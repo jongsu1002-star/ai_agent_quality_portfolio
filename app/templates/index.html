@@ -80,6 +80,9 @@
     .techniques { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem; }
     .techniques label { display: flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; }
     .techniques input { width: auto; margin: 0; }
+    .category-filter-checks { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.4rem; }
+    .category-filter-checks label { display: flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; font-weight: normal; }
+    .category-filter-checks input { width: auto; margin: 0; }
     .progress-track { background: #e2e8f0; border-radius: 999px; height: 10px; margin-top: 0.6rem; overflow: hidden; }
     .progress-fill { background: linear-gradient(90deg, #2563eb, #3b82f6); height: 100%; width: 0%; transition: width 0.3s ease; }
     .tabs { display: flex; gap: 0.5rem; margin-top: 1rem; border-bottom: 2px solid #e2e8f0; }
@@ -119,16 +122,16 @@
         </div>
         <div>
           <label>카테고리 필터 (선택, 여러 개 선택 가능)</label>
-          <div id="category-filter-checks" style="display:flex; flex-wrap:wrap; gap:0.3rem 1rem; margin-top:0.3rem;">
-            <label style="font-weight:normal; display:inline-flex; align-items:center; gap:0.3rem;"><input type="checkbox" class="category-filter-check" value="COM" /> COM · 공통</label>
-            <label style="font-weight:normal; display:inline-flex; align-items:center; gap:0.3rem;"><input type="checkbox" class="category-filter-check" value="ACC" /> ACC · 정확성</label>
-            <label style="font-weight:normal; display:inline-flex; align-items:center; gap:0.3rem;"><input type="checkbox" class="category-filter-check" value="REG" /> REG · 정책</label>
-            <label style="font-weight:normal; display:inline-flex; align-items:center; gap:0.3rem;"><input type="checkbox" class="category-filter-check" value="MTD" /> MTD · 절차</label>
-            <label style="font-weight:normal; display:inline-flex; align-items:center; gap:0.3rem;"><input type="checkbox" class="category-filter-check" value="RPT" /> RPT · 서류</label>
-            <label style="font-weight:normal; display:inline-flex; align-items:center; gap:0.3rem;"><input type="checkbox" class="category-filter-check" value="NFR" /> NFR · 비기능/안전성</label>
+          <div class="category-filter-checks">
+            <label><input type="checkbox" class="category-filter-check" value="COM" /> COM · 공통</label>
+            <label><input type="checkbox" class="category-filter-check" value="ACC" /> ACC · 정확성</label>
+            <label><input type="checkbox" class="category-filter-check" value="REG" /> REG · 정책</label>
+            <label><input type="checkbox" class="category-filter-check" value="MTD" /> MTD · 절차</label>
+            <label><input type="checkbox" class="category-filter-check" value="RPT" /> RPT · 서류</label>
+            <label><input type="checkbox" class="category-filter-check" value="NFR" /> NFR · 비기능/안전성</label>
           </div>
-          <input id="category-filter-custom" placeholder="그 외 값은 여기에 직접 입력(콤마로 여러 개, 예: XYZ,ABC)" style="margin-top:0.4rem;" />
-          <p class="chart-hint">체크(또는 직접 입력)한 카테고리 중 하나라도 일치하는 케이스가 실행됩니다(OR 조건). 아무것도 선택하지 않으면 전체 실행.</p>
+          <input id="category-filter-custom" placeholder="그 외 값은 콤마로 구분해 직접 입력 (예: XYZ,ABC)" style="margin-top:0.4rem;" />
+          <p class="chart-hint">체크(또는 직접 입력)한 카테고리 중 하나라도 일치하면 실행됩니다(OR 조건). 아무것도 선택하지 않으면 전체 실행.</p>
         </div>
         <div>
           <label>LLM 연동 (선택 — llm_quality/rubric/regression 등에서 사용)</label>

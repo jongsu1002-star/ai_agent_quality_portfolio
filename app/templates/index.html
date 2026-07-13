@@ -80,8 +80,8 @@
     .techniques { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem; }
     .techniques label { display: flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; }
     .techniques input { width: auto; margin: 0; }
-    .category-filter-checks { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.4rem; }
-    .category-filter-checks label { display: flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; font-weight: normal; }
+    .category-filter-checks { display: grid; grid-template-columns: repeat(2, max-content); gap: 0.3rem 1.5rem; margin-top: 0.4rem; }
+    .category-filter-checks label { display: flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; font-weight: normal; white-space: nowrap; }
     .category-filter-checks input { width: auto; margin: 0; }
     .progress-track { background: #e2e8f0; border-radius: 999px; height: 10px; margin-top: 0.6rem; overflow: hidden; }
     .progress-fill { background: linear-gradient(90deg, #2563eb, #3b82f6); height: 100%; width: 0%; transition: width 0.3s ease; }
@@ -131,7 +131,7 @@
             <label><input type="checkbox" class="category-filter-check" value="NFR" /> NFR · 비기능/안전성</label>
           </div>
           <input id="category-filter-custom" placeholder="그 외 값은 콤마로 구분해 직접 입력 (예: XYZ,ABC)" style="margin-top:0.4rem;" />
-          <p class="chart-hint">체크(또는 직접 입력)한 카테고리 중 하나라도 일치하면 실행됩니다(OR 조건). 아무것도 선택하지 않으면 전체 실행.</p>
+          <p class="chart-hint">체크한 카테고리 중 하나라도 일치하면 실행(OR 조건). 미선택 시 전체 실행.</p>
         </div>
         <div>
           <label>LLM 연동 (선택 — llm_quality/rubric/regression 등에서 사용)</label>

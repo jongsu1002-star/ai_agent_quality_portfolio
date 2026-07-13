@@ -119,7 +119,16 @@
         </div>
         <div>
           <label>카테고리 필터 (선택)</label>
-          <input id="category-filter" placeholder="예: COM, ACC, REG..." />
+          <input id="category-filter" list="category-filter-options" placeholder="예: COM" />
+          <datalist id="category-filter-options">
+            <option value="COM">COM · 공통</option>
+            <option value="ACC">ACC · 정확성</option>
+            <option value="REG">REG · 정책</option>
+            <option value="MTD">MTD · 절차</option>
+            <option value="RPT">RPT · 서류</option>
+            <option value="NFR">NFR · 비기능/안전성</option>
+          </datalist>
+          <p class="chart-hint">데이터셋의 <code>category</code> 값과 정확히 일치하는 케이스만 실행합니다(한 번에 하나만 입력, 콤마로 여러 개 지정 불가). 비워두면 전체 실행. 예시 코드: COM(공통)·ACC(정확성)·REG(정책)·MTD(절차)·RPT(서류)·NFR(비기능/안전성) — 데이터셋에 다른 값을 썼다면 그 값을 그대로 입력하세요.</p>
         </div>
         <div>
           <label>LLM 연동 (선택 — llm_quality/rubric/regression 등에서 사용)</label>
@@ -742,6 +751,15 @@
     const CATEGORY_COLOR_ORDER = ['COM', 'ACC', 'REG', 'MTD', 'RPT', 'NFR'];
     const CATEGORICAL_COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)'];
     const categoryColorCache = new Map();
+
+    // 이 6개는 프로젝트에서 쓰는 예시 카테고리 코드일 뿐, 데이터셋의 category는 자유 문자열이라
+    // 여기 없는 값도 얼마든지 들어올 수 있음 - 그런 값은 원문 그대로 표시(폴백)
+    const CATEGORY_LABELS = { COM: '공통', ACC: '정확성', REG: '정책', MTD: '절차', RPT: '서류', NFR: '비기능/안전성' };
+
+    function categoryLabel(category) {
+      const ko = CATEGORY_LABELS[category];
+      return ko ? `${category}(${ko})` : category;
+    }
 
     function categoryColor(category) {
       if (categoryColorCache.has(category)) return categoryColorCache.get(category);
@@ -1811,9 +1829,10 @@
         const failX = groupX + gap / 2;
         const passY = padTop + plotH - passH;
         const failY = padTop + plotH - failH;
-        const safeCategory = escapeHtml(category);
-        if (passH > 0) bars += `<path d="${roundedTopBarPath(passX, passY, barW, passH)}" fill="var(--status-good)" data-tooltip="${safeCategory} 통과: ${passed}건" />`;
-        if (failH > 0) bars += `<path d="${roundedTopBarPath(failX, failY, barW, failH)}" fill="var(--status-critical)" data-tooltip="${safeCategory} 실패: ${failed}건" />`;
+        const safeCategory = escapeHtml(category); // 막대 아래 축 라벨은 공간이 좁아 원래 코드만 표시
+        const safeCategoryLabel = escapeHtml(categoryLabel(category)); // 툴팁은 공간이 넉넉해 한글 병기
+        if (passH > 0) bars += `<path d="${roundedTopBarPath(passX, passY, barW, passH)}" fill="var(--status-good)" data-tooltip="${safeCategoryLabel} 통과: ${passed}건" />`;
+        if (failH > 0) bars += `<path d="${roundedTopBarPath(failX, failY, barW, failH)}" fill="var(--status-critical)" data-tooltip="${safeCategoryLabel} 실패: ${failed}건" />`;
         axisLabels += `<text x="${groupX}" y="${height - padBottom + 18}" text-anchor="middle" font-size="11" fill="var(--text-secondary)">${safeCategory}</text>`;
       });
 
@@ -1829,7 +1848,7 @@
         { label: '실패', color: 'var(--status-critical)' },
       ]);
       renderTable('table-category-bar', ['카테고리', '전체', '통과', '실패', '통과율'],
-        entries.map(([category, s]) => [category, s.total, s.passed, s.total - s.passed, s.total ? `${Math.round((s.passed / s.total) * 100)}%` : '0%']));
+        entries.map(([category, s]) => [categoryLabel(category), s.total, s.passed, s.total - s.passed, s.total ? `${Math.round((s.passed / s.total) * 100)}%` : '0%']));
     }
 
     // ---------- 3. 산점도: Recall vs Precision (케이스별) ----------
@@ -1908,8 +1927,8 @@
         const y = sy(passRate);
         const r = radiusFor(failed);
         const color = categoryColor(category);
-        const safeCategory = escapeHtml(category);
-        const tip = `${safeCategory} · 전체 ${s.total || 0}건 · 통과율 ${passRate}% · 실패 ${failed}건`;
+        const safeCategory = escapeHtml(category); // 버블 안 라벨은 공간이 좁아 원래 코드만 표시
+        const tip = `${escapeHtml(categoryLabel(category))} · 전체 ${s.total || 0}건 · 통과율 ${passRate}% · 실패 ${failed}건`;
         return `<circle cx="${x}" cy="${y}" r="${r}" fill="${color}" fill-opacity="0.55" stroke="${color}" stroke-width="2" data-tooltip="${tip}" />
                 <text x="${x}" y="${y + 4}" text-anchor="middle" font-size="11" font-weight="600" fill="var(--text-primary)">${safeCategory}</text>`;
       }).join('');
@@ -1921,7 +1940,7 @@
         ${bubbles}
       `;
       renderTable('table-bubble', ['카테고리', '전체', '통과율', '실패 건수'],
-        entries.map(([category, s]) => [category, s.total, s.total ? `${Math.round((s.passed / s.total) * 100)}%` : '0%', (s.total || 0) - (s.passed || 0)]));
+        entries.map(([category, s]) => [categoryLabel(category), s.total, s.total ? `${Math.round((s.passed / s.total) * 100)}%` : '0%', (s.total || 0) - (s.passed || 0)]));
     }
 
     // ---------- 5. 방사형 그래프: LLM 판정 품질 프로필 ----------

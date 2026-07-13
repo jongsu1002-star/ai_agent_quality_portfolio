@@ -1,0 +1,60 @@
+services:
+  qa-platform:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    env_file:
+      - .env
+    volumes:
+      - ./reports:/app/reports
+      # data/는 도커 네임드 볼륨을 씀(바인드 마운트 아님) - 모니터링 애드온의 SQLite가
+      # WAL 모드를 쓰는데, WAL은 공유 메모리 매핑 파일이 필요해서 Windows 호스트를
+      # 바인드 마운트로 컨테이너에 붙이면 "disk I/O error"가 남(Docker Desktop의
+      # 파일 공유 계층이 그 잠금 방식을 완전히 지원하지 않기 때문). 네임드 볼륨은
+      # 도커 VM 내부 파일시스템에 저장되므로 이 문제가 없음 - 재시작해도 데이터는 유지됨.
+      - qa-platform-data:/app/data
+    restart: unless-stopped
+
+  # 아래 prometheus/grafana는 모니터링 애드온용(선택 사항) - qa-platform과 완전히 독립적으로
+  # 뜨고 죽으며, 이 두 서비스가 없어도 qa-platform은 정상 동작함. 안 띄우고 싶으면
+  # `docker compose up -d qa-platform`처럼 서비스 이름을 지정해서 그것만 띄우면 됨.
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # --web.cors.origin: /monitoring-addon 페이지가 자체 차트를 그리려고 브라우저에서 직접
+    # Prometheus HTTP API(/api/v1/query_range)를 fetch()하는데, 기본 상태로는 브라우저가
+    # CORS로 그 응답을 막음 - 이 플래그로 허용해야 함(iframe 임베딩과 무관하게 fetch에는 항상 필요).
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.cors.origin=.*"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      # 로그인 화면 없이 대시보드가 바로 열리도록 익명 접속을 Viewer 권한으로 허용 - 이 플랫폼
+      # 자체가 이미 LAN 내에서 별도 인증 없이 쓰이는 내부 도구라 동일한 보안 수준을 맞춘 것.
+      # 로그인을 다시 요구하고 싶으면 아래 값을 "false"로 바꾸세요(admin/admin으로 로그인).
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      # Grafana는 기본적으로 다른 페이지의 iframe 안에 자신을 못 넣게 막아둠(X-Frame-Options) -
+      # /monitoring-addon 페이지에 대시보드를 직접 임베딩하려면 이걸 켜야 함
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  qa-platform-data:

@@ -1,0 +1,65 @@
+{
+  "title": "QA Platform Monitoring Addon",
+  "uid": "qa-platform-addon",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Total Requests (self)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "qa_platform_total_requests", "refId": "A" } ]
+    },
+    {
+      "id": 2,
+      "title": "Error Rate (self, 5xx)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "targets": [ { "expr": "qa_platform_error_rate", "refId": "A" } ]
+    },
+    {
+      "id": 3,
+      "title": "Avg / p95 Response Time (self, ms)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "qa_platform_avg_response_ms", "legendFormat": "avg", "refId": "A" },
+        { "expr": "qa_platform_p95_response_ms", "legendFormat": "p95", "refId": "B" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "k6 Latest Run - Failed Rate",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "targets": [ { "expr": "qa_platform_k6_failed_rate", "refId": "A" } ]
+    },
+    {
+      "id": 5,
+      "title": "k6 Latest Run - p95 (ms)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "qa_platform_k6_p95_ms", "refId": "A" } ]
+    },
+    {
+      "id": 6,
+      "title": "k6 Latest Run - Thresholds Passed (1=yes)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "qa_platform_k6_thresholds_passed", "refId": "A" } ]
+    }
+  ]
+}

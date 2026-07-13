@@ -1,0 +1,42 @@
+# Prometheus + Grafana만 별도로 띄우는 compose 파일. 앱까지 포함한 전체 스택을 한 번에 띄우고
+# 싶다면 이 파일 대신 프로젝트 루트의 `docker compose up -d`를 쓰세요(그 안에 이미 동일한
+# prometheus/grafana 서비스가 포함되어 있음). 이 파일은 앱을 로컬에서 `uvicorn app.main:app`으로
+# 직접 띄워둔 경우에만 씁니다 - Prometheus가 host.docker.internal:8000/metrics-addon을 스크레이프합니다.
+#
+# 실행: docker compose -f infra/docker-compose.monitoring.yml up -d
+# 종료: docker compose -f infra/docker-compose.monitoring.yml down
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # /monitoring-addon 페이지가 브라우저에서 직접 Prometheus API를 fetch()하므로 CORS 허용 필요
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--web.cors.origin=.*"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      # 로그인 화면 없이 대시보드가 바로 열리도록 익명 접속을 Viewer 권한으로 허용 -
+      # 이 플랫폼 자체가 이미 LAN 내에서 별도 인증 없이 쓰이는 내부 도구라 동일한
+      # 보안 수준을 맞춘 것. 로그인을 다시 요구하고 싶으면 아래 값을 "false"로 바꾸세요
+      # (그러면 admin/admin으로 직접 로그인해야 함).
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      # Grafana는 기본적으로 다른 페이지의 iframe 안에 자신을 못 넣게 막아둠(X-Frame-Options) -
+      # /monitoring-addon 페이지에 대시보드를 직접 임베딩하려면 이걸 켜야 함
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped

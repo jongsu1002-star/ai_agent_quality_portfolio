@@ -1,0 +1,2036 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Agent 품질관리·운영 모니터링 플랫폼</title>
+  <style>
+    :root {
+      --surface-1: #fcfcfb;
+      --text-primary: #0b0b0b;
+      --text-secondary: #52514e;
+      --text-muted: #898781;
+      --gridline: #e1e0d9;
+      --baseline: #c3c2b7;
+      --series-1: #2a78d6;
+      --series-2: #1baf7a;
+      --series-3: #eda100;
+      --series-4: #008300;
+      --series-5: #4a3aa7;
+      --series-6: #e34948;
+      --series-7: #e87ba4;
+      --series-8: #eb6834;
+      --status-good: #0ca30c;
+      --status-warning: #fab219;
+      --status-serious: #ec835a;
+      --status-critical: #d03b3b;
+    }
+    body { font-family: Arial, sans-serif; margin: 2rem; background: linear-gradient(135deg, #eff6ff, #f8fafc); color: #1f2937; }
+    .viz-svg { width: 100%; height: auto; }
+    .viz-legend { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.6rem; font-size: 0.85rem; color: var(--text-secondary); }
+    .viz-legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 0.35rem; vertical-align: middle; }
+    .table-toggle { background: none; color: #2563eb; font-weight: 600; padding: 0.3rem 0; text-decoration: underline; box-shadow: none; margin-top: 0.5rem; }
+    .table-view { margin-top: 0.5rem; overflow-x: auto; }
+    .table-view table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .table-view th, .table-view td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--gridline); white-space: nowrap; }
+    .table-view th { color: var(--text-secondary); }
+    #viz-tooltip { position: fixed; pointer-events: none; background: var(--text-primary); color: #fff; padding: 0.35rem 0.6rem; border-radius: 6px; font-size: 0.78rem; opacity: 0; transition: opacity 0.1s ease; z-index: 50; white-space: nowrap; }
+    .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
+    .doc-tabs { display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
+    .list-toolbar { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--text-muted); }
+    .list-toolbar select { width: auto; margin-top: 0; padding: 0.35rem 0.5rem; }
+    .list-pagination { display: flex; justify-content: center; align-items: center; gap: 0.75rem; margin-top: 0.75rem; font-size: 0.85rem; }
+    .list-pagination button { padding: 0.4rem 0.9rem; }
+    .chart-clickable { cursor: zoom-in; }
+    .chart-hint { font-size: 0.75rem; color: var(--text-muted); margin: 0.35rem 0 0; }
+    .chart-modal-overlay { display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); z-index: 100; align-items: center; justify-content: center; padding: 2rem; }
+    .chart-modal-content { position: relative; background: white; border-radius: 14px; padding: 1.75rem; width: 100%; max-width: 900px; max-height: 88vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
+    .chart-modal-content h2 { color: #1d4ed8; margin-top: 0; }
+    .chart-modal-content svg { width: 100%; height: auto; cursor: default; }
+    .chart-modal-close { position: absolute; top: 0.75rem; right: 0.75rem; background: none; color: #64748b; font-size: 1.1rem; line-height: 1; padding: 0.4rem 0.65rem; box-shadow: none; }
+    .password-field { position: relative; margin-top: 0.45rem; }
+    .password-field input { margin-top: 0; width: 100%; padding-right: 2.6rem; box-sizing: border-box; }
+    .password-field .password-toggle { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; background: none; color: #64748b; padding: 0; box-shadow: none; border-radius: 6px; }
+    .password-field .password-toggle:hover { background: #eef2f7; color: #2563eb; }
+    .password-field .password-toggle svg { width: 17px; height: 17px; }
+    .doc-tab-btn { background: #eef2f7; color: #1f2937; box-shadow: none; }
+    .doc-tab-btn.active { background: linear-gradient(90deg, #2563eb, #3b82f6); color: white; }
+    .doc-viewer { margin-top: 0.75rem; max-height: 600px; overflow-y: auto; padding: 1rem 1.25rem; border: 1px solid #e2e8f0; border-radius: 10px; line-height: 1.65; }
+    .doc-viewer h1, .doc-viewer h2, .doc-viewer h3, .doc-viewer h4 { color: #1d4ed8; margin: 1.1rem 0 0.5rem; }
+    .doc-viewer h1:first-child, .doc-viewer h2:first-child { margin-top: 0; }
+    .doc-viewer p { margin: 0.5rem 0; }
+    .doc-viewer table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.88rem; }
+    .doc-viewer th, .doc-viewer td { border: 1px solid #e2e8f0; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }
+    .doc-viewer th { background: #f8fafc; }
+    .doc-viewer code { background: #f1f5f9; padding: 0.1rem 0.3rem; border-radius: 4px; font-size: 0.85em; }
+    .doc-viewer pre.doc-code { background: #111827; color: #f9fafb; padding: 0.75rem; border-radius: 8px; overflow-x: auto; }
+    .doc-viewer pre.doc-code code { background: none; padding: 0; }
+    .doc-viewer blockquote { border-left: 3px solid #93c5fd; padding-left: 0.75rem; color: #52514e; margin: 0.5rem 0; }
+    .doc-viewer a { color: #2563eb; }
+    .doc-viewer ul, .doc-viewer ol { padding-left: 1.4rem; margin: 0.5rem 0; }
+    .doc-viewer hr { border: none; border-top: 1px solid #e2e8f0; margin: 1rem 0; }
+    .card { background: white; padding: 1.25rem; border-radius: 14px; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.12); margin-bottom: 1rem; }
+    button { padding: 0.7rem 1rem; border: none; border-radius: 8px; background: linear-gradient(90deg, #2563eb, #3b82f6); color: white; cursor: pointer; font-weight: 600; }
+    pre { background: #111827; color: #f9fafb; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+    input, select { width: 100%; padding: 0.7rem; margin-top: 0.45rem; border: 1px solid #cbd5e1; border-radius: 8px; box-sizing: border-box; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+    .metric { padding: 1rem; background: linear-gradient(135deg, #eff6ff, #dbeafe); border-radius: 10px; font-weight: 600; min-width: 0; overflow-wrap: break-word; word-break: break-word; }
+    .status-pill { display: inline-block; margin-top: 0.35rem; padding: 0.2rem 0.6rem; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 0.85rem; }
+    .title { color: #1d4ed8; }
+    .techniques { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem; }
+    .techniques label { display: flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; }
+    .techniques input { width: auto; margin: 0; }
+    .progress-track { background: #e2e8f0; border-radius: 999px; height: 10px; margin-top: 0.6rem; overflow: hidden; }
+    .progress-fill { background: linear-gradient(90deg, #2563eb, #3b82f6); height: 100%; width: 0%; transition: width 0.3s ease; }
+    .tabs { display: flex; gap: 0.5rem; margin-top: 1rem; border-bottom: 2px solid #e2e8f0; }
+    .tab-btn { background: none; color: #64748b; font-weight: 600; padding: 0.7rem 1.1rem; border-radius: 8px 8px 0 0; box-shadow: none; }
+    .tab-btn.active { background: white; color: #1d4ed8; box-shadow: 0 -2px 0 0 #2563eb inset; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1 class="title">AI Agent 품질관리·운영 모니터링 플랫폼</h1>
+    <p>QA 파이프라인, 리포팅, 모니터링 대시보드입니다.</p>
+    <div class="tabs">
+      <button type="button" class="tab-btn active" data-tab="settings" onclick="showTab('settings')">설정</button>
+      <button type="button" class="tab-btn" data-tab="run" onclick="showTab('run')">실행</button>
+      <button type="button" class="tab-btn" data-tab="dashboard" onclick="showTab('dashboard')">대시보드</button>
+      <button type="button" class="tab-btn" data-tab="monitoring" onclick="showTab('monitoring')">모니터링</button>
+      <button type="button" class="tab-btn" title="성능테스트(k6) · Prometheus/Grafana" onclick="window.location.href='/monitoring-addon'">모니터링 애드온</button>
+    </div>
+  </div>
+
+  <!-- ===================== 설정 ===================== -->
+  <div id="tab-settings" class="tab-panel active">
+    <div class="card">
+      <h2>연결 설정</h2>
+      <div class="grid">
+        <div>
+          <label>커넥터 모드</label>
+          <select id="connector-mode">
+            <option value="dataset_only">dataset_only (저장된 답변 재사용)</option>
+            <option value="mock">mock (키워드 규칙, 실제 챗봇 없음)</option>
+            <option value="api">api (실제 챗봇 엔드포인트 호출)</option>
+          </select>
+          <input id="connector-endpoint" placeholder="챗봇 API 엔드포인트 (api 모드 전용)" />
+          <input id="connector-request-field" placeholder="요청 필드명 (기본: question)" style="margin-top:0.4rem;" />
+        </div>
+        <div>
+          <label>카테고리 필터 (선택)</label>
+          <input id="category-filter" placeholder="예: COM, ACC, REG..." />
+        </div>
+        <div>
+          <label>LLM 연동 (선택 — llm_quality/rubric/regression 등에서 사용)</label>
+          <select id="llm-provider" onchange="toggleLlmProviderFields()">
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="custom">기타 (직접 개발한 LLM 연동)</option>
+            <option value="none">사용 안 함</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="grid" id="llm-openai-fields">
+        <div>
+          <label>OpenAI API 키</label>
+          <div class="password-field">
+            <input id="openai-key" type="password" placeholder="sk-..." />
+            <button type="button" class="password-toggle" onclick="togglePasswordVisibility('openai-key', this)"></button>
+          </div>
+        </div>
+      </div>
+      <div class="grid" id="llm-anthropic-fields" style="display:none;">
+        <div>
+          <label>Anthropic API 키</label>
+          <div class="password-field">
+            <input id="anthropic-key" type="password" placeholder="sk-ant-..." />
+            <button type="button" class="password-toggle" onclick="togglePasswordVisibility('anthropic-key', this)"></button>
+          </div>
+        </div>
+      </div>
+      <div class="grid" id="llm-custom-fields" style="display:none;">
+        <div>
+          <label>KEY 이름 (인증 헤더 이름, 예: X-API-Key, Authorization)</label>
+          <input id="llm-key-name" placeholder="예: X-API-Key" />
+          <label style="margin-top:0.6rem;">KEY 값</label>
+          <div class="password-field">
+            <input id="llm-key-value" type="password" placeholder="키 값 입력" />
+            <button type="button" class="password-toggle" onclick="togglePasswordVisibility('llm-key-value', this)"></button>
+          </div>
+        </div>
+        <div>
+          <label>엔드포인트 (OpenAI 호환 /chat/completions 기준 base URL)</label>
+          <input id="llm-endpoint" placeholder="https://your-llm.example.com/v1" />
+        </div>
+      </div>
+
+      <label style="margin-top:0.75rem; display:block;">알림 웹훅 (선택)</label>
+      <div class="grid">
+        <input id="slack-webhook" placeholder="Slack 웹훅 URL" />
+        <input id="discord-webhook" placeholder="Discord 웹훅 URL" />
+        <input id="teams-webhook" placeholder="Teams 웹훅 URL" />
+        <input id="jira-base-url" placeholder="Jira 기본 URL" />
+        <input id="jira-email" placeholder="Jira 이메일" />
+        <div class="password-field">
+          <input id="jira-token" type="password" placeholder="Jira API 토큰" />
+          <button type="button" class="password-toggle" onclick="togglePasswordVisibility('jira-token', this)"></button>
+        </div>
+        <input id="jira-project" placeholder="Jira 프로젝트 키" />
+      </div>
+
+      <div style="margin-top: 0.75rem;">
+        <button onclick="saveSettings()">설정 저장</button>
+      </div>
+      <pre id="result">대기 중...</pre>
+    </div>
+
+    <div class="card">
+      <h2>데이터셋 (정답 기준값)</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">카테고리/정답(golden_answer)/필수 키워드 등 채점 기준값을 담습니다. 발화문(질문)만 따로 바꾸고 싶다면 실행 탭의 "테스트 케이스"를 쓰세요.</p>
+      <p>현재 데이터셋: <strong id="current-dataset-info">없음</strong></p>
+      <input id="file" type="file" accept=".json,.xlsx,.xls" />
+      <div style="margin-top: 0.75rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <button onclick="uploadDataset()">데이터셋 업로드</button>
+        <button type="button" onclick="resetDataset()">데이터셋 초기화</button>
+        <button type="button" onclick="downloadDatasetTemplate()">엑셀 양식 다운로드</button>
+      </div>
+
+      <h3 style="margin-top: 1.25rem; font-size: 1rem; color: var(--text-secondary);">업로드 이력</h3>
+      <p style="color: var(--text-secondary); font-size: 0.85rem; margin: 0 0 0.5rem;">각 행의 미리보기/다운로드 버튼으로 바로 실행됩니다(선택 불필요). 체크 후 "선택 삭제"로 여러 건을 한 번에 지울 수 있습니다.</p>
+      <div style="margin-bottom: 0.5rem;">
+        <button type="button" onclick="deleteSelectedDatasets()">선택 삭제</button>
+      </div>
+      <div id="dataset-history" class="table-view" style="display: block; margin-top: 0.5rem;">불러오는 중...</div>
+      <div id="dataset-preview" style="margin-top: 0.75rem;"></div>
+    </div>
+
+    <div class="card">
+      <h2>문서 (항상 최신 내용)</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">아래 문서는 서버의 <code>docs/</code> 파일을 매번 새로 읽어와 보여줍니다 — 코드가 바뀌어도 여기서 항상 현재 내용을 확인할 수 있습니다.</p>
+      <div class="doc-tabs">
+        <button type="button" class="doc-tab-btn active" data-doc="user_manual" onclick="viewDoc('user_manual')">사용자 매뉴얼</button>
+        <button type="button" class="doc-tab-btn" data-doc="design_spec" onclick="viewDoc('design_spec')">설계서</button>
+        <button type="button" class="doc-tab-btn" data-doc="process_spec" onclick="viewDoc('process_spec')">프로세스 명세서</button>
+        <button type="button" class="doc-tab-btn" data-doc="network_guide" onclick="viewDoc('network_guide')">네트워크 접속 가이드</button>
+        <button type="button" onclick="downloadCurrentDoc('doc-viewer')">다운로드</button>
+      </div>
+      <div id="doc-viewer" class="doc-viewer">불러오는 중...</div>
+    </div>
+  </div>
+
+  <!-- ===================== 실행 ===================== -->
+  <div id="tab-run" class="tab-panel">
+    <div class="card">
+      <h2>테스트 케이스 (엑셀/JSON) - 발화문(질문)만 포함</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">
+        데이터셋(설정 탭)은 <strong>정답 기준값</strong>(category/golden_answer 등), 테스트 케이스는
+        <strong>발화문(질문)</strong>만 담습니다. id가 일치하는 데이터셋 케이스의 질문만 여기 업로드한
+        발화문으로 바뀌어 실행됩니다 - 올리지 않으면 데이터셋 자체의 질문 그대로 실행됩니다.
+      </p>
+      <p>현재 테스트 케이스: <strong id="current-testcase-info-run">없음</strong></p>
+      <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+        <button type="button" onclick="downloadTestcaseTemplate()">엑셀 양식 다운로드</button>
+        <button type="button" onclick="resetTestcase()">테스트 케이스 초기화</button>
+      </div>
+      <input id="file-testcase" type="file" accept=".json,.xlsx,.xls" />
+      <div style="margin-top: 0.75rem;">
+        <button type="button" onclick="uploadTestcase()">테스트 케이스 업로드</button>
+      </div>
+
+      <h3 style="margin-top: 1.25rem; font-size: 1rem; color: var(--text-secondary);">업로드 이력</h3>
+      <p style="color: var(--text-secondary); font-size: 0.85rem; margin: 0 0 0.5rem;">각 행의 미리보기/다운로드 버튼으로 바로 실행됩니다(선택 불필요). 체크 후 "선택 삭제"로 여러 건을 한 번에 지울 수 있습니다.</p>
+      <div style="margin-bottom: 0.5rem;">
+        <button type="button" onclick="deleteSelectedTestcases()">선택 삭제</button>
+      </div>
+      <div id="testcase-history" class="table-view" style="display: block; margin-top: 0.5rem;">불러오는 중...</div>
+      <div id="testcase-preview" style="margin-top: 0.75rem;"></div>
+    </div>
+
+    <div class="card">
+      <h2>테스트 기법 및 실행</h2>
+      <p>채점 기준 데이터셋: <strong id="current-dataset-info-run">없음</strong></p>
+      <label style="display:inline-flex; align-items:center; gap:0.4rem; margin-bottom:0.75rem;">
+        <input type="checkbox" id="no-dataset-toggle" style="width:auto;" />
+        데이터셋 사용 안 함 (정답 비교 없이, 테스트 케이스의 발화문만으로 품질 테스트 진행)
+      </label>
+      <label>테스트 기법</label>
+      <div class="techniques">
+        <label><input type="checkbox" value="rag" checked /> rag (검색품질 + 근거성)</label>
+        <label><input type="checkbox" value="llm_quality" checked /> llm_quality (LLM 판정)</label>
+        <label><input type="checkbox" value="rubric" /> rubric (루브릭 채점)</label>
+        <label><input type="checkbox" value="regression" /> regression (회귀 테스트)</label>
+        <label><input type="checkbox" value="functional" /> functional (커넥터 계약 검사)</label>
+        <label><input type="checkbox" value="dual_compare" /> dual_compare (룰-API 비교)</label>
+      </div>
+      <div style="margin-top: 0.75rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <button onclick="runPipeline()">QA 파이프라인 실행</button>
+        <button onclick="downloadLatestReport('csv')">CSV 다운로드</button>
+        <button onclick="downloadLatestReport('md')">마크다운 다운로드</button>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="status-pill" id="status-pill">실행 대기 중</div>
+    </div>
+
+    <div class="card">
+      <h2>최근 실행 결과</h2>
+      <pre id="run-result">대기 중...</pre>
+    </div>
+
+    <div class="card">
+      <h2>불일치 및 기능 테스트</h2>
+      <pre id="mismatch">아직 실행 이력이 없습니다.</pre>
+    </div>
+  </div>
+
+  <!-- ===================== 대시보드 ===================== -->
+  <div id="tab-dashboard" class="tab-panel">
+    <div class="card">
+      <h2>개요</h2>
+      <div class="grid">
+        <div class="metric">실행 횟수: <strong id="metric-runs">0</strong></div>
+        <div class="metric">최근 통과율: <strong id="metric-pass">0%</strong></div>
+        <div class="metric">데이터셋: <strong id="metric-dataset">없음</strong></div>
+        <div class="metric">상태: <strong id="metric-status">대기중</strong></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <label>아래 4개 차트에 표시할 실행 선택</label>
+      <select id="run-selector" onchange="onRunSelectorChange()">
+        <option value="">실행 이력 없음</option>
+      </select>
+      <p class="chart-hint">이 실행이 사용한 데이터셋: <strong id="run-dataset-info">-</strong> /
+        테스트 케이스(발화문): <strong id="run-testcase-info">데이터셋 자체 질문 사용</strong>
+        (설정/실행 탭에 보이는 현재 활성 값과 다를 수 있습니다 - 값을 바꾼 뒤 과거
+        실행을 다시 볼 때는 정상입니다.)</p>
+    </div>
+
+    <div class="chart-grid">
+      <div class="card">
+        <h2>통과율 추이 (시계열)</h2>
+        <svg id="chart-timeseries" class="viz-svg chart-clickable" viewBox="0 0 600 220" onclick="openChartModal('chart-timeseries', '통과율 추이 (시계열)')"></svg>
+        <p class="chart-hint">차트를 클릭하면 확대해서 볼 수 있습니다.</p>
+        <button type="button" class="table-toggle" data-table-toggle="table-timeseries" onclick="toggleTable('table-timeseries')">표로 보기</button>
+        <div id="table-timeseries" class="table-view" style="display:none;"></div>
+      </div>
+
+      <div class="card">
+        <h2>카테고리별 통과/실패 (막대그래프)</h2>
+        <svg id="chart-category-bar" class="viz-svg chart-clickable" viewBox="0 0 600 240" onclick="openChartModal('chart-category-bar', '카테고리별 통과/실패 (막대그래프)')"></svg>
+        <div id="legend-category-bar" class="viz-legend"></div>
+        <p class="chart-hint">차트를 클릭하면 확대해서 볼 수 있습니다.</p>
+        <button type="button" class="table-toggle" data-table-toggle="table-category-bar" onclick="toggleTable('table-category-bar')">표로 보기</button>
+        <div id="table-category-bar" class="table-view" style="display:none;"></div>
+      </div>
+
+      <div class="card">
+        <h2>검색품질: Recall vs Precision (산점도)</h2>
+        <svg id="chart-scatter" class="viz-svg chart-clickable" viewBox="0 0 600 260" onclick="openChartModal('chart-scatter', '검색품질: Recall vs Precision (산점도)')"></svg>
+        <div id="legend-scatter" class="viz-legend"></div>
+        <p class="chart-hint">차트를 클릭하면 확대해서 볼 수 있습니다.</p>
+        <button type="button" class="table-toggle" data-table-toggle="table-scatter" onclick="toggleTable('table-scatter')">표로 보기</button>
+        <div id="table-scatter" class="table-view" style="display:none;"></div>
+      </div>
+
+      <div class="card">
+        <h2>카테고리 규모·통과율·실패건수 (버블차트)</h2>
+        <svg id="chart-bubble" class="viz-svg chart-clickable" viewBox="0 0 600 260" onclick="openChartModal('chart-bubble', '카테고리 규모·통과율·실패건수 (버블차트)')"></svg>
+        <p class="chart-hint">차트를 클릭하면 확대해서 볼 수 있습니다.</p>
+        <button type="button" class="table-toggle" data-table-toggle="table-bubble" onclick="toggleTable('table-bubble')">표로 보기</button>
+        <div id="table-bubble" class="table-view" style="display:none;"></div>
+      </div>
+
+      <div class="card">
+        <h2>LLM 판정 품질 프로필 (방사형 그래프)</h2>
+        <svg id="chart-radar" class="viz-svg chart-clickable" viewBox="0 0 320 300" style="max-width:320px;" onclick="openChartModal('chart-radar', 'LLM 판정 품질 프로필 (방사형 그래프)')"></svg>
+        <p class="chart-hint">차트를 클릭하면 확대해서 볼 수 있습니다.</p>
+        <button type="button" class="table-toggle" data-table-toggle="table-radar" onclick="toggleTable('table-radar')">표로 보기</button>
+        <div id="table-radar" class="table-view" style="display:none;"></div>
+      </div>
+    </div>
+
+    <div id="chart-modal" class="chart-modal-overlay" onclick="if (event.target.id === 'chart-modal') closeChartModal();">
+      <div class="chart-modal-content">
+        <button type="button" class="chart-modal-close" onclick="closeChartModal()" aria-label="닫기">✕</button>
+        <h2 id="chart-modal-title"></h2>
+        <div id="chart-modal-body"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>테스트 결과 · 결함보고서 (자동 생성, 항상 최신)</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;"><code>테스트_결과.md</code>는 <code>pytest</code> 실행 시마다, <code>결함보고서.md</code>는 QA 파이프라인 실행 완료 시마다 자동으로 재생성됩니다.</p>
+      <div class="doc-tabs">
+        <button type="button" class="dashboard-doc-tab-btn doc-tab-btn active" data-doc="test_results" onclick="viewDoc('test_results', 'dashboard-doc-viewer', 'dashboard-doc-tab-btn')">테스트 결과</button>
+        <button type="button" class="dashboard-doc-tab-btn doc-tab-btn" data-doc="scenario_test_report" onclick="viewDoc('scenario_test_report', 'dashboard-doc-viewer', 'dashboard-doc-tab-btn')">테스트결과보고서</button>
+        <button type="button" class="dashboard-doc-tab-btn doc-tab-btn" data-doc="defect_report" onclick="viewDoc('defect_report', 'dashboard-doc-viewer', 'dashboard-doc-tab-btn')">결함보고서</button>
+        <button type="button" onclick="downloadCurrentDoc('dashboard-doc-viewer')">다운로드</button>
+      </div>
+      <div id="dashboard-doc-viewer" class="doc-viewer">불러오는 중...</div>
+    </div>
+
+    <div class="card">
+      <h2>Jira 티켓</h2>
+      <pre id="jira-tickets">아직 생성된 티켓이 없습니다.</pre>
+    </div>
+
+    <div class="card">
+      <h2>실행 이력</h2>
+      <pre id="history">불러오는 중...</pre>
+    </div>
+  </div>
+
+  <!-- ===================== 모니터링 ===================== -->
+  <div id="tab-monitoring" class="tab-panel">
+    <div class="card">
+      <h2>서버 운영 지표</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">이 서버 프로세스가 시작된 이후 처리한 HTTP 요청을 실시간으로 집계합니다 (재시작하면 초기화됨, QA 테스트/대시보드 데이터와는 별개입니다). 이 탭이 열려 있는 동안 5초마다 자동 갱신됩니다.</p>
+      <div class="grid">
+        <div class="metric">가동시간: <strong id="mon-uptime">-</strong></div>
+        <div class="metric">총 요청 수: <strong id="mon-total-requests">0</strong></div>
+        <div class="metric">에러율: <strong id="mon-error-rate">0%</strong></div>
+        <div class="metric">평균 응답시간: <strong id="mon-avg-ms">0ms</strong></div>
+        <div class="metric">p95 응답시간: <strong id="mon-p95-ms">0ms</strong></div>
+        <div class="metric">헬스 상태: <strong id="mon-health-status">-</strong></div>
+      </div>
+    </div>
+
+    <div class="chart-grid">
+      <div class="card">
+        <h2>최근 30분 요청 추이 (분당)</h2>
+        <svg id="chart-monitoring-requests" class="viz-svg chart-clickable" viewBox="0 0 600 220" onclick="openChartModal('chart-monitoring-requests', '최근 30분 요청 추이 (분당)')"></svg>
+        <div id="legend-monitoring-requests" class="viz-legend"></div>
+        <p class="chart-hint">차트를 클릭하면 확대해서 볼 수 있습니다.</p>
+        <button type="button" class="table-toggle" data-table-toggle="table-monitoring-requests" onclick="toggleTable('table-monitoring-requests')">표로 보기</button>
+        <div id="table-monitoring-requests" class="table-view" style="display:none;"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>엔드포인트별 상세 (최근 1시간, 상위 10개)</h2>
+      <div id="mon-by-path-table">불러오는 중...</div>
+    </div>
+
+    <div class="card">
+      <h2>외부 서비스 모니터링 (Uptime 체크)</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">이 플랫폼이 아니라 <strong>다른 서버에서 운영 중인 챗봇/API 서비스</strong>의 URL을 등록하면, 이 서버가 백그라운드에서 등록한 주기마다 직접 호출해 살아있는지·응답 속도를 기록합니다. QA 파이프라인 실행과는 무관하게 항상 동작합니다.</p>
+      <div class="grid">
+        <input id="mon-target-name" placeholder="이름 (예: 고객지원 챗봇)" />
+        <input id="mon-target-url" placeholder="URL (http:// 또는 https://로 시작)" />
+        <select id="mon-target-method">
+          <option value="GET">GET</option>
+          <option value="POST">POST</option>
+        </select>
+        <input id="mon-target-interval" type="number" min="10" value="60" placeholder="체크 주기(초, 최소 10)" />
+      </div>
+      <div style="margin-top: 0.75rem;">
+        <button type="button" onclick="addMonitoringTarget()">대상 추가</button>
+      </div>
+      <pre id="mon-target-add-result" style="display:none;"></pre>
+      <div id="mon-targets-table" style="margin-top: 1rem;">불러오는 중...</div>
+
+      <div style="margin-top: 1.5rem;">
+        <label>대상별 응답시간·가동 추이</label>
+        <select id="mon-target-chart-selector" onchange="renderSelectedTargetChart()">
+          <option value="">등록된 대상 없음</option>
+        </select>
+        <svg id="chart-monitoring-target" class="viz-svg chart-clickable" viewBox="0 0 600 220" onclick="openChartModal('chart-monitoring-target', '외부 대상 응답시간·가동 추이')"></svg>
+        <div id="legend-monitoring-target" class="viz-legend"></div>
+        <p class="chart-hint">차트를 클릭하면 확대해서 볼 수 있습니다.</p>
+        <button type="button" class="table-toggle" data-table-toggle="table-monitoring-target" onclick="toggleTable('table-monitoring-target')">표로 보기</button>
+        <div id="table-monitoring-target" class="table-view" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="viz-tooltip"></div>
+
+  <script>
+    const STATUS_LABELS = {
+      idle: '대기중',
+      queued: '대기열 등록',
+      running: '실행 중',
+      done: '완료',
+      error: '오류',
+      timeout: '시간 초과',
+    };
+
+    function koreanStatus(status) {
+      return STATUS_LABELS[status] || status;
+    }
+
+    const ICON_EYE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const ICON_EYE_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.8 21.8 0 0 1 5.06-6.06M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 8 11 8a21.8 21.8 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+    function initPasswordToggleIcons() {
+      document.querySelectorAll('.password-toggle').forEach(button => {
+        button.innerHTML = ICON_EYE;
+        button.setAttribute('aria-label', '값 보기');
+      });
+    }
+
+    function togglePasswordVisibility(inputId, button) {
+      const input = document.getElementById(inputId);
+      const showing = input.type === 'text';
+      input.type = showing ? 'password' : 'text';
+      button.innerHTML = showing ? ICON_EYE : ICON_EYE_OFF;
+      button.setAttribute('aria-label', showing ? '값 보기' : '값 숨기기');
+    }
+
+    // ---------- chart helpers (shared across the dashboard visualizations) ----------
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+
+    // 서버가 주는 ISO 형식(YYYY-MM-DDTHH:mm:ss)을 "YYYY-MM-DD HH:mm:ss"(24시간제)로 표시
+    function formatTimestamp(value) {
+      if (!value) return '';
+      const match = String(value).match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
+      return match ? `${match[1]} ${match[2]}` : String(value);
+    }
+
+    function showTooltip(evt, text) {
+      const tip = document.getElementById('viz-tooltip');
+      tip.textContent = text;
+      tip.style.left = `${evt.clientX + 12}px`;
+      tip.style.top = `${evt.clientY + 12}px`;
+      tip.style.opacity = '1';
+    }
+
+    function hideTooltip() {
+      document.getElementById('viz-tooltip').style.opacity = '0';
+    }
+
+    function initTooltipDelegation() {
+      document.querySelectorAll('.viz-svg').forEach(svg => {
+        svg.addEventListener('mousemove', evt => {
+          const target = evt.target.closest('[data-tooltip]');
+          if (target) {
+            showTooltip(evt, target.getAttribute('data-tooltip'));
+          } else {
+            hideTooltip();
+          }
+        });
+        svg.addEventListener('mouseleave', hideTooltip);
+      });
+    }
+
+    function initDatasetHistoryDelegation() {
+      const container = document.getElementById('dataset-history');
+      container.addEventListener('click', evt => {
+        const selectBtn = evt.target.closest('.dataset-select-btn');
+        if (selectBtn && !selectBtn.disabled) { selectDataset(selectBtn.dataset.path); return; }
+        const deactivateBtn = evt.target.closest('.dataset-deactivate-btn');
+        if (deactivateBtn) { resetDataset(); return; }
+        const previewBtn = evt.target.closest('.dataset-preview-btn');
+        if (previewBtn) { previewDataset(previewBtn.dataset.path); return; }
+        const downloadBtn = evt.target.closest('.dataset-download-btn');
+        if (downloadBtn) downloadDataset(downloadBtn.dataset.path);
+      });
+      container.addEventListener('change', evt => {
+        if (evt.target.classList.contains('dataset-check-all')) {
+          const checked = evt.target.checked;
+          container.querySelectorAll('.dataset-row-check').forEach(cb => { cb.checked = checked; });
+        }
+      });
+    }
+
+    async function deleteSelectedDatasets() {
+      const checked = Array.from(document.querySelectorAll('#dataset-history .dataset-row-check:checked')).map(el => el.dataset.path);
+      if (!checked.length) {
+        alert('삭제할 항목을 먼저 체크해주세요.');
+        return;
+      }
+      if (!confirm(`선택한 ${checked.length}건을 이력에서 완전히 삭제할까요? 되돌릴 수 없습니다.`)) return;
+      try {
+        const response = await fetch('/api/dataset/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paths: checked }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          document.getElementById('result').textContent = `삭제 실패: ${result.error || '알 수 없는 오류'}`;
+          return;
+        }
+        if (result.was_active) {
+          setActiveDatasetLabel('없음', null);
+          document.getElementById('status-pill').textContent = '활성 데이터셋이 삭제되어 초기화됨';
+        }
+        await loadDatasetHistory();
+      } catch (err) {
+        document.getElementById('result').textContent = `삭제 요청이 실패했습니다 (네트워크 오류): ${err.message}`;
+      }
+    }
+
+    function toggleTable(id) {
+      const el = document.getElementById(id);
+      const btn = document.querySelector(`[data-table-toggle="${id}"]`);
+      const isHidden = !el.style.display || el.style.display === 'none';
+      el.style.display = isHidden ? 'block' : 'none';
+      if (btn) btn.textContent = isHidden ? '차트로 보기' : '표로 보기';
+    }
+
+    function openChartModal(svgId, title) {
+      const source = document.getElementById(svgId);
+      const clone = source.cloneNode(true);
+      clone.removeAttribute('onclick');
+      clone.classList.remove('chart-clickable');
+      clone.addEventListener('mousemove', evt => {
+        const target = evt.target.closest('[data-tooltip]');
+        if (target) showTooltip(evt, target.getAttribute('data-tooltip'));
+        else hideTooltip();
+      });
+      clone.addEventListener('mouseleave', hideTooltip);
+
+      const body = document.getElementById('chart-modal-body');
+      body.innerHTML = '';
+      body.appendChild(clone);
+      document.getElementById('chart-modal-title').textContent = title;
+      document.getElementById('chart-modal').style.display = 'flex';
+    }
+
+    function closeChartModal() {
+      document.getElementById('chart-modal').style.display = 'none';
+    }
+
+    document.addEventListener('keydown', evt => {
+      if (evt.key === 'Escape') closeChartModal();
+    });
+
+    function renderLegend(id, items) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.innerHTML = items.map(item => `<span><span class="swatch" style="background:${item.color}"></span>${escapeHtml(item.label)}</span>`).join('');
+    }
+
+    const _tablePagers = {}; // id -> { page, pageSize, headers, rows } - renderTable() 호출 간 페이지 상태 유지 (자동 폴링으로 재호출돼도 보던 페이지 유지)
+
+    function renderTable(id, headers, rows) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (!headers.length) {
+        el.innerHTML = '<p>데이터가 없습니다.</p>';
+        delete _tablePagers[id];
+        return;
+      }
+      const state = _tablePagers[id] || { page: 1, pageSize: 10 };
+      state.headers = headers;
+      state.rows = rows;
+      _tablePagers[id] = state;
+      renderTablePage(id);
+    }
+
+    function renderTablePage(id) {
+      const el = document.getElementById(id);
+      const state = _tablePagers[id];
+      if (!el || !state) return;
+      const { headers, rows, pageSize } = state;
+      const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+      state.page = Math.min(Math.max(1, state.page), totalPages);
+
+      const start = (state.page - 1) * pageSize;
+      const pageRows = rows.slice(start, start + pageSize);
+      const thead = `<tr>${headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr>`;
+      const tbody = pageRows.map(row => `<tr>${row.map(cell => `<td>${escapeHtml(String(cell))}</td>`).join('')}</tr>`).join('');
+
+      const pageSizeOptions = [10, 30, 50, 100].map(n => `<option value="${n}"${n === pageSize ? ' selected' : ''}>${n}개씩</option>`).join('');
+      const toolbarHtml = rows.length ? `
+        <div class="list-toolbar">
+          <span>총 ${rows.length}건</span>
+          <select onchange="changeTablePageSize('${id}', this.value)">${pageSizeOptions}</select>
+        </div>` : '';
+      const paginationHtml = rows.length ? `
+        <div class="list-pagination">
+          <button type="button" ${state.page <= 1 ? 'disabled' : ''} onclick="changeTablePage('${id}', ${state.page - 1})">이전</button>
+          <span>${state.page} / ${totalPages}</span>
+          <button type="button" ${state.page >= totalPages ? 'disabled' : ''} onclick="changeTablePage('${id}', ${state.page + 1})">다음</button>
+        </div>` : '';
+
+      el.innerHTML = `${toolbarHtml}<table>${thead}${tbody}</table>${paginationHtml}`;
+    }
+
+    function changeTablePage(id, page) {
+      const state = _tablePagers[id];
+      if (!state) return;
+      state.page = parseInt(page, 10);
+      renderTablePage(id);
+    }
+
+    function changeTablePageSize(id, size) {
+      const state = _tablePagers[id];
+      if (!state) return;
+      state.pageSize = parseInt(size, 10);
+      state.page = 1;
+      renderTablePage(id);
+    }
+
+    // ---------- 커스텀 마크업(버튼 등)이 포함된 표용 페이지네이션 (dataset-history, mon-targets-table) ----------
+    const _htmlTablePagers = {};
+
+    function renderPagedHtmlTable(id, headerHtml, items, rowRenderFn) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      if (!items.length) {
+        el.innerHTML = '<p>데이터가 없습니다.</p>';
+        delete _htmlTablePagers[id];
+        return;
+      }
+      const state = _htmlTablePagers[id] || { page: 1, pageSize: 10 };
+      state.items = items;
+      state.headerHtml = headerHtml;
+      state.rowRenderFn = rowRenderFn;
+      _htmlTablePagers[id] = state;
+      renderPagedHtmlTablePage(id);
+    }
+
+    function renderPagedHtmlTablePage(id) {
+      const el = document.getElementById(id);
+      const state = _htmlTablePagers[id];
+      if (!el || !state) return;
+      const { items, pageSize, headerHtml, rowRenderFn } = state;
+      const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+      state.page = Math.min(Math.max(1, state.page), totalPages);
+      const start = (state.page - 1) * pageSize;
+      const rows = items.slice(start, start + pageSize).map(rowRenderFn).join('');
+      const pageSizeOptions = [10, 30, 50, 100].map(n => `<option value="${n}"${n === pageSize ? ' selected' : ''}>${n}개씩</option>`).join('');
+      const toolbarHtml = `
+        <div class="list-toolbar">
+          <span>총 ${items.length}건</span>
+          <select onchange="changeHtmlTablePageSize('${id}', this.value)">${pageSizeOptions}</select>
+        </div>`;
+      const paginationHtml = `
+        <div class="list-pagination">
+          <button type="button" ${state.page <= 1 ? 'disabled' : ''} onclick="changeHtmlTablePage('${id}', ${state.page - 1})">이전</button>
+          <span>${state.page} / ${totalPages}</span>
+          <button type="button" ${state.page >= totalPages ? 'disabled' : ''} onclick="changeHtmlTablePage('${id}', ${state.page + 1})">다음</button>
+        </div>`;
+      el.innerHTML = `${toolbarHtml}<table>${headerHtml}<tbody>${rows}</tbody></table>${paginationHtml}`;
+    }
+
+    function changeHtmlTablePage(id, page) {
+      const state = _htmlTablePagers[id];
+      if (!state) return;
+      state.page = parseInt(page, 10);
+      renderPagedHtmlTablePage(id);
+    }
+
+    function changeHtmlTablePageSize(id, size) {
+      const state = _htmlTablePagers[id];
+      if (!state) return;
+      state.pageSize = parseInt(size, 10);
+      state.page = 1;
+      renderPagedHtmlTablePage(id);
+    }
+
+    function emptyStateSvg() {
+      return '<text x="50%" y="50%" text-anchor="middle" font-size="13" fill="var(--text-muted)">아직 데이터가 없습니다.</text>';
+    }
+
+    function roundedTopBarPath(x, y, w, h) {
+      if (h <= 0) return '';
+      const r = Math.min(4, w / 2, h);
+      return `M ${x} ${y + h} L ${x} ${y + r} Q ${x} ${y} ${x + r} ${y} L ${x + w - r} ${y} Q ${x + w} ${y} ${x + w} ${y + r} L ${x + w} ${y + h} Z`;
+    }
+
+    const CATEGORY_COLOR_ORDER = ['COM', 'ACC', 'REG', 'MTD', 'RPT', 'NFR'];
+    const CATEGORICAL_COLORS = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)', 'var(--series-7)', 'var(--series-8)'];
+    const categoryColorCache = new Map();
+
+    function categoryColor(category) {
+      if (categoryColorCache.has(category)) return categoryColorCache.get(category);
+      const knownIndex = CATEGORY_COLOR_ORDER.indexOf(category);
+      const color = CATEGORICAL_COLORS[knownIndex >= 0 ? knownIndex : Math.min(categoryColorCache.size, CATEGORICAL_COLORS.length - 1)];
+      categoryColorCache.set(category, color);
+      return color;
+    }
+
+    // ---------- 설정 탭: 최신 문서 뷰어 (docs/*.md를 매 요청마다 새로 읽어옴) ----------
+
+    const DOC_FILES = {
+      user_manual: '사용자_매뉴얼.md',
+      design_spec: '설계서.md',
+      process_spec: '프로세스_명세서.md',
+      network_guide: '팀원용_접속가이드.md',
+      test_results: '테스트_결과.md',
+      scenario_test_report: '테스트_시나리오_보고서.md',
+      defect_report: '결함보고서.md',
+    };
+
+    function docKeyForFilename(filename) {
+      const base = filename.split('/').pop();
+      return Object.keys(DOC_FILES).find(key => DOC_FILES[key] === base) || null;
+    }
+
+    function renderInlineMarkdown(text) {
+      let html = escapeHtml(text);
+      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, href) => {
+        const docKey = href.endsWith('.md') ? docKeyForFilename(href.split('#')[0]) : null;
+        if (docKey) return `<a href="#" onclick="viewDoc('${docKey}'); return false;">${label}</a>`;
+        return `<a href="${href}" target="_blank" rel="noopener">${label}</a>`;
+      });
+      return html;
+    }
+
+    function splitTableRow(line) {
+      // Two ways a "|" can appear inside a cell without ending it, same as GFM tables:
+      // escaped as "\|" in plain text, or verbatim inside a `code span` (backslash escapes
+      // don't apply inside code spans in real Markdown, so don't rely on "\|" there --
+      // track backtick nesting instead, matching how GitHub/VS Code actually parse it).
+      const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+      const cells = [];
+      let current = '';
+      let inCode = false;
+      for (let i = 0; i < trimmed.length; i++) {
+        const ch = trimmed[i];
+        if (ch === '`') {
+          inCode = !inCode;
+          current += ch;
+        } else if (ch === '|' && !inCode && trimmed[i - 1] !== '\\') {
+          cells.push(current.trim());
+          current = '';
+        } else {
+          current += ch;
+        }
+      }
+      cells.push(current.trim());
+      return cells.map(cell => cell.replace(/\\\|/g, '|'));
+    }
+
+    function renderMarkdown(markdown) {
+      const lines = markdown.split('\n');
+      let html = '';
+      let inCodeBlock = false;
+      let codeBuffer = [];
+      let listBuffer = [];
+      let listType = null;
+      let tableBuffer = [];
+
+      const flushList = () => {
+        if (!listBuffer.length) return;
+        html += `<${listType}>${listBuffer.map(item => `<li>${renderInlineMarkdown(item)}</li>`).join('')}</${listType}>`;
+        listBuffer = [];
+        listType = null;
+      };
+
+      const flushTable = () => {
+        if (!tableBuffer.length) return;
+        const rows = tableBuffer.filter((_, idx) => idx !== 1).map(splitTableRow);
+        const [headerCells, ...bodyCells] = rows;
+        html += '<table><thead><tr>' + headerCells.map(c => `<th>${renderInlineMarkdown(c)}</th>`).join('') + '</tr></thead><tbody>' +
+          bodyCells.map(row => '<tr>' + row.map(c => `<td>${renderInlineMarkdown(c)}</td>`).join('') + '</tr>').join('') + '</tbody></table>';
+        tableBuffer = [];
+      };
+
+      for (const line of lines) {
+        if (line.trim().startsWith('```')) {
+          if (inCodeBlock) {
+            html += `<pre class="doc-code"><code>${escapeHtml(codeBuffer.join('\n'))}</code></pre>`;
+            codeBuffer = [];
+            inCodeBlock = false;
+          } else {
+            flushList();
+            flushTable();
+            inCodeBlock = true;
+          }
+          continue;
+        }
+        if (inCodeBlock) {
+          codeBuffer.push(line);
+          continue;
+        }
+
+        if (/^\s*\|.*\|\s*$/.test(line)) {
+          tableBuffer.push(line);
+          continue;
+        }
+        if (tableBuffer.length) flushTable();
+
+        const headerMatch = line.match(/^(#{1,6})\s+(.*)$/);
+        if (headerMatch) {
+          flushList();
+          const level = headerMatch[1].length;
+          html += `<h${level}>${renderInlineMarkdown(headerMatch[2])}</h${level}>`;
+          continue;
+        }
+
+        const quoteMatch = line.match(/^>\s?(.*)$/);
+        if (quoteMatch) {
+          flushList();
+          html += `<blockquote>${renderInlineMarkdown(quoteMatch[1])}</blockquote>`;
+          continue;
+        }
+
+        const ulMatch = line.match(/^-\s+(.*)$/);
+        const olMatch = line.match(/^\d+\.\s+(.*)$/);
+        if (ulMatch) {
+          if (listType !== 'ul') { flushList(); listType = 'ul'; }
+          listBuffer.push(ulMatch[1]);
+          continue;
+        }
+        if (olMatch) {
+          if (listType !== 'ol') { flushList(); listType = 'ol'; }
+          listBuffer.push(olMatch[1]);
+          continue;
+        }
+        if (listBuffer.length) flushList();
+
+        if (/^-{3,}\s*$/.test(line.trim())) {
+          html += '<hr />';
+          continue;
+        }
+        if (line.trim() === '') continue;
+
+        html += `<p>${renderInlineMarkdown(line)}</p>`;
+      }
+      flushList();
+      flushTable();
+      if (inCodeBlock && codeBuffer.length) {
+        html += `<pre class="doc-code"><code>${escapeHtml(codeBuffer.join('\n'))}</code></pre>`;
+      }
+      return html;
+    }
+
+    const _docViewerState = {}; // viewerId -> { key, content } - 다운로드 버튼이 "지금 보고 있는 문서"를 알 수 있도록
+
+    async function viewDoc(key, viewerId = 'doc-viewer', tabBtnClass = 'doc-tab-btn') {
+      document.querySelectorAll(`.${tabBtnClass}`).forEach(btn => btn.classList.toggle('active', btn.dataset.doc === key));
+      const viewer = document.getElementById(viewerId);
+      viewer.innerHTML = '<p>불러오는 중...</p>';
+      const response = await fetch(`/api/docs/${key}`);
+      if (!response.ok) {
+        viewer.innerHTML = '<p>문서를 불러올 수 없습니다.</p>';
+        delete _docViewerState[viewerId];
+        return;
+      }
+      const data = await response.json();
+      viewer.innerHTML = renderMarkdown(data.content);
+      _docViewerState[viewerId] = { key, content: data.content };
+    }
+
+    function downloadTextAsFile(filename, content) {
+      const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadCurrentDoc(viewerId) {
+      const state = _docViewerState[viewerId];
+      if (!state) return;
+      downloadTextAsFile(DOC_FILES[state.key] || `${state.key}.md`, state.content);
+    }
+
+    function showTab(name) {
+      document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.getElementById(`tab-${name}`).classList.add('active');
+      document.querySelector(`.tab-btn[data-tab="${name}"]`).classList.add('active');
+      // 설정/실행 탭은 다른 탭(또는 다른 사용자)이 그 사이에 데이터셋을 바꿨을 수도 있으므로,
+      // 탭을 열 때마다 서버의 현재 활성 데이터셋을 다시 조회해 화면에 보이는 값이 항상 최신이게 함
+      if (name === 'settings' || name === 'run') {
+        loadCurrentDataset();
+        loadCurrentTestcase();
+      }
+      // 모니터링 탭은 열려 있는 동안만 주기적으로 갱신 - 다른 탭에서는 불필요한 폴링을 하지 않음
+      if (name === 'monitoring') {
+        loadMonitoringSummary();
+        if (!window._monitoringInterval) {
+          window._monitoringInterval = setInterval(loadMonitoringSummary, 5000);
+        }
+      } else if (window._monitoringInterval) {
+        clearInterval(window._monitoringInterval);
+        window._monitoringInterval = null;
+      }
+    }
+
+    function selectedTechniques() {
+      return Array.from(document.querySelectorAll('.techniques input[type=checkbox]:checked')).map(el => el.value);
+    }
+
+    function toggleLlmProviderFields() {
+      const provider = document.getElementById('llm-provider').value;
+      document.getElementById('llm-openai-fields').style.display = provider === 'openai' ? 'grid' : 'none';
+      document.getElementById('llm-anthropic-fields').style.display = provider === 'anthropic' ? 'grid' : 'none';
+      document.getElementById('llm-custom-fields').style.display = provider === 'custom' ? 'grid' : 'none';
+    }
+
+    function llmConfigPayload() {
+      const provider = document.getElementById('llm-provider').value;
+      return {
+        llm_provider: provider,
+        openai_api_key: provider === 'openai' ? document.getElementById('openai-key').value : undefined,
+        anthropic_api_key: provider === 'anthropic' ? document.getElementById('anthropic-key').value : undefined,
+        llm_key_name: provider === 'custom' ? document.getElementById('llm-key-name').value : undefined,
+        llm_key_value: provider === 'custom' ? document.getElementById('llm-key-value').value : undefined,
+        llm_endpoint: provider === 'custom' ? document.getElementById('llm-endpoint').value : undefined,
+      };
+    }
+
+    function downloadDatasetTemplate() {
+      window.open('/api/dataset/template', '_blank');
+    }
+
+    async function uploadDataset(inputId = 'file') {
+      const fileInput = document.getElementById(inputId);
+      const resultTarget = inputId === 'file-run' ? 'run-result' : 'result';
+      if (!fileInput.files.length) {
+        document.getElementById(resultTarget).textContent = '데이터셋 파일을 선택해주세요.';
+        return;
+      }
+      try {
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        const response = await fetch('/api/dataset/upload', { method: 'POST', body: formData });
+        const payload = await response.json();
+        document.getElementById(resultTarget).textContent = JSON.stringify(payload, null, 2);
+        if (!response.ok) {
+          document.getElementById('status-pill').textContent = '업로드 실패';
+          return;
+        }
+        const uploadedName = payload.dataset_path ? payload.dataset_path.split(/[\\/]/).pop() : null;
+        setActiveDatasetLabel(uploadedName ? `${uploadedName} (${payload.case_count}건)` : '업로드됨', payload.dataset_path || null);
+        document.getElementById('metric-status').textContent = '데이터셋 업로드 완료';
+        document.getElementById('status-pill').textContent = '데이터셋 준비 완료';
+        await loadDatasetHistory();
+      } catch (err) {
+        // fetch 자체가 실패하면(서버 재시작 중 등) 아무 반응 없이 조용히 끝나버려서 "버튼이
+        // 안 먹는다"처럼 보이므로, 반드시 화면에 에러를 남김
+        document.getElementById(resultTarget).textContent = `업로드 요청이 실패했습니다 (네트워크 오류): ${err.message}`;
+      }
+    }
+
+    let currentActiveDatasetPath = null; // runPipeline()이 이 값을 그대로 요청에 실어 보내서,
+    // "지금 설정/실행 탭에 보이는 데이터셋"과 "실제로 채점에 쓰인 데이터셋"이 항상 일치하게 함
+    // (서버 쪽 ACTIVE_DATASET 전역값에만 의존하면 다른 탭/사용자가 그 사이에 바꿀 수 있음).
+
+    function setActiveDatasetLabel(label, path = undefined) {
+      document.getElementById('current-dataset-info').textContent = label;
+      document.getElementById('current-dataset-info-run').textContent = label;
+      document.getElementById('metric-dataset').textContent = label;
+      if (path !== undefined) currentActiveDatasetPath = path;
+    }
+
+    async function resetDataset() {
+      try {
+        const response = await fetch('/api/dataset/reset', { method: 'POST' });
+        const result = await response.json();
+        setActiveDatasetLabel('없음', null);
+        document.getElementById('result').textContent = JSON.stringify(result, null, 2);
+        document.getElementById('status-pill').textContent = '데이터셋 초기화됨';
+        await loadDatasetHistory();
+      } catch (err) {
+        document.getElementById('result').textContent = `초기화 요청이 실패했습니다 (네트워크 오류): ${err.message}`;
+      }
+    }
+
+    async function selectDataset(path) {
+      try {
+        const response = await fetch('/api/dataset/select', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path }),
+        });
+        const result = await response.json();
+        document.getElementById('result').textContent = JSON.stringify(result, null, 2);
+        if (!response.ok) {
+          document.getElementById('status-pill').textContent = '데이터셋 선택 실패';
+          return;
+        }
+        const selectedName = result.dataset_path.split(/[\\/]/).pop();
+        setActiveDatasetLabel(`${selectedName} (${result.case_count}건)`, result.dataset_path);
+        document.getElementById('status-pill').textContent = '데이터셋 준비 완료';
+        await loadDatasetHistory();
+      } catch (err) {
+        document.getElementById('result').textContent = `선택 요청이 실패했습니다 (네트워크 오류): ${err.message}`;
+      }
+    }
+
+    async function loadDatasetHistory() {
+      const el = document.getElementById('dataset-history');
+      let history;
+      try {
+        const response = await fetch('/api/dataset/history');
+        history = await response.json();
+      } catch (err) {
+        el.innerHTML = `<p style="color:#b91c1c;">이력을 불러오지 못했습니다 (네트워크 오류): ${escapeHtml(err.message)}</p>`;
+        return;
+      }
+      if (!Array.isArray(history) || !history.length) {
+        el.innerHTML = '<p>업로드 이력이 없습니다.</p>';
+        delete _htmlTablePagers['dataset-history'];
+        return;
+      }
+      const headerHtml = '<thead><tr><th><input type="checkbox" class="dataset-check-all" title="전체 선택" /></th><th>파일명</th><th>케이스</th><th>업로드 시각</th><th>상태</th><th></th><th></th><th></th></tr></thead>';
+      renderPagedHtmlTable('dataset-history', headerHtml, history, item => {
+        let status;
+        if (item.active) status = '<strong style="color:#166534;">사용 중</strong> <a href="javascript:void(0)" class="dataset-deactivate-btn" style="color:#b91c1c;">미사용</a>';
+        else if (!item.exists) status = '<span style="color:#b91c1c;">파일 없음</span>';
+        else status = '-';
+        const disabled = item.active || !item.exists ? 'disabled' : '';
+        return `<tr>
+          <td><input type="checkbox" class="dataset-row-check" data-path="${escapeHtml(item.path)}" /></td>
+          <td>${escapeHtml(item.filename)}</td>
+          <td>${item.case_count}건</td>
+          <td>${escapeHtml(formatTimestamp(item.uploaded_at))}</td>
+          <td>${status}</td>
+          <td><button type="button" class="table-toggle dataset-select-btn" data-path="${escapeHtml(item.path)}" ${disabled}>사용</button></td>
+          <td><button type="button" class="dataset-preview-btn" data-path="${escapeHtml(item.path)}">미리보기</button></td>
+          <td><button type="button" class="dataset-download-btn" data-path="${escapeHtml(item.path)}">다운로드</button></td>
+        </tr>`;
+      });
+    }
+
+    // ---------- 테스트 케이스(발화문) - 데이터셋(정답)과 완전히 별도로 관리 ----------
+    let currentActiveTestcasePath = null; // runPipeline()이 dataset_path와 같은 방식으로 그대로 실어 보냄
+
+    function setActiveTestcaseLabel(label, path = undefined) {
+      document.getElementById('current-testcase-info-run').textContent = label;
+      if (path !== undefined) currentActiveTestcasePath = path;
+    }
+
+    function downloadTestcaseTemplate() {
+      window.open('/api/testcase/template', '_blank');
+    }
+
+    function downloadDataset(path) {
+      window.open(`/api/dataset/download?path=${encodeURIComponent(path)}`, '_blank');
+    }
+
+    function downloadTestcase(path) {
+      window.open(`/api/testcase/download?path=${encodeURIComponent(path)}`, '_blank');
+    }
+
+    async function previewDataset(path) {
+      const el = document.getElementById('dataset-preview');
+      el.textContent = '불러오는 중...';
+      try {
+        const response = await fetch(`/api/dataset/preview?path=${encodeURIComponent(path)}`);
+        const data = await response.json();
+        if (!response.ok) {
+          el.innerHTML = `<p class="error-note">${escapeHtml(data.error || '미리보기를 불러올 수 없습니다.')}</p>`;
+          return;
+        }
+        const headers = ['id', 'category', 'question', 'golden_answer'];
+        const rows = data.rows.map(r => headers.map(h => r[h] ?? ''));
+        el.innerHTML = `<p class="muted">${escapeHtml(data.filename)} - 총 ${data.total}건 중 ${data.shown}건 표시</p><div id="dataset-preview-table"></div>`;
+        renderTable('dataset-preview-table', headers, rows);
+      } catch (err) {
+        el.innerHTML = `<p class="error-note">미리보기 요청이 실패했습니다: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    async function previewTestcase(path) {
+      const el = document.getElementById('testcase-preview');
+      el.textContent = '불러오는 중...';
+      try {
+        const response = await fetch(`/api/testcase/preview?path=${encodeURIComponent(path)}`);
+        const data = await response.json();
+        if (!response.ok) {
+          el.innerHTML = `<p class="error-note">${escapeHtml(data.error || '미리보기를 불러올 수 없습니다.')}</p>`;
+          return;
+        }
+        el.innerHTML = `<p class="muted">${escapeHtml(data.filename)} - 총 ${data.total}건 중 ${data.shown}건 표시</p><div id="testcase-preview-table"></div>`;
+        renderTable('testcase-preview-table', ['id', 'question'], data.rows.map(r => [r.id, r.question]));
+      } catch (err) {
+        el.innerHTML = `<p class="error-note">미리보기 요청이 실패했습니다: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    async function uploadTestcase() {
+      const fileInput = document.getElementById('file-testcase');
+      if (!fileInput.files.length) {
+        document.getElementById('run-result').textContent = '테스트 케이스 파일을 선택해주세요.';
+        return;
+      }
+      try {
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        const response = await fetch('/api/testcase/upload', { method: 'POST', body: formData });
+        const payload = await response.json();
+        document.getElementById('run-result').textContent = JSON.stringify(payload, null, 2);
+        if (!response.ok) {
+          document.getElementById('status-pill').textContent = '테스트 케이스 업로드 실패';
+          return;
+        }
+        const uploadedName = payload.testcase_path ? payload.testcase_path.split(/[\\/]/).pop() : null;
+        setActiveTestcaseLabel(uploadedName ? `${uploadedName} (${payload.case_count}건)` : '업로드됨', payload.testcase_path || null);
+        document.getElementById('status-pill').textContent = '테스트 케이스 준비 완료';
+        await loadTestcaseHistory();
+      } catch (err) {
+        document.getElementById('run-result').textContent = `업로드 요청이 실패했습니다 (네트워크 오류): ${err.message}`;
+      }
+    }
+
+    async function resetTestcase() {
+      try {
+        const response = await fetch('/api/testcase/reset', { method: 'POST' });
+        const result = await response.json();
+        setActiveTestcaseLabel('없음', null);
+        document.getElementById('run-result').textContent = JSON.stringify(result, null, 2);
+        document.getElementById('status-pill').textContent = '테스트 케이스 초기화됨';
+        await loadTestcaseHistory();
+      } catch (err) {
+        document.getElementById('run-result').textContent = `초기화 요청이 실패했습니다 (네트워크 오류): ${err.message}`;
+      }
+    }
+
+    async function selectTestcase(path) {
+      try {
+        const response = await fetch('/api/testcase/select', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path }),
+        });
+        const result = await response.json();
+        document.getElementById('run-result').textContent = JSON.stringify(result, null, 2);
+        if (!response.ok) {
+          document.getElementById('status-pill').textContent = '테스트 케이스 선택 실패';
+          return;
+        }
+        const selectedName = result.testcase_path.split(/[\\/]/).pop();
+        setActiveTestcaseLabel(`${selectedName} (${result.case_count}건)`, result.testcase_path);
+        document.getElementById('status-pill').textContent = '테스트 케이스 준비 완료';
+        await loadTestcaseHistory();
+      } catch (err) {
+        document.getElementById('run-result').textContent = `선택 요청이 실패했습니다 (네트워크 오류): ${err.message}`;
+      }
+    }
+
+    async function loadTestcaseHistory() {
+      const el = document.getElementById('testcase-history');
+      let history;
+      try {
+        const response = await fetch('/api/testcase/history');
+        history = await response.json();
+      } catch (err) {
+        el.innerHTML = `<p style="color:#b91c1c;">이력을 불러오지 못했습니다 (네트워크 오류): ${escapeHtml(err.message)}</p>`;
+        return;
+      }
+      if (!Array.isArray(history) || !history.length) {
+        el.innerHTML = '<p>업로드 이력이 없습니다.</p>';
+        delete _htmlTablePagers['testcase-history'];
+        return;
+      }
+      const headerHtml = '<thead><tr><th><input type="checkbox" class="testcase-check-all" title="전체 선택" /></th><th>파일명</th><th>케이스</th><th>업로드 시각</th><th>상태</th><th></th><th></th><th></th></tr></thead>';
+      renderPagedHtmlTable('testcase-history', headerHtml, history, item => {
+        let status;
+        if (item.active) status = '<strong style="color:#166534;">사용 중</strong> <a href="javascript:void(0)" class="testcase-deactivate-btn" style="color:#b91c1c;">미사용</a>';
+        else if (!item.exists) status = '<span style="color:#b91c1c;">파일 없음</span>';
+        else status = '-';
+        const disabled = item.active || !item.exists ? 'disabled' : '';
+        return `<tr>
+          <td><input type="checkbox" class="testcase-row-check" data-path="${escapeHtml(item.path)}" /></td>
+          <td>${escapeHtml(item.filename)}</td>
+          <td>${item.case_count}건</td>
+          <td>${escapeHtml(formatTimestamp(item.uploaded_at))}</td>
+          <td>${status}</td>
+          <td><button type="button" class="table-toggle testcase-select-btn" data-path="${escapeHtml(item.path)}" ${disabled}>사용</button></td>
+          <td><button type="button" class="testcase-preview-btn" data-path="${escapeHtml(item.path)}">미리보기</button></td>
+          <td><button type="button" class="testcase-download-btn" data-path="${escapeHtml(item.path)}">다운로드</button></td>
+        </tr>`;
+      });
+    }
+
+    function initTestcaseHistoryDelegation() {
+      const container = document.getElementById('testcase-history');
+      container.addEventListener('click', evt => {
+        const selectBtn = evt.target.closest('.testcase-select-btn');
+        if (selectBtn && !selectBtn.disabled) { selectTestcase(selectBtn.dataset.path); return; }
+        const deactivateBtn = evt.target.closest('.testcase-deactivate-btn');
+        if (deactivateBtn) { resetTestcase(); return; }
+        const previewBtn = evt.target.closest('.testcase-preview-btn');
+        if (previewBtn) { previewTestcase(previewBtn.dataset.path); return; }
+        const downloadBtn = evt.target.closest('.testcase-download-btn');
+        if (downloadBtn) downloadTestcase(downloadBtn.dataset.path);
+      });
+      container.addEventListener('change', evt => {
+        if (evt.target.classList.contains('testcase-check-all')) {
+          const checked = evt.target.checked;
+          container.querySelectorAll('.testcase-row-check').forEach(cb => { cb.checked = checked; });
+        }
+      });
+    }
+
+    async function deleteSelectedTestcases() {
+      const checked = Array.from(document.querySelectorAll('#testcase-history .testcase-row-check:checked')).map(el => el.dataset.path);
+      if (!checked.length) {
+        alert('삭제할 항목을 먼저 체크해주세요.');
+        return;
+      }
+      if (!confirm(`선택한 ${checked.length}건을 이력에서 완전히 삭제할까요? 되돌릴 수 없습니다.`)) return;
+      try {
+        const response = await fetch('/api/testcase/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paths: checked }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          document.getElementById('run-result').textContent = `삭제 실패: ${result.error || '알 수 없는 오류'}`;
+          return;
+        }
+        if (result.was_active) {
+          setActiveTestcaseLabel('없음', null);
+          document.getElementById('status-pill').textContent = '활성 테스트 케이스가 삭제되어 초기화됨';
+        }
+        await loadTestcaseHistory();
+      } catch (err) {
+        document.getElementById('run-result').textContent = `삭제 요청이 실패했습니다 (네트워크 오류): ${err.message}`;
+      }
+    }
+
+    async function loadCurrentTestcase() {
+      const response = await fetch('/api/testcase/current');
+      const current = await response.json();
+      if (current.path) {
+        setActiveTestcaseLabel(`${current.filename} (${current.case_count}건)`, current.path);
+      } else {
+        setActiveTestcaseLabel('없음', null);
+      }
+    }
+
+    async function saveSettings() {
+      const payload = {
+        slack_webhook_url: document.getElementById('slack-webhook').value,
+        discord_webhook_url: document.getElementById('discord-webhook').value,
+        teams_webhook_url: document.getElementById('teams-webhook').value,
+        jira_base_url: document.getElementById('jira-base-url').value,
+        jira_email: document.getElementById('jira-email').value,
+        jira_token: document.getElementById('jira-token').value,
+        jira_project: document.getElementById('jira-project').value,
+        ...llmConfigPayload(),
+      };
+      try {
+        const response = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const result = await response.json();
+        document.getElementById('result').textContent = JSON.stringify(result, null, 2);
+      } catch (err) {
+        document.getElementById('result').textContent = `설정 저장 요청이 실패했습니다 (네트워크 오류): ${err.message}`;
+      }
+    }
+
+    function setProgress(completed, total) {
+      const pct = total ? Math.round((completed / total) * 100) : 0;
+      document.getElementById('progress-fill').style.width = `${pct}%`;
+    }
+
+    async function pollRunStatus(runId) {
+      for (let attempt = 0; attempt < 60; attempt++) {
+        const response = await fetch(`/api/run/${runId}/status`);
+        const status = await response.json();
+        setProgress((status.progress || {}).completed || 0, (status.progress || {}).total || 1);
+        document.getElementById('metric-status').textContent = koreanStatus(status.status);
+        if (status.status === 'done' || status.status === 'error') {
+          return status;
+        }
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+      return { status: 'timeout' };
+    }
+
+    async function runPipeline() {
+      const techniques = selectedTechniques();
+      if (!techniques.length) {
+        document.getElementById('run-result').textContent = '최소 하나의 기법을 선택하세요.';
+        return;
+      }
+      const payload = {
+        techniques,
+        dataset_path: currentActiveDatasetPath,
+        testcase_path: currentActiveTestcasePath,
+        no_dataset: document.getElementById('no-dataset-toggle').checked,
+        mode: document.getElementById('connector-mode').value,
+        api_endpoint: document.getElementById('connector-endpoint').value,
+        connector: { request_field: document.getElementById('connector-request-field').value || 'question' },
+        category: document.getElementById('category-filter').value || undefined,
+        ...llmConfigPayload(),
+        slack_webhook_url: document.getElementById('slack-webhook').value,
+        discord_webhook_url: document.getElementById('discord-webhook').value,
+        teams_webhook_url: document.getElementById('teams-webhook').value,
+        jira_config: {
+          base_url: document.getElementById('jira-base-url').value,
+          email: document.getElementById('jira-email').value,
+          api_token: document.getElementById('jira-token').value,
+          project_key: document.getElementById('jira-project').value,
+        }
+      };
+      document.getElementById('metric-status').textContent = koreanStatus('queued');
+      document.getElementById('status-pill').textContent = '파이프라인 실행 중';
+      setProgress(0, 1);
+
+      const response = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const result = await response.json();
+      if (!response.ok) {
+        document.getElementById('run-result').textContent = JSON.stringify(result, null, 2);
+        document.getElementById('status-pill').textContent = '실행 거부됨';
+        return;
+      }
+
+      const finalStatus = await pollRunStatus(result.run_id);
+      document.getElementById('status-pill').textContent = finalStatus.status === 'done' ? '실행 완료' : '실행 실패';
+
+      const resultResponse = await fetch(`/api/run/${result.run_id}/result`);
+      const report = resultResponse.ok ? await resultResponse.json() : { error: finalStatus.error };
+      document.getElementById('run-result').textContent = JSON.stringify(report, null, 2);
+      document.getElementById('mismatch').textContent = JSON.stringify({
+        mismatch_cases: report.mismatch_cases,
+        functional_test: report.functional_test,
+        rule_api_comparison: report.rule_api_comparison,
+        regressions_detected: report.regressions_detected,
+      }, null, 2);
+
+      await loadJiraTickets();
+      await loadHistory();
+      await refreshActiveDashboardDoc();
+    }
+
+    async function refreshActiveDashboardDoc() {
+      const activeBtn = document.querySelector('.dashboard-doc-tab-btn.active');
+      if (activeBtn) {
+        await viewDoc(activeBtn.dataset.doc, 'dashboard-doc-viewer', 'dashboard-doc-tab-btn');
+      }
+    }
+
+    function downloadLatestReport(format) {
+      window.open(`/api/reports/latest?format=${format}`, '_blank');
+    }
+
+    async function loadJiraTickets() {
+      const response = await fetch('/api/jira/tickets');
+      const tickets = await response.json();
+      document.getElementById('jira-tickets').textContent = JSON.stringify(tickets, null, 2);
+    }
+
+    async function loadHistory() {
+      const response = await fetch('/api/runs');
+      const data = await response.json();
+      document.getElementById('history').textContent = JSON.stringify(data, null, 2);
+      document.getElementById('metric-runs').textContent = Array.isArray(data) ? data.length : 0;
+      if (Array.isArray(data) && data.length) {
+        const latest = data[data.length - 1];
+        const passRate = typeof latest.overall_pass_rate === 'number' ? `${Math.round(latest.overall_pass_rate * 100)}%` : '0%';
+        document.getElementById('metric-pass').textContent = passRate;
+      }
+      renderTimeSeriesChart(Array.isArray(data) ? data.map(item => ({ label: item.run_id, value: Math.round((item.overall_pass_rate || 0) * 100) })) : []);
+      renderTable('table-timeseries', ['실행', '통과율'], Array.isArray(data) ? data.map(item => [item.run_id, `${Math.round((item.overall_pass_rate || 0) * 100)}%`]) : []);
+      populateRunSelector(data);
+      const latestRunId = Array.isArray(data) && data.length ? data[data.length - 1].run_id : null;
+      await loadDashboardDetails(latestRunId);
+    }
+
+    function populateRunSelector(history) {
+      const select = document.getElementById('run-selector');
+      if (!Array.isArray(history) || !history.length) {
+        select.innerHTML = '<option value="">실행 이력 없음</option>';
+        return;
+      }
+      select.innerHTML = history.slice().reverse().map(item => {
+        const pct = Math.round((item.overall_pass_rate || 0) * 100);
+        const datasetLabel = item.dataset_path ? item.dataset_path.split(/[\\/]/).pop() : '기본 데모';
+        return `<option value="${escapeHtml(item.run_id)}">${escapeHtml(item.run_id)} (통과율 ${pct}%, ${escapeHtml(datasetLabel)})</option>`;
+      }).join('');
+      select.value = history[history.length - 1].run_id; // default: most recent run
+    }
+
+    async function onRunSelectorChange() {
+      const select = document.getElementById('run-selector');
+      await loadDashboardDetails(select.value || null);
+    }
+
+    async function loadDashboardDetails(runId) {
+      if (!runId) {
+        ['chart-category-bar', 'chart-scatter', 'chart-bubble', 'chart-radar'].forEach(id => {
+          document.getElementById(id).innerHTML = emptyStateSvg();
+        });
+        document.getElementById('run-dataset-info').textContent = '-';
+        document.getElementById('run-testcase-info').textContent = '데이터셋 자체 질문 사용';
+        return;
+      }
+      const detailResponse = await fetch(`/api/runs/${runId}`);
+      if (!detailResponse.ok) return;
+      const report = await detailResponse.json();
+      renderCategoryBarChart(report.category_stats);
+      renderRetrievalScatter(report.cases);
+      renderCategoryBubbleChart(report.category_stats);
+      renderLlmJudgeRadar(report.cases);
+      const datasetName = report.dataset_path ? report.dataset_path.split(/[\\/]/).pop() : '기본 데모 케이스(또는 데이터셋 사용 안 함)';
+      const caseCount = report.dataset_case_count || (report.cases ? report.cases.length : 0);
+      document.getElementById('run-dataset-info').textContent = `${datasetName} (${caseCount}건)`;
+      const testcaseName = report.testcase_path ? report.testcase_path.split(/[\\/]/).pop() : null;
+      document.getElementById('run-testcase-info').textContent = testcaseName
+        ? `${testcaseName} (${report.testcase_case_count || 0}건)`
+        : '데이터셋 자체 질문 사용';
+    }
+
+    // ---------- 1. 시계열: 실행별 통과율 추이 ----------
+    function renderTimeSeriesChart(points) {
+      const svg = document.getElementById('chart-timeseries');
+      if (!points.length) {
+        svg.innerHTML = emptyStateSvg();
+        return;
+      }
+      const width = 600, height = 220, padding = 36;
+      const max = 100;
+      const stepX = points.length > 1 ? (width - padding * 2) / (points.length - 1) : 0;
+      const xy = i => [padding + i * stepX, height - padding - (points[i].value / max) * (height - padding * 2)];
+
+      const gridlines = [0, 25, 50, 75, 100].map(v => {
+        const y = height - padding - (v / max) * (height - padding * 2);
+        return `<line x1="${padding}" y1="${y}" x2="${width - padding}" y2="${y}" stroke="var(--gridline)" stroke-width="1" />
+                <text x="${padding - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="var(--text-muted)">${v}%</text>`;
+      }).join('');
+
+      const linePath = points.map((p, i) => { const [x, y] = xy(i); return `${i === 0 ? 'M' : 'L'} ${x} ${y}`; }).join(' ');
+      const [lastX, lastY] = xy(points.length - 1);
+      const areaPath = `${linePath} L ${lastX} ${height - padding} L ${padding} ${height - padding} Z`;
+      const last = points[points.length - 1];
+
+      const dots = points.map((p, i) => {
+        const [x, y] = xy(i);
+        const tip = `${escapeHtml(p.label)}: ${p.value}%`;
+        return `<circle cx="${x}" cy="${y}" r="5" fill="var(--series-1)" stroke="var(--surface-1)" stroke-width="2" data-tooltip="${escapeHtml(tip)}" />`;
+      }).join('');
+
+      const axisLabels = points.map((p, i) => {
+        const [x] = xy(i);
+        return `<text x="${x}" y="${height - 10}" text-anchor="middle" font-size="10" fill="var(--text-muted)">${escapeHtml(p.label)}</text>`;
+      }).join('');
+
+      svg.innerHTML = `
+        ${gridlines}
+        <path d="${areaPath}" fill="var(--series-1)" opacity="0.1" />
+        <path d="${linePath}" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        ${dots}
+        <text x="${lastX}" y="${lastY - 12}" text-anchor="middle" font-size="12" font-weight="600" fill="var(--text-primary)">${last.value}%</text>
+        ${axisLabels}
+      `;
+    }
+
+    // ---------- 모니터링: 분당 요청수 (정상/에러 색상 구분) ----------
+    function renderMonitoringRequestsChart(points) {
+      const svg = document.getElementById('chart-monitoring-requests');
+      if (!svg) return;
+      if (!points.length || !points.some(p => p.count > 0)) {
+        svg.innerHTML = emptyStateSvg();
+        renderTable('table-monitoring-requests', [], []);
+        return;
+      }
+      const width = 600, height = 220, padding = 36;
+      const maxCount = Math.max(...points.map(p => p.count), 1);
+      const stepX = points.length > 1 ? (width - padding * 2) / (points.length - 1) : 0;
+      const xy = (i, value) => [padding + i * stepX, height - padding - (value / maxCount) * (height - padding * 2)];
+
+      const gridlines = [0, 0.25, 0.5, 0.75, 1].map(t => {
+        const y = height - padding - t * (height - padding * 2);
+        return `<line x1="${padding}" y1="${y}" x2="${width - padding}" y2="${y}" stroke="var(--gridline)" stroke-width="1" />
+                <text x="${padding - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="var(--text-muted)">${Math.round(maxCount * t)}</text>`;
+      }).join('');
+
+      const linePath = points.map((p, i) => { const [x, y] = xy(i, p.count); return `${i === 0 ? 'M' : 'L'} ${x} ${y}`; }).join(' ');
+      const [lastX] = xy(points.length - 1, points[points.length - 1].count);
+      const areaPath = `${linePath} L ${lastX} ${height - padding} L ${padding} ${height - padding} Z`;
+
+      const dots = points.map((p, i) => {
+        const [x, y] = xy(i, p.count);
+        const hasError = p.error_count > 0;
+        const tip = `${p.label}: 요청 ${p.count}건${hasError ? `, 에러 ${p.error_count}건` : ''} (평균 ${p.avg_ms}ms)`;
+        const color = hasError ? 'var(--status-critical)' : 'var(--series-1)';
+        const r = hasError ? 6 : 4;
+        return `<circle cx="${x}" cy="${y}" r="${r}" fill="${color}" stroke="var(--surface-1)" stroke-width="2" data-tooltip="${escapeHtml(tip)}" />`;
+      }).join('');
+
+      // x축 라벨은 30개를 다 찍으면 겹치므로 5분 간격만 표시 - 마지막 지점은 직전 라벨과
+      // 너무 가까우면(2칸 이하) 겹치므로 생략 (원본 데이터가 마지막 지점 라벨 포함일 때 겹침 방지)
+      const lastRegularLabelIndex = Math.floor((points.length - 1) / 5) * 5;
+      const axisLabels = points.map((p, i) => {
+        const isLast = i === points.length - 1;
+        if (i % 5 !== 0 && !(isLast && i - lastRegularLabelIndex > 2)) return '';
+        const [x] = xy(i, p.count);
+        return `<text x="${x}" y="${height - 10}" text-anchor="middle" font-size="10" fill="var(--text-muted)">${escapeHtml(p.label)}</text>`;
+      }).join('');
+
+      svg.innerHTML = `
+        ${gridlines}
+        <path d="${areaPath}" fill="var(--series-1)" opacity="0.1" />
+        <path d="${linePath}" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        ${dots}
+        ${axisLabels}
+      `;
+      renderLegend('legend-monitoring-requests', [
+        { label: '정상 처리', color: 'var(--series-1)' },
+        { label: '에러 발생', color: 'var(--status-critical)' },
+      ]);
+      renderTable('table-monitoring-requests', ['시각', '요청수', '에러수', '평균응답(ms)'], points.map(p => [p.label, p.count, p.error_count, p.avg_ms]));
+    }
+
+    function formatUptime(seconds) {
+      const s = Math.floor(seconds || 0);
+      const days = Math.floor(s / 86400);
+      const hours = Math.floor((s % 86400) / 3600);
+      const minutes = Math.floor((s % 3600) / 60);
+      const secs = s % 60;
+      if (days > 0) return `${days}일 ${hours}시간 ${minutes}분`;
+      if (hours > 0) return `${hours}시간 ${minutes}분`;
+      if (minutes > 0) return `${minutes}분 ${secs}초`;
+      return `${secs}초`;
+    }
+
+    async function loadMonitoringSummary() {
+      const response = await fetch('/api/monitoring/summary');
+      if (!response.ok) return;
+      const data = await response.json();
+
+      document.getElementById('mon-uptime').textContent = formatUptime(data.uptime_seconds);
+      document.getElementById('mon-total-requests').textContent = data.total_requests ?? 0;
+      document.getElementById('mon-error-rate').textContent = `${Math.round((data.error_rate || 0) * 1000) / 10}%`;
+      document.getElementById('mon-avg-ms').textContent = `${data.avg_response_ms ?? 0}ms`;
+      document.getElementById('mon-p95-ms').textContent = `${data.p95_response_ms ?? 0}ms`;
+
+      const healthEl = document.getElementById('mon-health-status');
+      const health = data.health || {};
+      healthEl.textContent = health.status === 'ok' ? '정상' : (health.status || '-');
+      healthEl.style.color = health.status === 'ok' ? 'var(--status-good)' : 'var(--status-critical)';
+
+      const points = (data.requests_per_minute || []).map(p => {
+        const d = new Date(p.minute * 60000);
+        const label = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        return { label, count: p.count, error_count: p.error_count, avg_ms: p.avg_ms };
+      });
+      renderMonitoringRequestsChart(points);
+
+      const byPath = data.by_path || [];
+      if (!byPath.length) {
+        document.getElementById('mon-by-path-table').innerHTML = '<p>아직 요청 기록이 없습니다.</p>';
+      } else {
+        renderTable('mon-by-path-table', ['엔드포인트', '요청수', '에러수', '평균응답(ms)'], byPath.map(row => [row.path, row.count, row.error_count, row.avg_ms]));
+      }
+
+      await loadMonitoringTargets();
+    }
+
+    // ---------- 외부 서비스 모니터링 (다른 서버에서 운영 중인 챗봇/API의 Uptime 체크) ----------
+    function formatRelativeTime(unixSeconds) {
+      if (!unixSeconds) return '아직 확인 안 됨';
+      const diffSec = Math.max(0, Math.floor(Date.now() / 1000 - unixSeconds));
+      if (diffSec < 60) return `${diffSec}초 전`;
+      if (diffSec < 3600) return `${Math.floor(diffSec / 60)}분 전`;
+      return `${Math.floor(diffSec / 3600)}시간 전`;
+    }
+
+    function renderMonitoringTargetsTable(rows) {
+      const container = document.getElementById('mon-targets-table');
+      if (!rows.length) {
+        container.innerHTML = '<p>등록된 외부 대상이 없습니다. 위에서 이름/URL을 입력하고 "대상 추가"를 눌러보세요.</p>';
+        delete _htmlTablePagers['mon-targets-table'];
+        return;
+      }
+      const headerHtml = '<thead><tr><th>이름</th><th>URL</th><th>상태</th><th>최근 응답</th><th>가동률(최근 20회)</th><th>마지막 확인</th><th>상세</th><th></th></tr></thead>';
+      renderPagedHtmlTable('mon-targets-table', headerHtml, rows, row => {
+        const statusLabel = !row.checked ? '확인 중...' : (row.last_success ? '정상' : '실패');
+        const statusColor = !row.checked ? 'var(--text-muted)' : (row.last_success ? 'var(--status-good)' : 'var(--status-critical)');
+        const detail = row.last_error ? row.last_error : (row.last_status_code != null ? `HTTP ${row.last_status_code}` : '-');
+        return `<tr>
+          <td>${escapeHtml(row.name)}</td>
+          <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(row.url)}">${escapeHtml(row.url)}</td>
+          <td style="color:${statusColor}; font-weight:600;">${statusLabel}</td>
+          <td>${row.last_duration_ms != null ? row.last_duration_ms + 'ms' : '-'}</td>
+          <td>${row.uptime_pct_recent != null ? row.uptime_pct_recent + '%' : '-'}</td>
+          <td>${escapeHtml(formatRelativeTime(row.last_checked_at))}</td>
+          <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(detail)}">${escapeHtml(detail)}</td>
+          <td><button type="button" onclick="removeMonitoringTarget('${row.id}')">삭제</button></td>
+        </tr>`;
+      });
+    }
+
+    let _lastMonitoringTargets = [];
+
+    async function loadMonitoringTargets() {
+      const response = await fetch('/api/monitoring/targets');
+      if (!response.ok) return;
+      const rows = await response.json();
+      _lastMonitoringTargets = rows;
+      renderMonitoringTargetsTable(rows);
+      populateMonitoringTargetChartSelector(rows);
+    }
+
+    function populateMonitoringTargetChartSelector(rows) {
+      const selector = document.getElementById('mon-target-chart-selector');
+      const previousValue = selector.value;
+      if (!rows.length) {
+        selector.innerHTML = '<option value="">등록된 대상 없음</option>';
+        renderTargetResponseChart([]);
+        return;
+      }
+      selector.innerHTML = rows.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('');
+      selector.value = rows.some(r => r.id === previousValue) ? previousValue : rows[0].id;
+      renderSelectedTargetChart();
+    }
+
+    function renderSelectedTargetChart() {
+      const selector = document.getElementById('mon-target-chart-selector');
+      const target = _lastMonitoringTargets.find(r => r.id === selector.value);
+      const points = (target && target.history || []).map(h => {
+        const d = new Date(h.timestamp * 1000);
+        const label = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+        return { label, ms: h.duration_ms, success: h.success, statusCode: h.status_code };
+      });
+      renderTargetResponseChart(points);
+    }
+
+    // 외부 대상 1건의 체크 이력을 응답시간(ms) 선 그래프로 표시 - 실패한 체크는 빨간 점으로 강조
+    function renderTargetResponseChart(points) {
+      const svg = document.getElementById('chart-monitoring-target');
+      if (!points.length) {
+        svg.innerHTML = emptyStateSvg();
+        renderTable('table-monitoring-target', [], []);
+        return;
+      }
+      const width = 600, height = 220, padding = 36;
+      const maxMs = Math.max(...points.map(p => p.ms), 1);
+      const stepX = points.length > 1 ? (width - padding * 2) / (points.length - 1) : 0;
+      const xy = (i, value) => [padding + i * stepX, height - padding - (value / maxMs) * (height - padding * 2)];
+
+      const gridlines = [0, 0.25, 0.5, 0.75, 1].map(t => {
+        const y = height - padding - t * (height - padding * 2);
+        return `<line x1="${padding}" y1="${y}" x2="${width - padding}" y2="${y}" stroke="var(--gridline)" stroke-width="1" />
+                <text x="${padding - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="var(--text-muted)">${Math.round(maxMs * t)}ms</text>`;
+      }).join('');
+
+      const linePath = points.map((p, i) => { const [x, y] = xy(i, p.ms); return `${i === 0 ? 'M' : 'L'} ${x} ${y}`; }).join(' ');
+      const [lastX] = xy(points.length - 1, points[points.length - 1].ms);
+      const areaPath = `${linePath} L ${lastX} ${height - padding} L ${padding} ${height - padding} Z`;
+
+      const dots = points.map((p, i) => {
+        const [x, y] = xy(i, p.ms);
+        const tip = `${p.label}: ${p.ms}ms${p.success ? '' : ` (실패${p.statusCode ? ', HTTP ' + p.statusCode : ''})`}`;
+        const color = p.success ? 'var(--series-1)' : 'var(--status-critical)';
+        return `<circle cx="${x}" cy="${y}" r="${p.success ? 4 : 6}" fill="${color}" stroke="var(--surface-1)" stroke-width="2" data-tooltip="${escapeHtml(tip)}" />`;
+      }).join('');
+
+      const lastRegularLabelIndex = Math.floor((points.length - 1) / 5) * 5;
+      const axisLabels = points.map((p, i) => {
+        const isLast = i === points.length - 1;
+        if (i % 5 !== 0 && !(isLast && i - lastRegularLabelIndex > 2)) return '';
+        const [x] = xy(i, p.ms);
+        return `<text x="${x}" y="${height - 10}" text-anchor="middle" font-size="10" fill="var(--text-muted)">${escapeHtml(p.label)}</text>`;
+      }).join('');
+
+      svg.innerHTML = `
+        ${gridlines}
+        <path d="${areaPath}" fill="var(--series-1)" opacity="0.1" />
+        <path d="${linePath}" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        ${dots}
+        ${axisLabels}
+      `;
+      renderLegend('legend-monitoring-target', [
+        { label: '정상 응답', color: 'var(--series-1)' },
+        { label: '실패', color: 'var(--status-critical)' },
+      ]);
+      renderTable('table-monitoring-target', ['시각', '응답시간(ms)', '결과'], points.map(p => [p.label, p.ms, p.success ? '정상' : `실패${p.statusCode ? ' (HTTP ' + p.statusCode + ')' : ''}`]));
+    }
+
+    async function addMonitoringTarget() {
+      const name = document.getElementById('mon-target-name').value;
+      const url = document.getElementById('mon-target-url').value;
+      const method = document.getElementById('mon-target-method').value;
+      const interval = document.getElementById('mon-target-interval').value;
+      const resultEl = document.getElementById('mon-target-add-result');
+      resultEl.style.display = 'block';
+      if (!url) {
+        resultEl.textContent = 'URL을 입력해주세요.';
+        return;
+      }
+      const response = await fetch('/api/monitoring/targets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, url, method, interval_seconds: Number(interval) || 60 }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        resultEl.textContent = `등록 실패: ${result.error || '알 수 없는 오류'}`;
+        return;
+      }
+      resultEl.style.display = 'none';
+      document.getElementById('mon-target-name').value = '';
+      document.getElementById('mon-target-url').value = '';
+      document.getElementById('mon-target-interval').value = '60';
+      await loadMonitoringTargets();
+    }
+
+    async function removeMonitoringTarget(id) {
+      await fetch(`/api/monitoring/targets/${id}`, { method: 'DELETE' });
+      await loadMonitoringTargets();
+    }
+
+    // ---------- 2. 막대그래프: 카테고리별 통과/실패 ----------
+    function renderCategoryBarChart(categoryStats) {
+      const svg = document.getElementById('chart-category-bar');
+      const entries = Object.entries(categoryStats || {});
+      if (!entries.length) {
+        svg.innerHTML = emptyStateSvg();
+        renderTable('table-category-bar', [], []);
+        return;
+      }
+
+      const width = 600, height = 240, padTop = 20, padRight = 20, padBottom = 40, padLeft = 40;
+      const plotW = width - padLeft - padRight;
+      const plotH = height - padTop - padBottom;
+      const maxTotal = Math.max(...entries.map(([, s]) => s.total || 0), 1);
+      const groupW = plotW / entries.length;
+      const barW = Math.min(24, groupW / 3);
+      const gap = 2;
+
+      let bars = '';
+      let axisLabels = '';
+      entries.forEach(([category, stats], i) => {
+        const groupX = padLeft + i * groupW + groupW / 2;
+        const passed = stats.passed || 0;
+        const failed = (stats.total || 0) - passed;
+        const passH = (passed / maxTotal) * plotH;
+        const failH = (failed / maxTotal) * plotH;
+        const passX = groupX - barW - gap / 2;
+        const failX = groupX + gap / 2;
+        const passY = padTop + plotH - passH;
+        const failY = padTop + plotH - failH;
+        const safeCategory = escapeHtml(category);
+        if (passH > 0) bars += `<path d="${roundedTopBarPath(passX, passY, barW, passH)}" fill="var(--status-good)" data-tooltip="${safeCategory} 통과: ${passed}건" />`;
+        if (failH > 0) bars += `<path d="${roundedTopBarPath(failX, failY, barW, failH)}" fill="var(--status-critical)" data-tooltip="${safeCategory} 실패: ${failed}건" />`;
+        axisLabels += `<text x="${groupX}" y="${height - padBottom + 18}" text-anchor="middle" font-size="11" fill="var(--text-secondary)">${safeCategory}</text>`;
+      });
+
+      const gridlines = [0, 0.25, 0.5, 0.75, 1].map(t => {
+        const y = padTop + plotH - t * plotH;
+        return `<line x1="${padLeft}" y1="${y}" x2="${width - padRight}" y2="${y}" stroke="var(--gridline)" stroke-width="1" />
+                <text x="${padLeft - 8}" y="${y + 4}" text-anchor="end" font-size="10" fill="var(--text-muted)">${Math.round(maxTotal * t)}</text>`;
+      }).join('');
+
+      svg.innerHTML = `${gridlines}${bars}${axisLabels}`;
+      renderLegend('legend-category-bar', [
+        { label: '통과', color: 'var(--status-good)' },
+        { label: '실패', color: 'var(--status-critical)' },
+      ]);
+      renderTable('table-category-bar', ['카테고리', '전체', '통과', '실패', '통과율'],
+        entries.map(([category, s]) => [category, s.total, s.passed, s.total - s.passed, s.total ? `${Math.round((s.passed / s.total) * 100)}%` : '0%']));
+    }
+
+    // ---------- 3. 산점도: Recall vs Precision (케이스별) ----------
+    function renderRetrievalScatter(cases) {
+      const svg = document.getElementById('chart-scatter');
+      const points = (cases || []).filter(c => c.retrieval && c.retrieval.applicable);
+      if (!points.length) {
+        svg.innerHTML = emptyStateSvg();
+        renderTable('table-scatter', [], []);
+        return;
+      }
+
+      const width = 600, height = 260, padTop = 20, padRight = 20, padBottom = 40, padLeft = 44;
+      const plotW = width - padLeft - padRight;
+      const plotH = height - padTop - padBottom;
+      const sx = v => padLeft + v * plotW;
+      const sy = v => padTop + plotH - v * plotH;
+
+      const gridlines = [0, 0.25, 0.5, 0.75, 1].map(t => `
+        <line x1="${sx(t)}" y1="${padTop}" x2="${sx(t)}" y2="${padTop + plotH}" stroke="var(--gridline)" stroke-width="1" />
+        <line x1="${padLeft}" y1="${sy(t)}" x2="${padLeft + plotW}" y2="${sy(t)}" stroke="var(--gridline)" stroke-width="1" />
+        <text x="${sx(t)}" y="${height - padBottom + 16}" text-anchor="middle" font-size="10" fill="var(--text-muted)">${t}</text>
+        <text x="${padLeft - 8}" y="${sy(t) + 4}" text-anchor="end" font-size="10" fill="var(--text-muted)">${t}</text>
+      `).join('');
+
+      const dots = points.map(c => {
+        const x = sx(c.retrieval.recall_at_k);
+        const y = sy(c.retrieval.precision_at_k);
+        const color = c.overall_pass ? 'var(--status-good)' : 'var(--status-critical)';
+        const tip = `${escapeHtml(c.case_id)} · Recall ${c.retrieval.recall_at_k.toFixed(2)} · Precision ${c.retrieval.precision_at_k.toFixed(2)}`;
+        return `<circle cx="${x}" cy="${y}" r="5" fill="${color}" stroke="var(--surface-1)" stroke-width="2" data-tooltip="${escapeHtml(tip)}" />`;
+      }).join('');
+
+      svg.innerHTML = `
+        ${gridlines}
+        <text x="${padLeft + plotW / 2}" y="${height - 4}" text-anchor="middle" font-size="11" fill="var(--text-secondary)">Recall@K</text>
+        <text x="14" y="${padTop + plotH / 2}" text-anchor="middle" font-size="11" fill="var(--text-secondary)" transform="rotate(-90 14 ${padTop + plotH / 2})">Precision@K</text>
+        ${dots}
+      `;
+      renderLegend('legend-scatter', [
+        { label: '통과', color: 'var(--status-good)' },
+        { label: '실패', color: 'var(--status-critical)' },
+      ]);
+      renderTable('table-scatter', ['케이스', 'Recall@K', 'Precision@K', 'MRR', '판정'],
+        points.map(c => [c.case_id, c.retrieval.recall_at_k.toFixed(2), c.retrieval.precision_at_k.toFixed(2), c.retrieval.mrr.toFixed(2), c.overall_pass ? '통과' : '실패']));
+    }
+
+    // ---------- 4. 버블차트: 카테고리 규모 · 통과율 · 실패건수 ----------
+    function renderCategoryBubbleChart(categoryStats) {
+      const svg = document.getElementById('chart-bubble');
+      const entries = Object.entries(categoryStats || {});
+      if (!entries.length) {
+        svg.innerHTML = emptyStateSvg();
+        renderTable('table-bubble', [], []);
+        return;
+      }
+
+      const width = 600, height = 260, padTop = 20, padRight = 30, padBottom = 40, padLeft = 50;
+      const plotW = width - padLeft - padRight;
+      const plotH = height - padTop - padBottom;
+      const maxTotal = Math.max(...entries.map(([, s]) => s.total || 0), 1);
+      const maxFailed = Math.max(...entries.map(([, s]) => (s.total || 0) - (s.passed || 0)), 1);
+      const sx = v => padLeft + (v / maxTotal) * plotW;
+      const sy = v => padTop + plotH - (v / 100) * plotH;
+      const radiusFor = failed => 8 + Math.sqrt(failed / maxFailed) * 22;
+
+      const gridlines = [0, 25, 50, 75, 100].map(t => `
+        <line x1="${padLeft}" y1="${sy(t)}" x2="${padLeft + plotW}" y2="${sy(t)}" stroke="var(--gridline)" stroke-width="1" />
+        <text x="${padLeft - 8}" y="${sy(t) + 4}" text-anchor="end" font-size="10" fill="var(--text-muted)">${t}%</text>
+      `).join('');
+
+      const bubbles = entries.map(([category, s]) => {
+        const failed = (s.total || 0) - (s.passed || 0);
+        const passRate = s.total ? Math.round((s.passed / s.total) * 100) : 0;
+        const x = sx(s.total || 0);
+        const y = sy(passRate);
+        const r = radiusFor(failed);
+        const color = categoryColor(category);
+        const safeCategory = escapeHtml(category);
+        const tip = `${safeCategory} · 전체 ${s.total || 0}건 · 통과율 ${passRate}% · 실패 ${failed}건`;
+        return `<circle cx="${x}" cy="${y}" r="${r}" fill="${color}" fill-opacity="0.55" stroke="${color}" stroke-width="2" data-tooltip="${tip}" />
+                <text x="${x}" y="${y + 4}" text-anchor="middle" font-size="11" font-weight="600" fill="var(--text-primary)">${safeCategory}</text>`;
+      }).join('');
+
+      svg.innerHTML = `
+        ${gridlines}
+        <text x="${padLeft + plotW / 2}" y="${height - 4}" text-anchor="middle" font-size="11" fill="var(--text-secondary)">전체 케이스 수</text>
+        <text x="14" y="${padTop + plotH / 2}" text-anchor="middle" font-size="11" fill="var(--text-secondary)" transform="rotate(-90 14 ${padTop + plotH / 2})">통과율(%)</text>
+        ${bubbles}
+      `;
+      renderTable('table-bubble', ['카테고리', '전체', '통과율', '실패 건수'],
+        entries.map(([category, s]) => [category, s.total, s.total ? `${Math.round((s.passed / s.total) * 100)}%` : '0%', (s.total || 0) - (s.passed || 0)]));
+    }
+
+    // ---------- 5. 방사형 그래프: LLM 판정 품질 프로필 ----------
+    function renderLlmJudgeRadar(cases) {
+      const svg = document.getElementById('chart-radar');
+      const judged = (cases || []).map(c => c.llm_judge).filter(j => j && !j.errored && !j.refused);
+      if (!judged.length) {
+        svg.innerHTML = emptyStateSvg();
+        renderTable('table-radar', [], []);
+        return;
+      }
+
+      const avg = key => judged.reduce((sum, j) => sum + (key === 'safety' ? (5 - j.toxicity) : j[key]), 0) / judged.length;
+      const axes = [
+        { key: 'accuracy', label: '정확성' },
+        { key: 'relevance', label: '관련성' },
+        { key: 'consistency', label: '일관성' },
+        { key: 'safety', label: '안전성' },
+      ].map(a => ({ ...a, value: avg(a.key) }));
+
+      const cx = 160, cy = 140, maxR = 100, maxVal = 5;
+      const angleFor = i => (Math.PI * 2 * i) / axes.length - Math.PI / 2;
+      const pointFor = (i, value) => {
+        const angle = angleFor(i);
+        const r = (value / maxVal) * maxR;
+        return [cx + r * Math.cos(angle), cy + r * Math.sin(angle)];
+      };
+
+      const rings = [1, 2, 3, 4, 5].map(level => {
+        const pts = axes.map((_, i) => pointFor(i, level).join(',')).join(' ');
+        return `<polygon points="${pts}" fill="none" stroke="var(--gridline)" stroke-width="1" />`;
+      }).join('');
+
+      const spokesAndLabels = axes.map((a, i) => {
+        const [x, y] = pointFor(i, maxVal);
+        const [lx, ly] = pointFor(i, maxVal * 1.24);
+        return `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="var(--gridline)" stroke-width="1" />
+                <text x="${lx}" y="${ly}" text-anchor="middle" font-size="11" fill="var(--text-secondary)">${a.label}</text>`;
+      }).join('');
+
+      const shapePts = axes.map((a, i) => pointFor(i, a.value).join(',')).join(' ');
+      const vertexMarks = axes.map((a, i) => {
+        const [x, y] = pointFor(i, a.value);
+        const tip = `${a.label}: ${a.value.toFixed(1)} / 5`;
+        return `<circle cx="${x}" cy="${y}" r="5" fill="var(--series-1)" stroke="var(--surface-1)" stroke-width="2" data-tooltip="${escapeHtml(tip)}" />
+                <text x="${x}" y="${y - 10}" text-anchor="middle" font-size="10" font-weight="600" fill="var(--text-primary)">${a.value.toFixed(1)}</text>`;
+      }).join('');
+
+      svg.innerHTML = `
+        ${rings}
+        ${spokesAndLabels}
+        <polygon points="${shapePts}" fill="var(--series-1)" fill-opacity="0.12" stroke="var(--series-1)" stroke-width="2" stroke-linejoin="round" />
+        ${vertexMarks}
+      `;
+      renderTable('table-radar', ['지표', '평균 (5점 만점)'], axes.map(a => [a.label, a.value.toFixed(2)]));
+    }
+
+    async function loadSettings() {
+      const response = await fetch('/api/settings');
+      const settings = await response.json();
+      document.getElementById('slack-webhook').value = settings.slack_webhook_url || '';
+      document.getElementById('discord-webhook').value = settings.discord_webhook_url || '';
+      document.getElementById('teams-webhook').value = settings.teams_webhook_url || '';
+      document.getElementById('jira-base-url').value = settings.jira_base_url || '';
+      document.getElementById('jira-email').value = settings.jira_email || '';
+      document.getElementById('jira-token').value = settings.jira_token || '';
+      document.getElementById('jira-project').value = settings.jira_project || '';
+      document.getElementById('openai-key').value = settings.openai_api_key || '';
+      document.getElementById('anthropic-key').value = settings.anthropic_api_key || '';
+      document.getElementById('llm-provider').value = settings.llm_provider || 'openai';
+      document.getElementById('llm-key-name').value = settings.llm_key_name || '';
+      document.getElementById('llm-key-value').value = settings.llm_key_value || '';
+      document.getElementById('llm-endpoint').value = settings.llm_endpoint || '';
+      toggleLlmProviderFields();
+      document.getElementById('metric-status').textContent = '설정 불러옴';
+      document.getElementById('status-pill').textContent = '설정 준비 완료';
+    }
+
+    async function loadConnectorDefaults() {
+      const response = await fetch('/api/config/connector-defaults');
+      const defaults = await response.json();
+      document.getElementById('connector-mode').value = defaults.mode || 'dataset_only';
+      document.getElementById('connector-endpoint').placeholder = defaults.api_endpoint || '챗봇 API 엔드포인트 (api 모드 전용)';
+    }
+
+    async function loadCurrentDataset() {
+      const response = await fetch('/api/dataset/current');
+      const current = await response.json();
+      if (current.path) {
+        setActiveDatasetLabel(`${current.filename} (${current.case_count}건)`, current.path);
+      } else {
+        setActiveDatasetLabel('없음', null);
+      }
+    }
+
+    initTooltipDelegation();
+    initPasswordToggleIcons();
+    initDatasetHistoryDelegation();
+    initTestcaseHistoryDelegation();
+    loadSettings();
+    loadConnectorDefaults();
+    loadCurrentDataset();
+    loadDatasetHistory();
+    loadCurrentTestcase();
+    loadTestcaseHistory();
+    loadHistory();
+    loadJiraTickets();
+    loadMonitoringSummary();
+    viewDoc('user_manual');
+    viewDoc('test_results', 'dashboard-doc-viewer', 'dashboard-doc-tab-btn');
+
+    // 모니터링 애드온 페이지 등 다른 화면에서 특정 탭으로 바로 돌아올 수 있도록
+    // (예: /#monitoring), URL 해시로 지정된 탭이 있으면 그 탭을 열어줌
+    const initialTab = (location.hash || '').replace('#', '');
+    if (['settings', 'run', 'dashboard', 'monitoring'].includes(initialTab)) {
+      showTab(initialTab);
+    }
+  </script>
+</body>
+</html>

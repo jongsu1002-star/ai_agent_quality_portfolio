@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+desktop_app/build/
+desktop_app/*.spec
+
+# 앱 실행 중 자동 생성되는 산출물(업로드 이력, 실행 결과, 설정 등) - 소스 아님
+reports/

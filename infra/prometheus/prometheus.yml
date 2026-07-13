@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "ai-agent-monitoring-addon"
+    metrics_path: "/metrics-addon"
+    static_configs:
+      # host.docker.internal - 컨테이너 안에서 도커 밖 호스트(로컬에서 uvicorn으로 떠 있는
+      # 기존 FastAPI 앱)를 가리키는 특수 호스트명. 기존 앱은 컨테이너화하지 않고 그대로 둠.
+      - targets: ["host.docker.internal:8000"]

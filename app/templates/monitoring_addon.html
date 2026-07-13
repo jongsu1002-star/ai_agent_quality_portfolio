@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>모니터링 애드온 - k6·Prometheus·Grafana</title>
+  <style>
+    :root {
+      --surface-1: #fcfcfb;
+      --text-primary: #0b0b0b;
+      --text-secondary: #52514e;
+      --text-muted: #898781;
+      --gridline: #e1e0d9;
+      --series-1: #2a78d6;
+      --status-good: #0ca30c;
+      --status-warning: #fab219;
+      --status-critical: #d03b3b;
+    }
+    body { font-family: Arial, sans-serif; margin: 2rem; background: linear-gradient(135deg, #eff6ff, #f8fafc); color: #1f2937; }
+    .card { background: white; padding: 1.25rem; border-radius: 14px; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.12); margin-bottom: 1rem; }
+    .title { color: #1d4ed8; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; }
+    .metric { padding: 1rem; background: linear-gradient(135deg, #eff6ff, #dbeafe); border-radius: 10px; font-weight: 600; min-width: 0; overflow-wrap: break-word; word-break: break-word; }
+    .badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.85rem; font-weight: 700; }
+    .badge-pass { background: #dcfce7; color: #166534; }
+    .badge-fail { background: #fee2e2; color: #991b1b; }
+    button, select { padding: 0.55rem 0.9rem; border: 1px solid #cbd5e1; border-radius: 8px; background: white; cursor: pointer; font-weight: 600; }
+    button.primary { border: none; background: linear-gradient(90deg, #2563eb, #3b82f6); color: white; }
+    input[type="text"], input[type="number"], input:not([type]) {
+      padding: 0.55rem 0.7rem; border: 1px solid #cbd5e1; border-radius: 8px;
+      font-family: inherit; font-size: 0.95rem; box-sizing: border-box; width: 100%;
+    }
+    label { display: block; font-weight: 600; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.35rem; }
+    .field-row { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 1rem; align-items: end; }
+    .field-row select, .field-row input { width: 100%; }
+    @media (max-width: 720px) { .field-row { grid-template-columns: 1fr; } }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--gridline); white-space: nowrap; }
+    th { color: var(--text-secondary); }
+    .viz-svg { width: 100%; height: auto; }
+    .error-note { color: var(--status-critical); font-size: 0.9rem; }
+    .muted { color: var(--text-muted); font-size: 0.85rem; }
+    .pagination { display: flex; gap: 0.5rem; align-items: center; justify-content: center; margin-top: 0.75rem; }
+    .list-toolbar { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--text-muted); }
+    .list-toolbar select { width: auto; }
+    a { color: #2563eb; }
+    code { background: #f1f5f9; padding: 0.1rem 0.3rem; border-radius: 4px; font-size: 0.9em; }
+    .tabs { display: flex; gap: 0.5rem; margin-top: 1rem; border-bottom: 2px solid #e2e8f0; }
+    .tab-btn { background: none; color: #64748b; font-weight: 600; padding: 0.7rem 1.1rem; border-radius: 8px 8px 0 0; box-shadow: none; border: none; cursor: pointer; }
+    .tab-btn.active { background: white; color: #1d4ed8; box-shadow: 0 -2px 0 0 #2563eb inset; cursor: default; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1 class="title">모니터링 애드온 - 성능테스트(k6) · Prometheus/Grafana</h1>
+    <p>
+      이 페이지는 기존 QA 품질관리·운영 모니터링 화면(<a href="/">메인 대시보드</a>)과 완전히 별도로
+      동작합니다 - 여기서 무엇을 하든 기존 화면/API에는 영향을 주지 않습니다.
+    </p>
+    <div class="tabs">
+      <button type="button" class="tab-btn" onclick="window.location.href='/#settings'">설정</button>
+      <button type="button" class="tab-btn" onclick="window.location.href='/#run'">실행</button>
+      <button type="button" class="tab-btn" onclick="window.location.href='/#dashboard'">대시보드</button>
+      <button type="button" class="tab-btn" onclick="window.location.href='/#monitoring'">모니터링</button>
+      <button type="button" class="tab-btn active">모니터링 애드온</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>k6 성능테스트 실행</h2>
+    <p class="muted">
+      웹에서 바로 성능테스트를 실행합니다. 대상은 <strong>localhost 또는 사내망 IP(10.x/172.16-31.x/192.168.x)만</strong>
+      허용됩니다(외부 인터넷 주소는 거부) - 이 서버 자체나 사내 다른 서비스만 테스트할 수 있습니다.
+      동시사용자수는 최대 50명, 지속시간은 최대 2분까지입니다. 한 번에 하나만 실행할 수 있습니다.
+    </p>
+    <div class="field-row" style="grid-template-columns: 2fr 1fr 1fr 1fr auto;">
+      <div>
+        <label for="k6-target-url">대상 URL</label>
+        <input id="k6-target-url" type="text" placeholder="http://localhost:8000" />
+      </div>
+      <div>
+        <label for="k6-path">경로</label>
+        <input id="k6-path" type="text" placeholder="/" value="/" />
+      </div>
+      <div>
+        <label for="k6-vus">동시사용자수</label>
+        <input id="k6-vus" type="number" min="1" max="50" value="10" />
+      </div>
+      <div>
+        <label for="k6-duration">지속시간</label>
+        <select id="k6-duration">
+          <option value="10s">10초</option>
+          <option value="30s" selected>30초</option>
+          <option value="1m">1분</option>
+          <option value="2m">2분</option>
+        </select>
+      </div>
+      <div>
+        <button type="button" class="primary" onclick="triggerK6Run()" style="width:100%;">실행</button>
+      </div>
+    </div>
+    <p class="muted" style="margin-top:0.4rem;">
+      경로는 대상 URL 뒤에 그대로 붙여서 요청합니다 (기본값 <code>/</code> - 이 플랫폼 자신을
+      테스트할 때는 더 가벼운 <code>/health</code>를 입력해도 됩니다. 다른 서비스면 그 서비스가
+      실제로 갖고 있는 경로를 입력하세요 - 없는 경로면 전부 실패로 집계됩니다).
+    </p>
+    <div style="margin-top:0.75rem;">
+      <label style="display:inline-flex; align-items:center; gap:0.4rem; font-weight:600; font-size:0.85rem; color:var(--text-secondary);">
+        <input type="checkbox" id="k6-use-utterance" onchange="toggleK6UtteranceFields()" style="width:auto;" />
+        발화문 전송 (체크 시 GET 상태 확인 대신 챗봇 질의응답 API를 POST로 부하테스트)
+      </label>
+    </div>
+    <div class="field-row" id="k6-utterance-fields" style="grid-template-columns: 3fr 1fr; margin-top:0.5rem; display:none;">
+      <div>
+        <label for="k6-utterance">발화문</label>
+        <input id="k6-utterance" type="text" placeholder="예: 수강료는 얼마인가요?" disabled />
+      </div>
+      <div>
+        <label for="k6-request-field">요청 필드명</label>
+        <input id="k6-request-field" type="text" placeholder="message" value="message" disabled />
+      </div>
+    </div>
+    <p class="muted" style="margin-top:0.4rem;">
+      체크하면 <code>{"요청필드명": "발화문"}</code> 형태로 POST 요청을 보내 실제 챗봇 API를
+      부하테스트합니다. 체크하지 않으면(기본값) 기존처럼 단순 GET으로 응답 상태만 확인합니다.
+      요청 필드명은 대상 챗봇이 기대하는 JSON 키에 맞게 바꾸세요(예: message, question).
+    </p>
+    <div id="k6-trigger-status" style="margin-top:0.75rem;"></div>
+  </div>
+
+  <div class="card">
+    <h2>k6 최신 성능테스트 결과</h2>
+    <div id="k6-latest-content">불러오는 중...</div>
+  </div>
+
+  <div class="chart-grid" style="margin-bottom:1rem;">
+    <div class="card">
+      <h2>실행별 p95 응답시간 추이</h2>
+      <svg id="chart-k6-p95" class="viz-svg" viewBox="0 0 600 200"></svg>
+      <p id="k6-chart-error" class="error-note" style="display:none;"></p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>k6 실행 이력</h2>
+    <div style="margin-bottom:0.75rem; display:flex; gap:1rem; align-items:center;">
+      <span><label style="display:inline; font-weight:normal; margin:0;">판정 필터: </label>
+      <select id="k6-result-filter" onchange="loadK6Runs(1)">
+        <option value="">전체</option>
+        <option value="Pass">Pass</option>
+        <option value="Fail">Fail</option>
+      </select></span>
+      <span><label style="display:inline; font-weight:normal; margin:0;">페이지당: </label>
+      <select id="k6-page-size" onchange="changeK6PageSize(this.value)">
+        <option value="10">10개</option>
+        <option value="30">30개</option>
+        <option value="50">50개</option>
+        <option value="100">100개</option>
+      </select></span>
+    </div>
+    <div id="k6-runs-content">불러오는 중...</div>
+    <div class="pagination">
+      <button type="button" onclick="changeK6Page(-1)">이전</button>
+      <span id="k6-page-label" class="muted">1 페이지</span>
+      <button type="button" onclick="changeK6Page(1)">다음</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>k6 실행 상세</h2>
+    <div id="k6-detail-content" class="muted">위 이력 표에서 "상세" 버튼을 눌러 threshold 결과를 확인하세요.</div>
+  </div>
+
+  <div class="card">
+    <h2>운영 지표 장기 스냅샷 (1분 주기, 기존 MetricsCollector 읽기 전용)</h2>
+    <div id="snapshot-content">불러오는 중...</div>
+  </div>
+
+  <div class="card" id="grafana-card" style="display:none;">
+    <h2>Prometheus / Grafana</h2>
+    <p class="muted">
+      아래 스택은 <code>infra/docker-compose.monitoring.yml</code>로 별도 실행해야 보입니다
+      (기존 <code>docker-compose.yml</code>과 별개). 실행 방법은 <strong>사용자_매뉴얼.md 11장</strong>
+      (메인 대시보드 → 설정 탭 → 문서 카드에서 확인 가능) 참고.
+    </p>
+    <h3 style="margin-top:0.5rem;">Prometheus 쿼리 (실시간 차트)</h3>
+    <p class="muted">
+      qa_platform_total_requests (누적 총 요청수)의 최근 1시간 추이 - Prometheus 자체 UI를
+      iframe으로 그대로 넣는 대신, Prometheus HTTP API에서 직접 값을 받아와 이 페이지 스타일로
+      그립니다(제품 자체 React UI를 크로스오리진 iframe에 넣으면 자동 실행이 안 되는 경우가
+      있어 더 안정적인 방식으로 대체함).
+    </p>
+    <svg id="prometheus-chart" class="viz-svg" viewBox="0 0 600 200" style="background:#0b0b0b; border-radius:8px;"></svg>
+    <p id="prometheus-embed-error" class="error-note" style="display:none;">Prometheus 데이터를 불러올 수 없습니다 (컨테이너가 안 떠 있거나 연결할 수 없음) - 아래 링크로 직접 접속해보세요.</p>
+
+    <h3 style="margin-top:1.25rem;">Grafana 대시보드 (실시간 임베딩)</h3>
+    <div id="grafana-embed-grid" style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem;"></div>
+    <p id="grafana-embed-error" class="error-note" style="display:none;">Grafana 임베딩을 불러올 수 없습니다 (컨테이너가 안 떠 있거나 연결할 수 없음) - 아래 링크로 직접 접속해보세요.</p>
+    <ul style="margin-top:0.75rem;">
+      <li>Prometheus: <a id="prometheus-link" href="#" target="_blank"></a></li>
+      <li>Grafana (새 창으로 열기): <a id="grafana-link" href="#" target="_blank"></a> (기본 계정 admin/admin, 위 임베딩은 로그인 없이 바로 보임)</li>
+      <li>이 앱이 노출하는 지표: <a href="/metrics-addon" target="_blank">/metrics-addon</a></li>
+    </ul>
+  </div>
+
+  <script>
+    const GRAFANA_LINK_ENABLED = __GRAFANA_LINK_ENABLED__;
+    let k6Page = 1;
+    let K6_PAGE_SIZE = 10;
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+
+    function badge(result) {
+      if (result === 'Pass') return '<span class="badge badge-pass">Pass</span>';
+      if (result === 'Fail') return '<span class="badge badge-fail">Fail</span>';
+      return escapeHtml(result || '-');
+    }
+
+    async function loadK6Latest() {
+      const el = document.getElementById('k6-latest-content');
+      try {
+        const response = await fetch('/api/monitoring-addon/k6/latest');
+        const data = await response.json();
+        if (data.status === 'no_data') {
+          el.innerHTML = '<p class="muted">아직 k6 실행 결과가 없습니다. <code>k6 run tests/k6/load_test.js</code>로 한 번 실행해보세요.</p>';
+          return;
+        }
+        if (data.status === 'invalid_json' || data.error) {
+          el.innerHTML = `<p class="error-note">결과를 불러올 수 없습니다: ${escapeHtml(data.error || data.status)}</p>`;
+          return;
+        }
+        const dur = data.http_req_duration || {};
+        const utteranceMetric = data.utterance ? `<div class="metric">발화문: ${escapeHtml(data.utterance)} (필드: ${escapeHtml(data.request_field || '-')})</div>` : '';
+        el.innerHTML = `
+          <div class="grid">
+            <div class="metric">실행 ID: ${escapeHtml(data.run_id)}</div>
+            <div class="metric">대상: ${escapeHtml(data.target_url)}${escapeHtml(data.target_path || '')}</div>
+            <div class="metric">동시사용자수: ${data.vus}</div>
+            <div class="metric">총 요청 수: ${data.total_requests}</div>
+            <div class="metric">실패율: ${Math.round((data.failed_rate || 0) * 1000) / 10}%</div>
+            <div class="metric">평균 응답: ${dur.avg_ms}ms</div>
+            <div class="metric">p95 응답: ${dur.p95_ms}ms</div>
+            <div class="metric">판정: ${badge(data.result)}</div>
+            ${utteranceMetric}
+          </div>`;
+      } catch (err) {
+        el.innerHTML = `<p class="error-note">k6 최신 결과를 불러오는 중 오류가 발생했습니다: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    // ---------- k6 웹 실행 (URL/동시사용자수/지속시간 입력 후 바로 실행) ----------
+    let k6TriggerPollTimer = null;
+
+    function toggleK6UtteranceFields() {
+      const useUtterance = document.getElementById('k6-use-utterance').checked;
+      document.getElementById('k6-utterance-fields').style.display = useUtterance ? 'grid' : 'none';
+      document.getElementById('k6-utterance').disabled = !useUtterance;
+      document.getElementById('k6-request-field').disabled = !useUtterance;
+    }
+
+    async function triggerK6Run() {
+      const statusEl = document.getElementById('k6-trigger-status');
+      const targetUrl = document.getElementById('k6-target-url').value.trim();
+      const path = document.getElementById('k6-path').value.trim() || '/';
+      const vus = Number(document.getElementById('k6-vus').value);
+      const duration = document.getElementById('k6-duration').value;
+      // 체크박스가 꺼져 있으면 발화문 입력창에 텍스트가 남아있어도 무시 - "보낼지 말지"를
+      // 텍스트 유무가 아니라 명시적인 체크 여부로만 판단해야 사용자 의도와 항상 일치함
+      const useUtterance = document.getElementById('k6-use-utterance').checked;
+      const utterance = useUtterance ? document.getElementById('k6-utterance').value.trim() : '';
+      const requestField = document.getElementById('k6-request-field').value.trim() || 'message';
+
+      if (useUtterance && !utterance) {
+        statusEl.innerHTML = '<p class="error-note">발화문 전송을 체크했으면 발화문 내용을 입력해주세요.</p>';
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/monitoring-addon/k6/trigger', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target_url: targetUrl, path, vus, duration, utterance, request_field: requestField }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          statusEl.innerHTML = `<p class="error-note">실행 실패: ${escapeHtml(result.error || '알 수 없는 오류')}</p>`;
+          return;
+        }
+        statusEl.innerHTML = '<p class="muted">실행 시작됨 - 진행 상황을 확인하는 중...</p>';
+        await pollK6TriggerStatus(); // 이 안에서 "running"이면 스스로 폴링 타이머를 시작함
+      } catch (err) {
+        statusEl.innerHTML = `<p class="error-note">실행 요청이 실패했습니다 (네트워크 오류): ${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    async function pollK6TriggerStatus() {
+      // 상태에 따라 스스로 폴링 타이머를 관리 - "running"일 때만 계속 돌고, 끝나면 멈춤.
+      // 페이지를 새로고침해서 처음 불릴 때도 이미 실행 중이던 테스트를 이어서 표시하려고
+      // 별도 트리거 없이도 이 함수 하나로 시작/유지/정지가 전부 처리되게 함.
+      const statusEl = document.getElementById('k6-trigger-status');
+      try {
+        const response = await fetch('/api/monitoring-addon/k6/trigger/status');
+        const data = await response.json();
+        if (data.status === 'running') {
+          if (!k6TriggerPollTimer) k6TriggerPollTimer = setInterval(pollK6TriggerStatus, 2000);
+          const elapsed = Math.round(Date.now() / 1000 - data.started_at);
+          const utteranceNote = data.utterance ? `, 발화문: "${escapeHtml(data.utterance)}"` : '';
+          statusEl.innerHTML = `<p class="muted">실행 중... (${elapsed}초 경과, 대상: ${escapeHtml(data.target_url)}${escapeHtml(data.path || '')}, 동시사용자수: ${data.vus}, 지속시간: ${escapeHtml(data.duration)}${utteranceNote})</p>`;
+          return;
+        }
+        if (k6TriggerPollTimer) { clearInterval(k6TriggerPollTimer); k6TriggerPollTimer = null; }
+        if (data.status === 'done') {
+          statusEl.innerHTML = `<p style="color:var(--status-good, #0ca30c);">실행 완료 (종료 코드 ${data.exit_code}) - 아래 "k6 최신 성능테스트 결과"와 이력에 반영됩니다.</p>`;
+          await loadK6Latest();
+          await loadK6Runs(1);
+        } else if (data.status === 'error') {
+          statusEl.innerHTML = `<p class="error-note">실행 중 오류: ${escapeHtml(data.error || '알 수 없는 오류')}</p>`;
+        }
+        // status === 'idle'이면 아무것도 표시하지 않음(아직 한 번도 실행 안 한 초기 상태)
+      } catch (err) {
+        if (k6TriggerPollTimer) { clearInterval(k6TriggerPollTimer); k6TriggerPollTimer = null; }
+        statusEl.innerHTML = `<p class="error-note">상태 확인 중 오류가 발생했습니다: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    function renderK6P95Chart(points) {
+      const svg = document.getElementById('chart-k6-p95');
+      const errEl = document.getElementById('k6-chart-error');
+      errEl.style.display = 'none';
+      if (!points.length) {
+        svg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" font-size="13" fill="var(--text-muted)">아직 데이터가 없습니다.</text>';
+        return;
+      }
+      const width = 600, height = 200, padding = 36;
+      const maxMs = Math.max(...points.map(p => p.p95), 1);
+      const stepX = points.length > 1 ? (width - padding * 2) / (points.length - 1) : 0;
+      const xy = (i, v) => [padding + i * stepX, height - padding - (v / maxMs) * (height - padding * 2)];
+      const linePath = points.map((p, i) => { const [x, y] = xy(i, p.p95); return `${i === 0 ? 'M' : 'L'} ${x} ${y}`; }).join(' ');
+      const dots = points.map((p, i) => {
+        const [x, y] = xy(i, p.p95);
+        return `<circle cx="${x}" cy="${y}" r="4" fill="var(--series-1)" stroke="white" stroke-width="2"><title>${escapeHtml(p.run_id)}: ${p.p95}ms</title></circle>`;
+      }).join('');
+      svg.innerHTML = `<path d="${linePath}" fill="none" stroke="var(--series-1)" stroke-width="2" />${dots}`;
+    }
+
+    async function loadK6Runs(page) {
+      k6Page = page || k6Page;
+      const el = document.getElementById('k6-runs-content');
+      const resultFilter = document.getElementById('k6-result-filter').value;
+      try {
+        const params = new URLSearchParams({ page: k6Page, page_size: K6_PAGE_SIZE });
+        if (resultFilter) params.set('result', resultFilter);
+        const response = await fetch(`/api/monitoring-addon/k6/runs?${params}`);
+        const data = await response.json();
+        if (data.status === 'history_disabled') {
+          el.innerHTML = '<p class="muted">이력 기능이 비활성화되어 있습니다(K6_HISTORY_ENABLED=false).</p>';
+          return;
+        }
+        const items = data.items || [];
+        document.getElementById('k6-page-label').textContent = `${data.page || k6Page} 페이지 (총 ${data.total || 0}건)`;
+        if (!items.length) {
+          el.innerHTML = '<p class="muted">실행 이력이 없습니다.</p>';
+          renderK6P95Chart([]);
+          return;
+        }
+        const rows = items.map(run => `<tr>
+          <td>${escapeHtml(run.run_id)}</td>
+          <td>${escapeHtml(run.scenario || '-')}</td>
+          <td>${run.vus}</td>
+          <td>${run.total_requests}</td>
+          <td>${Math.round((run.failed_rate || 0) * 1000) / 10}%</td>
+          <td>${run.http_req_duration ? run.http_req_duration.avg_ms : '-'}ms</td>
+          <td>${run.http_req_duration ? run.http_req_duration.p95_ms : '-'}ms</td>
+          <td>${badge(run.result)}</td>
+          <td><button type="button" onclick="loadK6RunDetail('${run.run_id}')">상세</button></td>
+        </tr>`).join('');
+        el.innerHTML = `<table><tr><th>실행 ID</th><th>시나리오</th><th>동시사용자수</th><th>요청수</th><th>실패율</th><th>평균 응답</th><th>p95</th><th>판정</th><th></th></tr>${rows}</table>`;
+
+        const chartPoints = items.slice().reverse().map(run => ({ run_id: run.run_id, p95: (run.http_req_duration || {}).p95_ms || 0 }));
+        renderK6P95Chart(chartPoints);
+      } catch (err) {
+        el.innerHTML = `<p class="error-note">실행 이력을 불러오는 중 오류가 발생했습니다: ${escapeHtml(err.message)}</p>`;
+        document.getElementById('k6-chart-error').style.display = 'block';
+        document.getElementById('k6-chart-error').textContent = '차트 데이터를 불러올 수 없습니다.';
+      }
+    }
+
+    function changeK6Page(delta) {
+      const next = Math.max(1, k6Page + delta);
+      loadK6Runs(next);
+    }
+
+    function changeK6PageSize(size) {
+      K6_PAGE_SIZE = parseInt(size, 10);
+      loadK6Runs(1);
+    }
+
+    async function loadK6RunDetail(runId) {
+      const el = document.getElementById('k6-detail-content');
+      el.textContent = '불러오는 중...';
+      try {
+        const response = await fetch(`/api/monitoring-addon/k6/runs/${encodeURIComponent(runId)}`);
+        const data = await response.json();
+        if (!response.ok) {
+          el.innerHTML = `<p class="error-note">상세를 불러올 수 없습니다: ${escapeHtml(data.error || '알 수 없는 오류')}</p>`;
+          return;
+        }
+        const thresholdRows = (data.thresholds || []).map(t => `<tr>
+          <td>${escapeHtml(t.name)}</td><td>${escapeHtml(t.condition)}</td><td>${t.passed ? '✅ 통과' : '❌ 실패'}</td>
+        </tr>`).join('');
+        el.innerHTML = `
+          <p><strong>${escapeHtml(data.run_id)}</strong> - ${badge(data.result)}</p>
+          <table><tr><th>지표</th><th>조건</th><th>결과</th></tr>${thresholdRows || '<tr><td colspan="3" class="muted">threshold 없음</td></tr>'}</table>`;
+      } catch (err) {
+        el.innerHTML = `<p class="error-note">상세를 불러오는 중 오류가 발생했습니다: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    const snapshotPager = { page: 1, pageSize: 10, items: [] };
+
+    async function loadSnapshotHistory() {
+      const el = document.getElementById('snapshot-content');
+      try {
+        const response = await fetch('/api/monitoring-addon/history/summary?limit=200');
+        const data = await response.json();
+        if (data.status === 'db_disabled') {
+          el.innerHTML = '<p class="muted">DB 저장이 비활성화되어 있습니다(MONITORING_ADDON_DB_ENABLED=false).</p>';
+          return;
+        }
+        snapshotPager.items = data.items || [];
+        if (!snapshotPager.items.length) {
+          el.innerHTML = '<p class="muted">아직 저장된 스냅샷이 없습니다 (서버가 뜬 지 1분 후부터 쌓입니다).</p>';
+          return;
+        }
+        renderSnapshotPage();
+      } catch (err) {
+        el.innerHTML = `<p class="error-note">스냅샷 이력을 불러오는 중 오류가 발생했습니다: ${escapeHtml(err.message)}</p>`;
+      }
+    }
+
+    function renderSnapshotPage() {
+      const el = document.getElementById('snapshot-content');
+      const { items, pageSize } = snapshotPager;
+      const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+      snapshotPager.page = Math.min(Math.max(1, snapshotPager.page), totalPages);
+      const start = (snapshotPager.page - 1) * pageSize;
+      const pageItems = items.slice(start, start + pageSize);
+      const rows = pageItems.map(s => {
+        const d = new Date(s.snapshot_time * 1000);
+        const label = `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+        return `<tr><td>${label}</td><td>${s.total_requests}</td><td>${Math.round((s.error_rate || 0) * 1000) / 10}%</td><td>${s.avg_response_ms}ms</td><td>${s.p95_response_ms}ms</td></tr>`;
+      }).join('');
+      const pageSizeOptions = [10, 30, 50, 100].map(n => `<option value="${n}"${n === pageSize ? ' selected' : ''}>${n}개씩</option>`).join('');
+      el.innerHTML = `
+        <div class="list-toolbar">
+          <span>총 ${items.length}건</span>
+          <select onchange="changeSnapshotPageSize(this.value)">${pageSizeOptions}</select>
+        </div>
+        <table><tr><th>시각</th><th>총 요청수</th><th>에러율</th><th>평균응답</th><th>p95응답</th></tr>${rows}</table>
+        <div class="pagination">
+          <button type="button" ${snapshotPager.page <= 1 ? 'disabled' : ''} onclick="changeSnapshotPage(-1)">이전</button>
+          <span class="muted">${snapshotPager.page} / ${totalPages}</span>
+          <button type="button" ${snapshotPager.page >= totalPages ? 'disabled' : ''} onclick="changeSnapshotPage(1)">다음</button>
+        </div>`;
+    }
+
+    function changeSnapshotPage(delta) {
+      snapshotPager.page = Math.max(1, snapshotPager.page + delta);
+      renderSnapshotPage();
+    }
+
+    function changeSnapshotPageSize(size) {
+      snapshotPager.pageSize = parseInt(size, 10);
+      snapshotPager.page = 1;
+      renderSnapshotPage();
+    }
+
+    if (GRAFANA_LINK_ENABLED) {
+      document.getElementById('grafana-card').style.display = 'block';
+    }
+
+    // Prometheus/Grafana 링크는 지금 이 페이지에 접속한 호스트명을 그대로 사용 -
+    // "localhost"로 고정해두면 다른 PC에서 접속했을 때 그 PC 자신의 localhost를
+    // 가리키게 되어 링크가 동작하지 않음 (팀원용 접속 가이드와 같은 이유)
+    const addonHost = window.location.hostname || 'localhost';
+    // 홈 화면만 보여주는 대신, 실제 지표가 바로 보이는 화면으로 딥링크
+    const prometheusUrl = `http://${addonHost}:9090/graph?g0.expr=qa_platform_total_requests&g0.tab=0`;
+    const grafanaUrl = `http://${addonHost}:3000/d/qa-platform-addon/qa-platform-monitoring-addon`;
+    const prometheusLink = document.getElementById('prometheus-link');
+    const grafanaLink = document.getElementById('grafana-link');
+    prometheusLink.href = prometheusUrl;
+    prometheusLink.textContent = `http://${addonHost}:9090`;
+    grafanaLink.href = grafanaUrl;
+    grafanaLink.textContent = `http://${addonHost}:3000`;
+
+    // Prometheus 자체 UI(v3부터 React SPA)를 크로스오리진 iframe에 넣으면 URL 파라미터로
+    // 지정한 쿼리가 자동 실행되지 않는 경우가 있어(임베딩 특성상 브라우저가 스토리지를
+    // 파티셔닝하는 것과 관련된 것으로 보임), iframe 대신 Prometheus HTTP API에서 값을 직접
+    // fetch()해서 이 페이지의 다른 차트들과 같은 방식(SVG)으로 그림. Prometheus가 CORS를
+    // 허용해야 하므로(--web.cors.origin), docker-compose.yml에 그 옵션이 켜져 있어야 함.
+    async function loadPrometheusChart() {
+      const errEl = document.getElementById('prometheus-embed-error');
+      const svg = document.getElementById('prometheus-chart');
+      const end = Math.floor(Date.now() / 1000);
+      const start = end - 3600;
+      const url = `http://${addonHost}:9090/api/v1/query_range?query=qa_platform_total_requests&start=${start}&end=${end}&step=60`;
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const series = (data.data && data.data.result && data.data.result[0]) ? data.data.result[0].values : [];
+        if (!series.length) {
+          svg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" font-size="13" fill="#898781">아직 데이터가 없습니다.</text>';
+          errEl.style.display = 'none';
+          return;
+        }
+        const points = series.map(([t, v]) => ({ t: Number(t), v: Number(v) }));
+        const width = 600, height = 200, padding = 36;
+        const maxV = Math.max(...points.map(p => p.v), 1);
+        const stepX = points.length > 1 ? (width - padding * 2) / (points.length - 1) : 0;
+        const xy = (i, v) => [padding + i * stepX, height - padding - (v / maxV) * (height - padding * 2)];
+        const linePath = points.map((p, i) => { const [x, y] = xy(i, p.v); return `${i === 0 ? 'M' : 'L'} ${x} ${y}`; }).join(' ');
+        const lastLabel = new Date(points[points.length - 1].t * 1000).toLocaleTimeString();
+        svg.innerHTML = `
+          <text x="8" y="16" font-size="11" fill="#898781">qa_platform_total_requests (최근 1시간)</text>
+          <path d="${linePath}" fill="none" stroke="#2a78d6" stroke-width="2" />
+          <text x="${width - 8}" y="${height - 8}" text-anchor="end" font-size="10" fill="#898781">${escapeHtml(lastLabel)}</text>`;
+        errEl.style.display = 'none';
+      } catch (err) {
+        errEl.style.display = 'block';
+        errEl.textContent = `Prometheus 데이터를 불러올 수 없습니다: ${err.message} - 아래 링크로 직접 접속해보세요.`;
+      }
+    }
+    loadPrometheusChart();
+    setInterval(loadPrometheusChart, 30000);
+
+    // Grafana 패널을 페이지 안에 직접 임베딩 - 대시보드 전체를 통째로 iframe에 넣는
+    // /d/ + kiosk 방식은 크로스오리진 iframe 안에서 패널 그리드가 렌더링되지 않는 문제가
+    // 있어서(툴바/푸터만 보이고 패널은 빈 화면), Grafana가 iframe 임베딩 전용으로 제공하는
+    // /d-solo/ 라우트(패널 1개씩 개별 임베딩)를 대신 사용 - 이건 정상적으로 렌더링됨.
+    // GF_SECURITY_ALLOW_EMBEDDING=true + 익명 Viewer 접속이 켜져 있어야 로그인 없이 뜸.
+    const GRAFANA_PANELS = [
+      { id: 1, height: 220 },
+      { id: 2, height: 220 },
+      { id: 3, height: 280, wide: true },
+      { id: 4, height: 220 },
+      { id: 5, height: 220 },
+      { id: 6, height: 280, wide: true },
+    ];
+    const embedGrid = document.getElementById('grafana-embed-grid');
+    let embedLoadFailures = 0;
+    GRAFANA_PANELS.forEach(panel => {
+      const iframe = document.createElement('iframe');
+      iframe.title = `Grafana panel ${panel.id}`;
+      iframe.style.cssText = `width:100%; height:${panel.height}px; border:1px solid #333; border-radius:8px; background:#111;`;
+      if (panel.wide) iframe.style.gridColumn = 'span 2';
+      iframe.src = `http://${addonHost}:3000/d-solo/qa-platform-addon/qa-platform-monitoring-addon?orgId=1&panelId=${panel.id}&theme=dark&refresh=30s`;
+      iframe.addEventListener('error', () => {
+        embedLoadFailures += 1;
+        if (embedLoadFailures === 1) document.getElementById('grafana-embed-error').style.display = 'block';
+      });
+      embedGrid.appendChild(iframe);
+    });
+
+    document.getElementById('k6-target-url').value = window.location.origin;
+
+    loadK6Latest();
+    loadK6Runs(1);
+    loadSnapshotHistory();
+    pollK6TriggerStatus(); // 페이지를 새로고침해도 이미 실행 중이던 테스트가 있으면 이어서 표시(자체적으로 타이머 관리)
+  </script>
+</body>
+</html>

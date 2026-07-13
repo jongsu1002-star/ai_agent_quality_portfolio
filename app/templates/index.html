@@ -351,14 +351,6 @@
       </div>
     </div>
 
-    <div id="chart-modal" class="chart-modal-overlay" onclick="if (event.target.id === 'chart-modal') closeChartModal();">
-      <div class="chart-modal-content">
-        <button type="button" class="chart-modal-close" onclick="closeChartModal()" aria-label="닫기">✕</button>
-        <h2 id="chart-modal-title"></h2>
-        <div id="chart-modal-body"></div>
-      </div>
-    </div>
-
     <div class="card">
       <h2>테스트 결과 · 결함보고서 (자동 생성, 항상 최신)</h2>
       <p style="color: var(--text-secondary); font-size: 0.9rem;"><code>테스트_결과.md</code>는 <code>pytest</code> 실행 시마다, <code>결함보고서.md</code>는 QA 파이프라인 실행 완료 시마다 자동으로 재생성됩니다.</p>
@@ -442,6 +434,17 @@
         <button type="button" class="table-toggle" data-table-toggle="table-monitoring-target" onclick="toggleTable('table-monitoring-target')">표로 보기</button>
         <div id="table-monitoring-target" class="table-view" style="display:none;"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- 모든 탭에서 공용으로 쓰는 차트 확대보기 모달 - 특정 탭(예: 대시보드) 안에 두면 그 탭이
+       숨겨져 있을 때(display:none) 다른 탭의 차트를 클릭해도 모달이 안 보이다가, 나중에 그
+       탭으로 돌아가면 엉뚱하게 모달이 떠 있는 것처럼 보이는 문제가 있어 탭 바깥으로 뺌. -->
+  <div id="chart-modal" class="chart-modal-overlay" onclick="if (event.target.id === 'chart-modal') closeChartModal();">
+    <div class="chart-modal-content">
+      <button type="button" class="chart-modal-close" onclick="closeChartModal()" aria-label="닫기">✕</button>
+      <h2 id="chart-modal-title"></h2>
+      <div id="chart-modal-body"></div>
     </div>
   </div>
 

@@ -293,10 +293,13 @@ def _set_active_testcase(path: Path, case_count: int) -> None:
 
 
 @app.get("/", response_class=HTMLResponse)
-def index() -> str:
-    """대시보드 HTML을 그대로 반환 - 매 요청마다 파일을 새로 읽으므로 재시작 없이 수정사항이 반영됨."""
+def index() -> HTMLResponse:
+    """대시보드 HTML을 그대로 반환 - 매 요청마다 파일을 새로 읽으므로 재시작 없이 수정사항이 반영됨.
+
+    no-store를 안 붙이면 브라우저가 이 HTML을 디스크 캐시에 담아두고 새로고침(F5)에도
+    캐시를 그대로 써버려서, 서버는 최신 파일을 읽어도 화면은 예전 코드로 남는 문제가 있었음."""
     html_path = Path(__file__).with_name("templates").joinpath("index.html")
-    return html_path.read_text(encoding="utf-8")
+    return HTMLResponse(html_path.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/health")
@@ -1010,10 +1013,11 @@ if MONITORING_ADDON_ENABLED:
             app.include_router(_monitoring_addon_module.metrics_router)
 
         @app.get("/monitoring-addon", response_class=HTMLResponse)
-        def monitoring_addon_page() -> str:
+        def monitoring_addon_page() -> HTMLResponse:
             """모니터링 애드온 전용 페이지 - 기존 대시보드(index.html)와는 완전히 별도인 신규 페이지."""
             html_path = Path(__file__).with_name("templates").joinpath("monitoring_addon.html")
             html = html_path.read_text(encoding="utf-8")
-            return html.replace("__GRAFANA_LINK_ENABLED__", "true" if GRAFANA_LINK_ENABLED else "false")
+            html = html.replace("__GRAFANA_LINK_ENABLED__", "true" if GRAFANA_LINK_ENABLED else "false")
+            return HTMLResponse(html, headers={"Cache-Control": "no-store"})
     except Exception as e:
         print(f"[monitoring-addon] router load skipped: {e}")

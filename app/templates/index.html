@@ -758,6 +758,7 @@
       test_results: '테스트_결과.md',
       scenario_test_report: '테스트_시나리오_보고서.md',
       defect_report: '결함보고서.md',
+      readme: 'README.md',
     };
 
     function docKeyForFilename(filename) {
@@ -1074,17 +1075,19 @@
       const headerHtml = '<thead><tr><th><input type="checkbox" class="dataset-check-all" title="전체 선택" /></th><th>파일명</th><th>케이스</th><th>업로드 시각</th><th>상태</th><th></th><th></th><th></th></tr></thead>';
       renderPagedHtmlTable('dataset-history', headerHtml, history, item => {
         let status;
-        if (item.active) status = '<strong style="color:#166534;">사용 중</strong> <a href="javascript:void(0)" class="dataset-deactivate-btn" style="color:#b91c1c;">미사용</a>';
+        if (item.active) status = '<strong style="color:#166534;">사용 중</strong>';
         else if (!item.exists) status = '<span style="color:#b91c1c;">파일 없음</span>';
         else status = '-';
-        const disabled = item.active || !item.exists ? 'disabled' : '';
+        const actionBtn = item.active
+          ? `<button type="button" class="table-toggle dataset-deactivate-btn" data-path="${escapeHtml(item.path)}" style="color:#b91c1c;">미사용</button>`
+          : `<button type="button" class="table-toggle dataset-select-btn" data-path="${escapeHtml(item.path)}" ${!item.exists ? 'disabled' : ''}>사용</button>`;
         return `<tr>
           <td><input type="checkbox" class="dataset-row-check" data-path="${escapeHtml(item.path)}" /></td>
           <td>${escapeHtml(item.filename)}</td>
           <td>${item.case_count}건</td>
           <td>${escapeHtml(formatTimestamp(item.uploaded_at))}</td>
           <td>${status}</td>
-          <td><button type="button" class="table-toggle dataset-select-btn" data-path="${escapeHtml(item.path)}" ${disabled}>사용</button></td>
+          <td>${actionBtn}</td>
           <td><button type="button" class="dataset-preview-btn" data-path="${escapeHtml(item.path)}">미리보기</button></td>
           <td><button type="button" class="dataset-download-btn" data-path="${escapeHtml(item.path)}">다운로드</button></td>
         </tr>`;
@@ -1225,17 +1228,19 @@
       const headerHtml = '<thead><tr><th><input type="checkbox" class="testcase-check-all" title="전체 선택" /></th><th>파일명</th><th>케이스</th><th>업로드 시각</th><th>상태</th><th></th><th></th><th></th></tr></thead>';
       renderPagedHtmlTable('testcase-history', headerHtml, history, item => {
         let status;
-        if (item.active) status = '<strong style="color:#166534;">사용 중</strong> <a href="javascript:void(0)" class="testcase-deactivate-btn" style="color:#b91c1c;">미사용</a>';
+        if (item.active) status = '<strong style="color:#166534;">사용 중</strong>';
         else if (!item.exists) status = '<span style="color:#b91c1c;">파일 없음</span>';
         else status = '-';
-        const disabled = item.active || !item.exists ? 'disabled' : '';
+        const actionBtn = item.active
+          ? `<button type="button" class="table-toggle testcase-deactivate-btn" data-path="${escapeHtml(item.path)}" style="color:#b91c1c;">미사용</button>`
+          : `<button type="button" class="table-toggle testcase-select-btn" data-path="${escapeHtml(item.path)}" ${!item.exists ? 'disabled' : ''}>사용</button>`;
         return `<tr>
           <td><input type="checkbox" class="testcase-row-check" data-path="${escapeHtml(item.path)}" /></td>
           <td>${escapeHtml(item.filename)}</td>
           <td>${item.case_count}건</td>
           <td>${escapeHtml(formatTimestamp(item.uploaded_at))}</td>
           <td>${status}</td>
-          <td><button type="button" class="table-toggle testcase-select-btn" data-path="${escapeHtml(item.path)}" ${disabled}>사용</button></td>
+          <td>${actionBtn}</td>
           <td><button type="button" class="testcase-preview-btn" data-path="${escapeHtml(item.path)}">미리보기</button></td>
           <td><button type="button" class="testcase-download-btn" data-path="${escapeHtml(item.path)}">다운로드</button></td>
         </tr>`;

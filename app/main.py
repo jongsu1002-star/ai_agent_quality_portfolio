@@ -361,7 +361,10 @@ DOC_FILES = {
     "test_results": "테스트_결과.md",
     "scenario_test_report": "테스트_시나리오_보고서.md",
     "defect_report": "결함보고서.md",
+    "readme": "README.md",
 }
+# readme는 docs/가 아니라 프로젝트 최상위에 있는 파일이라 별도 경로로 서빙
+DOC_ROOT_KEYS = {"readme"}
 
 
 @app.get("/api/docs/{doc_key}")
@@ -370,7 +373,8 @@ def get_doc(doc_key: str) -> JSONResponse:
     filename = DOC_FILES.get(doc_key)
     if not filename:
         return JSONResponse({"error": "unknown document"}, status_code=404)
-    path = Path("docs") / filename
+    base_dir = Path(".") if doc_key in DOC_ROOT_KEYS else Path("docs")
+    path = base_dir / filename
     if not path.exists():
         return JSONResponse({"error": "document not found"}, status_code=404)
     return JSONResponse({"name": filename, "content": path.read_text(encoding="utf-8")})

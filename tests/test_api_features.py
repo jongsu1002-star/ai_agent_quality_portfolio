@@ -137,6 +137,29 @@ def test_excel_template_round_trip_runs_against_uploaded_cases():
     assert [case["case_id"] for case in report["cases"]] == ["TC-001", "TC-002"]
 
 
+def test_run_with_multiple_category_filter_values_via_api(tmp_path):
+    client = TestClient(app)
+    payload = [
+        {"id": "TC-200", "category": "COM", "question": "q1", "golden_answer": "a1", "existing_answer": "a1"},
+        {"id": "TC-201", "category": "ACC", "question": "q2", "golden_answer": "a2", "existing_answer": "a2"},
+        {"id": "TC-202", "category": "REG", "question": "q3", "golden_answer": "a3", "existing_answer": "a3"},
+    ]
+    path = tmp_path / "multi_category_cases.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    with path.open("rb") as fh:
+        upload_response = client.post("/api/dataset/upload", files={"file": (path.name, fh, "application/json")})
+    assert upload_response.status_code == 200
+
+    run_response = client.post("/api/run", json={"techniques": ["rag"], "category": ["COM", "REG"]})
+    run_id = run_response.json()["run_id"]
+    final_status = _wait_for_run(client, run_id)
+    assert final_status["status"] == "done"
+
+    report = client.get(f"/api/run/{run_id}/result").json()
+    assert {case["case_id"] for case in report["cases"]} == {"TC-200", "TC-202"}
+    assert set(report["category_stats"].keys()) == {"COM", "REG"}
+
+
 def test_run_status_and_history_endpoints():
     client = TestClient(app)
     run_response = client.post("/api/run", json={"techniques": ["rag", "llm_quality"]})

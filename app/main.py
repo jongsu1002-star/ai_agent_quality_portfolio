@@ -758,7 +758,7 @@ def _default_cases() -> List[GoldenCase]:
     ]
 
 
-def _execute_run(run_id: str, techniques: List[str], category_filter: Optional[str], payload: Dict[str, Any]) -> None:
+def _execute_run(run_id: str, techniques: List[str], category_filter: Optional[List[str]], payload: Dict[str, Any]) -> None:
     """백그라운드 스레드에서 실제 파이프라인을 실행 (POST /api/run이 이 함수를 스레드로 띄움).
 
     예외가 나도 여기서 잡아 RUN_REGISTRY에 status="error"로 기록합니다 - 스레드가 죽어도
@@ -876,11 +876,22 @@ def run_pipeline(payload: Optional[Dict[str, Any]] = None) -> JSONResponse:
     else:
         techniques = ["rag", "llm_quality"]
 
+    # "category"는 리스트(다중 선택, OR 조건)가 정식 형태지만, 문자열 하나만 보내는 예전 방식
+    # 호출부(외부 스크립트 등)도 계속 동작하도록 여기서 정규화 - PipelineOrchestrator.run()도
+    # 같은 이유로 한 번 더 방어함(직접 호출하는 다른 진입점 대비)
+    raw_category = payload.get("category")
+    if isinstance(raw_category, list):
+        category_filter = [str(c) for c in raw_category if c] or None
+    elif raw_category:
+        category_filter = [str(raw_category)]
+    else:
+        category_filter = None
+
     run_id = f"run_{len(RUN_REGISTRY) + 1}"
     with RUN_LOCK:
         RUN_REGISTRY[run_id] = {"status": "queued", "progress": {"completed": 0, "total": 1}, "result": None, "error": None, "jira_tickets": []}
 
-    thread = Thread(target=_execute_run, args=(run_id, techniques, payload.get("category"), payload), daemon=True)
+    thread = Thread(target=_execute_run, args=(run_id, techniques, category_filter, payload), daemon=True)
     thread.start()
 
     return JSONResponse({"run_id": run_id, "status": RUN_REGISTRY[run_id]["status"]})

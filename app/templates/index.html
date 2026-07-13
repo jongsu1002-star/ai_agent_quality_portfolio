@@ -118,17 +118,17 @@
           <input id="connector-request-field" placeholder="요청 필드명 (기본: question)" style="margin-top:0.4rem;" />
         </div>
         <div>
-          <label>카테고리 필터 (선택)</label>
-          <input id="category-filter" list="category-filter-options" placeholder="예: COM" />
-          <datalist id="category-filter-options">
-            <option value="COM">COM · 공통</option>
-            <option value="ACC">ACC · 정확성</option>
-            <option value="REG">REG · 정책</option>
-            <option value="MTD">MTD · 절차</option>
-            <option value="RPT">RPT · 서류</option>
-            <option value="NFR">NFR · 비기능/안전성</option>
-          </datalist>
-          <p class="chart-hint">데이터셋의 <code>category</code> 값과 정확히 일치하는 케이스만 실행합니다(한 번에 하나만 입력, 콤마로 여러 개 지정 불가). 비워두면 전체 실행. 예시 코드: COM(공통)·ACC(정확성)·REG(정책)·MTD(절차)·RPT(서류)·NFR(비기능/안전성) — 데이터셋에 다른 값을 썼다면 그 값을 그대로 입력하세요.</p>
+          <label>카테고리 필터 (선택, 여러 개 선택 가능)</label>
+          <div id="category-filter-checks" style="display:flex; flex-wrap:wrap; gap:0.3rem 1rem; margin-top:0.3rem;">
+            <label style="font-weight:normal; display:inline-flex; align-items:center; gap:0.3rem;"><input type="checkbox" class="category-filter-check" value="COM" /> COM · 공통</label>
+            <label style="font-weight:normal; display:inline-flex; align-items:center; gap:0.3rem;"><input type="checkbox" class="category-filter-check" value="ACC" /> ACC · 정확성</label>
+            <label style="font-weight:normal; display:inline-flex; align-items:center; gap:0.3rem;"><input type="checkbox" class="category-filter-check" value="REG" /> REG · 정책</label>
+            <label style="font-weight:normal; display:inline-flex; align-items:center; gap:0.3rem;"><input type="checkbox" class="category-filter-check" value="MTD" /> MTD · 절차</label>
+            <label style="font-weight:normal; display:inline-flex; align-items:center; gap:0.3rem;"><input type="checkbox" class="category-filter-check" value="RPT" /> RPT · 서류</label>
+            <label style="font-weight:normal; display:inline-flex; align-items:center; gap:0.3rem;"><input type="checkbox" class="category-filter-check" value="NFR" /> NFR · 비기능/안전성</label>
+          </div>
+          <input id="category-filter-custom" placeholder="그 외 값은 여기에 직접 입력(콤마로 여러 개, 예: XYZ,ABC)" style="margin-top:0.4rem;" />
+          <p class="chart-hint">체크(또는 직접 입력)한 카테고리 중 하나라도 일치하는 케이스가 실행됩니다(OR 조건). 아무것도 선택하지 않으면 전체 실행.</p>
         </div>
         <div>
           <label>LLM 연동 (선택 — llm_quality/rubric/regression 등에서 사용)</label>
@@ -980,6 +980,13 @@
       return Array.from(document.querySelectorAll('.techniques input[type=checkbox]:checked')).map(el => el.value);
     }
 
+    function getCategoryFilterValues() {
+      const checked = Array.from(document.querySelectorAll('.category-filter-check:checked')).map(el => el.value);
+      const custom = document.getElementById('category-filter-custom').value.split(',').map(s => s.trim()).filter(Boolean);
+      const values = [...new Set([...checked, ...custom])];
+      return values.length ? values : undefined;
+    }
+
     function toggleLlmProviderFields() {
       const provider = document.getElementById('llm-provider').value;
       document.getElementById('llm-openai-fields').style.display = provider === 'openai' ? 'grid' : 'none';
@@ -1379,7 +1386,7 @@
         mode: document.getElementById('connector-mode').value,
         api_endpoint: document.getElementById('connector-endpoint').value,
         connector: { request_field: document.getElementById('connector-request-field').value || 'question' },
-        category: document.getElementById('category-filter').value || undefined,
+        category: getCategoryFilterValues(),
         ...llmConfigPayload(),
         slack_webhook_url: document.getElementById('slack-webhook').value,
         discord_webhook_url: document.getElementById('discord-webhook').value,

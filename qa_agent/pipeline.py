@@ -78,7 +78,7 @@ class PipelineOrchestrator:
     def run(
         self,
         cases: List[GoldenCase],
-        category_filter: Optional[str] = None,
+        category_filter: Optional[List[str]] = None,
         on_progress: Optional[Callable[[int, int], None]] = None,
         run_id: Optional[str] = None,
         techniques: Optional[List[str]] = None,
@@ -90,10 +90,18 @@ class PipelineOrchestrator:
         dataset_path/testcase_path는 실행 결과에 그대로 기록되어(RunReport.dataset_path 등)
         대시보드가 "이 결과가 어느 데이터셋·테스트 케이스 기준인지"를 보여줄 수 있게 함 - 안 그러면
         나중에 활성 값이 바뀐 뒤 과거 실행 결과를 볼 때 지금 화면에 보이는 값과 착각하기 쉬움.
+
+        category_filter는 카테고리 값 목록(정확 일치, OR 조건)입니다. None/빈 리스트면 전체 실행.
+        호출부가 실수로 문자열 하나만 넘겨도(예전 방식 category_filter="COM") 안전하게 단일 원소
+        리스트로 취급합니다 - 문자열을 그대로 두면 `in` 검사가 부분 문자열 포함 검사로 새서
+        (예: "ACC" in "COM") 의도치 않은 케이스가 걸릴 수 있기 때문입니다.
         """
         techniques = techniques or ["rag", "llm_quality"]
         run_id = run_id or "run"
-        filtered_cases = [case for case in cases if category_filter is None or case.category == category_filter]
+        if isinstance(category_filter, str):
+            category_filter = [category_filter]
+        category_set = set(category_filter) if category_filter else None
+        filtered_cases = [case for case in cases if category_set is None or case.category in category_set]
 
         previous_pass_by_id = self._load_previous_pass_map(run_id) if "regression" in techniques else {}
 

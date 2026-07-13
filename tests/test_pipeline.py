@@ -30,6 +30,25 @@ def test_pipeline_generates_report_for_simple_case(tmp_path):
     assert (tmp_path / "run_test-run.json").exists()
 
 
+def test_pipeline_aggregates_test_type_stats_and_groups_missing_type_as_uncategorized(tmp_path):
+    typed_case = GoldenCase(
+        id="TC-010",
+        category="COM",
+        question="q1",
+        golden_answer="a1",
+        test_type="regression",
+        existing_answer="a1",
+    )
+    untyped_case = GoldenCase(id="TC-011", category="COM", question="q2", golden_answer="a2", existing_answer="a2")
+
+    orchestrator = PipelineOrchestrator(Config(reports_dir=str(tmp_path)))
+    report = orchestrator.run([typed_case, untyped_case], techniques=["rag"], run_id="test-run-type")
+
+    payload = report.to_dict()
+    assert payload["test_type_stats"]["regression"]["total"] == 1
+    assert payload["test_type_stats"]["미분류"]["total"] == 1
+
+
 def test_pipeline_fails_case_with_missing_retrieval_docs(tmp_path):
     case = GoldenCase(
         id="TC-002",

@@ -221,6 +221,7 @@ class RunReport:
     run_id: str
     overall_pass_rate: float = 0.0
     category_stats: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # 카테고리별 {total, passed}
+    test_type_stats: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # 테스트 유형(GoldenCase.test_type)별 {total, passed} - 없으면 "미분류"
     regressions_detected: int = 0  # is_regression=True인 케이스 수
     comparison_summary: Dict[str, Any] = field(default_factory=dict)  # 룰-LLM 일치/불일치 집계
     mismatch_cases: List[Dict[str, Any]] = field(default_factory=list)  # 룰-LLM 판정이 갈린 케이스 목록
@@ -237,6 +238,7 @@ class RunReport:
             "run_id": self.run_id,
             "overall_pass_rate": self.overall_pass_rate,
             "category_stats": self.category_stats,
+            "test_type_stats": self.test_type_stats,
             "regressions_detected": self.regressions_detected,
             "comparison_summary": self.comparison_summary,
             "mismatch_cases": self.mismatch_cases,

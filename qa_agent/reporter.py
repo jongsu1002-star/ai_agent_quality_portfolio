@@ -178,6 +178,18 @@ def _render_defect_report_markdown(report: Dict[str, Any]) -> str:
         fail_rate = (1 - passed / total) if total else 0.0
         lines.append(f"| `{category}` | {total} | {passed} | {total - passed} | {fail_rate:.0%} |")
 
+    test_type_stats = report.get("test_type_stats") or {}
+    lines += ["", "## 테스트 유형별 현황", ""]
+    if not test_type_stats:
+        lines.append("케이스에 테스트 유형(`test_type`)이 지정되지 않았습니다.")
+    else:
+        lines += ["| 테스트 유형 | 전체 | 통과 | 실패 | 실패율 |", "|---|---|---|---|---|"]
+        for test_type, stats in test_type_stats.items():
+            total = stats.get("total", 0)
+            passed = stats.get("passed", 0)
+            fail_rate = (1 - passed / total) if total else 0.0
+            lines.append(f"| `{test_type}` | {total} | {passed} | {total - passed} | {fail_rate:.0%} |")
+
     lines += ["", "## 결함 목록", ""]
     if not failing:
         lines.append("이번 실행에서 발견된 결함이 없습니다.")

@@ -30,6 +30,38 @@ def test_write_defect_report_doc_lists_failing_cases(tmp_path):
     assert "COM" in content
 
 
+def test_write_defect_report_doc_lists_test_type_breakdown(tmp_path):
+    report = {
+        "run_id": "run_10",
+        "overall_pass_rate": 1.0,
+        "regressions_detected": 0,
+        "category_stats": {"COM": {"total": 2, "passed": 2}},
+        "test_type_stats": {"regression": {"total": 1, "passed": 1}, "미분류": {"total": 1, "passed": 1}},
+        "mismatch_cases": [],
+        "functional_test": {},
+        "cases": [
+            {"case_id": "TC-1", "overall_pass": True, "errors": []},
+            {"case_id": "TC-2", "overall_pass": True, "errors": []},
+        ],
+    }
+
+    path = write_defect_report_doc(report, docs_dir=str(tmp_path))
+    content = path.read_text(encoding="utf-8")
+
+    assert "테스트 유형별 현황" in content
+    assert "`regression`" in content
+    assert "`미분류`" in content
+
+
+def test_write_defect_report_doc_notes_missing_test_type(tmp_path):
+    report = {"run_id": "run_11", "overall_pass_rate": 1.0, "regressions_detected": 0, "cases": []}
+
+    path = write_defect_report_doc(report, docs_dir=str(tmp_path))
+    content = path.read_text(encoding="utf-8")
+
+    assert "테스트 유형(`test_type`)이 지정되지 않았습니다" in content
+
+
 def test_render_test_results_markdown_summarizes_pass_fail():
     stats = {
         "passed": [_FakeReport("tests/test_a.py::test_one"), _FakeReport("tests/test_a.py::test_two")],

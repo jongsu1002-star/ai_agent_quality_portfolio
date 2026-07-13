@@ -60,7 +60,9 @@ class PipelineOrchestrator:
         self.groundedness_evaluator = GroundednessEvaluator(
             threshold=config.thresholds.groundedness.get("score", 0.6), judge_client=self.judge_client, pass_policy=pass_policy
         )
-        self.context_relevance_evaluator = ContextRelevanceEvaluator(threshold=config.thresholds.context_relevance.get("score", 0.05), pass_policy=pass_policy)
+        self.context_relevance_evaluator = ContextRelevanceEvaluator(
+            threshold=config.thresholds.context_relevance.get("score", 0.05), judge_client=self.judge_client, pass_policy=pass_policy
+        )
         self.llm_judge_evaluator = LLMJudgeEvaluator(thresholds=config.thresholds.llm_judge, judge_client=self.judge_client)
         rubric_spec = config.rubric or {}
         self.rubric_evaluator = RubricEvaluator(
@@ -288,15 +290,24 @@ class PipelineOrchestrator:
         return {case.get("case_id"): bool(case.get("overall_pass")) for case in data.get("cases", [])}
 
     def _build_report(self, cases: List[GoldenCase], results: List[CaseResult], run_id: str, functional_test: Dict[str, Any]) -> RunReport:
-        """케이스별 결과를 모아 카테고리 통계/회귀 건수/불일치 목록 등을 집계."""
+        """케이스별 결과를 모아 카테고리/테스트유형 통계·회귀 건수·불일치 목록 등을 집계."""
         category_by_id = {case.id: case.category for case in cases}
+        # test_type은 선택 필드라(functional/regression 등) 비어있는 케이스가 섞일 수 있음 -
+        # 그런 케이스도 통계에서 누락되지 않도록 "미분류"로 묶음
+        test_type_by_id = {case.id: (case.test_type or "미분류") for case in cases}
 
         category_stats: Dict[str, Dict[str, Any]] = {}
+        test_type_stats: Dict[str, Dict[str, Any]] = {}
         for result in results:
             category = category_by_id.get(result.case_id, "UNKNOWN")
             stats = category_stats.setdefault(category, {"total": 0, "passed": 0})
             stats["total"] += 1
             stats["passed"] += 1 if result.overall_pass else 0
+
+            test_type = test_type_by_id.get(result.case_id, "미분류")
+            type_stats = test_type_stats.setdefault(test_type, {"total": 0, "passed": 0})
+            type_stats["total"] += 1
+            type_stats["passed"] += 1 if result.overall_pass else 0
 
         pass_rate = sum(1 for r in results if r.overall_pass) / len(results) if results else 1.0
 
@@ -325,6 +336,7 @@ class PipelineOrchestrator:
             run_id=run_id,
             overall_pass_rate=pass_rate,
             category_stats=category_stats,
+            test_type_stats=test_type_stats,
             regressions_detected=regressions_detected,
             comparison_summary=comparison_summary,
             mismatch_cases=mismatch_cases,

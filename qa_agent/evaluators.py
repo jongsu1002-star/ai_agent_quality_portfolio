@@ -128,10 +128,14 @@ class ContextRelevanceEvaluator:
 
     근거성(GroundednessEvaluator)과는 다른 축입니다: 근거성은 "답변이 컨텍스트에
     기반했는가", 이건 "애초에 검색된 컨텍스트 자체가 엉뚱한 문서는 아닌가"를 봅니다.
+    GroundednessEvaluator와 같은 2단계 설계: 임계값 근처(애매한) 케이스만 LLM으로 보정해서
+    명확한 케이스에까지 LLM 비용을 쓰지 않습니다.
     """
 
-    def __init__(self, threshold: float = 0.05, pass_policy: str = "either_pass"):
+    def __init__(self, threshold: float = 0.05, borderline_margin: float = 0.05, judge_client: Optional[OpenAIJudgeClient] = None, pass_policy: str = "either_pass"):
         self.threshold = threshold
+        self.borderline_margin = borderline_margin
+        self.judge_client = judge_client or OpenAIJudgeClient()
         self.pass_policy = pass_policy
 
     def evaluate(self, case: Any, response: Any) -> DualEvalResult:
@@ -143,8 +147,27 @@ class ContextRelevanceEvaluator:
         score = max(_char_ngram_overlap(question.lower(), ctx.lower()) for ctx in contexts)
         rule_passed = score >= self.threshold
         rule_side = DualScoreSide(score=score, passed=rule_passed)
-        # LLM 보정은 아직 구현하지 않음(확장 여지) - 룰 판정만으로 결정
-        return DualEvalResult(rule=rule_side, agreement="n/a", final_pass=rule_passed, evaluated=True)
+
+        llm_side = None
+        if abs(score - self.threshold) <= self.borderline_margin and self.judge_client.enabled:
+            # 문자 n-gram 중복은 동의어/재구성된 문장을 "관련 없음"으로 오판할 수 있어,
+            # 임계값 근처(애매한 경우)에만 LLM으로 의미 기반 관련성을 재확인
+            try:
+                verdict = self.judge_client.judge(
+                    system_prompt=(
+                        "You check whether retrieved context passages are semantically relevant to the given "
+                        'question (not whether they support any particular answer). Respond ONLY as JSON: '
+                        '{"score": 0-1 float, "relevant": bool}.'
+                    ),
+                    user_prompt=f"Question:\n{question}\n\nRetrieved context:\n{chr(10).join(contexts)}",
+                )
+                llm_side = DualScoreSide(score=float(verdict.get("score", 0.0)), passed=bool(verdict.get("relevant", False)))
+            except Exception:
+                llm_side = None  # LLM 호출 실패는 룰 판정만으로 넘어감 (인프라 오류로 전체 실패시키지 않음)
+
+        final_pass = apply_pass_policy(rule_passed, llm_side.passed if llm_side else None, self.pass_policy)
+        agreement = compute_agreement(rule_passed, llm_side.passed if llm_side else None)
+        return DualEvalResult(rule=rule_side, llm=llm_side, agreement=agreement, final_pass=final_pass, evaluated=True)
 
 
 class LLMJudgeEvaluator:

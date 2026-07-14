@@ -113,8 +113,9 @@
 
   <!-- ===================== 설정 ===================== -->
   <div id="tab-settings" class="tab-panel active">
-    <div class="card">
+    <div class="card" id="connection-settings-card" style="display:none;">
       <h2>연결 설정</h2>
+      <p style="color: var(--text-secondary); font-size: 0.85rem;">Jira/LLM API 키 등 민감정보를 포함한 전역 설정이라 관리자만 조회/변경할 수 있습니다.</p>
       <div class="grid">
         <div>
           <label>커넥터 모드</label>
@@ -505,7 +506,12 @@
         logoutBtn.style.display = data.enabled ? '' : 'none';
         logoutBtn.textContent = data.username ? `로그아웃 (${data.username})` : '로그아웃';
         _isAdmin = !!data.is_admin;
+        const canSeeSettings = !data.enabled || _isAdmin; // 계정 시스템이 꺼진 LAN 모드에서는 전원이 사실상 운영자
         document.getElementById('users-tab-btn').style.display = _isAdmin ? '' : 'none';
+        document.getElementById('connection-settings-card').style.display = canSeeSettings ? '' : 'none';
+        if (canSeeSettings) {
+          loadSettings();
+        }
       } catch (err) {
         // 조회 실패해도 화면 자체는 계속 써야 하므로 조용히 무시(로그아웃 버튼만 안 보임)
       }
@@ -2158,7 +2164,6 @@
     initPasswordToggleIcons();
     initDatasetHistoryDelegation();
     initTestcaseHistoryDelegation();
-    loadSettings();
     loadConnectorDefaults();
     loadCurrentDataset();
     loadDatasetHistory();

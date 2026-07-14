@@ -57,6 +57,10 @@
       <input id="password" type="password" autocomplete="new-password" />
       <label for="password-confirm">비밀번호 확인</label>
       <input id="password-confirm" type="password" autocomplete="new-password" />
+      <div id="setup-code-field" style="display:none;">
+        <label for="setup-code">관리자 설정 코드</label>
+        <input id="setup-code" type="password" autocomplete="off" />
+      </div>
       <div id="error"></div>
       <div id="success"></div>
       <button type="submit" id="submit-btn">가입 신청</button>
@@ -68,6 +72,13 @@
     const errorEl = document.getElementById('error');
     const successEl = document.getElementById('success');
     const submitBtn = document.getElementById('submit-btn');
+    const setupCodeField = document.getElementById('setup-code-field');
+
+    fetch('/api/signup/requires-setup-code').then(r => r.json()).then(data => {
+      if (data.required) {
+        setupCodeField.style.display = 'block';
+      }
+    }).catch(() => {});
 
     form.addEventListener('submit', async (evt) => {
       evt.preventDefault();
@@ -88,7 +99,11 @@
         const response = await fetch('/signup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username: document.getElementById('username').value, password }),
+          body: JSON.stringify({
+            username: document.getElementById('username').value,
+            password,
+            setup_code: document.getElementById('setup-code').value,
+          }),
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) {

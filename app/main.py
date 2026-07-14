@@ -175,9 +175,48 @@ async def _record_request_metrics(request: Request, call_next):
 SESSION_COOKIE_NAME = "qa_session"
 _ACTIVE_SESSIONS: Dict[str, str] = {}  # 세션 토큰 -> username. 메모리 저장이라 서버 재시작 시 전부 무효화(재로그인 필요)
 _SHARED_BUCKET = "shared"  # 계정이 하나도 없는(=로그인이 꺼진) 상태에서 모두가 공유하는 고정 버킷 - 기존 단일사용자 동작과 완전히 동일한 경로를 그대로 씀
-_AUTH_EXEMPT_PATHS = {"/login", "/logout", "/signup", "/health", "/metrics-addon", "/api/auth/status"}  # 로그인 없이 항상 허용
+_AUTH_EXEMPT_PATHS = {"/login", "/logout", "/signup", "/health", "/metrics-addon", "/api/auth/status", "/api/signup/requires-setup-code"}  # 로그인 없이 항상 허용
 _SAFE_NEXT_PATTERN = re.compile(r"^/[A-Za-z0-9/_\-]*$")
 _SAFE_USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_\-]{3,32}$")
+
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCKOUT_SECONDS = 300  # 5분
+_LOGIN_ATTEMPTS: Dict[str, Dict[str, float]] = {}  # 클라이언트 IP -> {"count", "locked_until"}. 브루트포스 방어용, 세션과 같은 이유로 프로세스 메모리에만 둠
+_LOGIN_ATTEMPTS_LOCK = Lock()
+
+
+def _login_rate_limit_key(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _check_login_rate_limit(request: Request) -> Optional[JSONResponse]:
+    """실패가 누적된 IP를 잠금 - 아이디 유무와 무관하게 IP 기준이라 계정 열거 시도도 함께 막음."""
+    key = _login_rate_limit_key(request)
+    with _LOGIN_ATTEMPTS_LOCK:
+        entry = _LOGIN_ATTEMPTS.get(key)
+        if entry and entry["locked_until"] > time.time():
+            retry_after = int(entry["locked_until"] - time.time()) + 1
+            return JSONResponse(
+                {"error": f"로그인 시도가 너무 많습니다. {retry_after}초 후 다시 시도하세요"},
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+    return None
+
+
+def _record_login_failure(request: Request) -> None:
+    key = _login_rate_limit_key(request)
+    with _LOGIN_ATTEMPTS_LOCK:
+        entry = _LOGIN_ATTEMPTS.setdefault(key, {"count": 0.0, "locked_until": 0.0})
+        entry["count"] += 1
+        if entry["count"] >= LOGIN_MAX_ATTEMPTS:
+            entry["locked_until"] = time.time() + LOGIN_LOCKOUT_SECONDS
+            entry["count"] = 0.0
+
+
+def _record_login_success(request: Request) -> None:
+    with _LOGIN_ATTEMPTS_LOCK:
+        _LOGIN_ATTEMPTS.pop(_login_rate_limit_key(request), None)
 
 
 def _current_username(request: Request) -> str:
@@ -202,7 +241,12 @@ def _is_admin(request: Request) -> bool:
 
 
 def _require_admin(request: Request) -> Optional[JSONResponse]:
-    """관리자 전용 API 맨 앞에서 호출 - 문제 없으면 None, 막아야 하면 바로 반환할 응답."""
+    """관리자 전용 API 맨 앞에서 호출 - 문제 없으면 None, 막아야 하면 바로 반환할 응답.
+
+    계정 시스템 자체가 꺼져있는 LAN 모드(가입자 0명)에서는 로그인도 강제하지 않는
+    것과 같은 이유로 관리자 체크도 건너뜀(그 모드에선 접속자 전원이 사실상 단일 운영자)."""
+    if not USER_STORE.has_any_users():
+        return None
     if not _is_admin(request):
         return JSONResponse({"error": "관리자만 접근할 수 있습니다"}, status_code=403)
     return None
@@ -402,22 +446,45 @@ def _set_active_testcase(username: str, path: Path, case_count: int) -> None:
     _active_testcase_pointer(username).write_text(json.dumps({"path": normalized}), encoding="utf-8")
 
 
+def _admin_setup_code() -> str:
+    """ADMIN_SETUP_CODE 환경변수(선택) - 설정해두면 서비스 최초 가입 시 이 코드를 아는 사람만
+    자동 관리자가 될 수 있음. 공개 도메인 배포 전 계정이 하나도 없는 틈을 타 외부인이 먼저
+    가입해 관리자를 선점하는 것을 막기 위한 용도. 비워두면(기본값) 기존과 동일하게 동작."""
+    return os.getenv("ADMIN_SETUP_CODE", "").strip()
+
+
 @app.get("/signup", response_class=HTMLResponse)
 def signup_page() -> HTMLResponse:
     html_path = Path(__file__).with_name("templates").joinpath("signup.html")
     return HTMLResponse(html_path.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/signup/requires-setup-code")
+def signup_requires_setup_code() -> JSONResponse:
+    """가입 화면이 '관리자 설정 코드' 입력란을 보여줘야 하는지 - ADMIN_SETUP_CODE가 설정돼
+    있고 아직 계정이 하나도 없을 때(=지금 가입하면 자동 관리자가 될 때)만 true."""
+    required = bool(_admin_setup_code()) and not USER_STORE.has_any_users()
+    return JSONResponse({"required": required})
+
+
 @app.post("/signup")
 def signup_submit(payload: Dict[str, Any]) -> JSONResponse:
     """가입 신청 - 서비스에 계정이 하나도 없을 때(최초 가입)만 자동으로 관리자 승인되어
-    바로 로그인 상태가 되고, 그 외에는 항상 대기 상태로 시작해 관리자 승인을 거침."""
+    바로 로그인 상태가 되고, 그 외에는 항상 대기 상태로 시작해 관리자 승인을 거침.
+
+    ADMIN_SETUP_CODE가 설정된 경우, 최초 가입은 코드가 일치해야만 진행됨(계정 선점 방지) -
+    나머지(두 번째 가입자부터)는 원래대로 대기 상태로 시작하므로 코드가 필요 없음."""
     username = str(payload.get("username", "")).strip()
     password = str(payload.get("password", ""))
     if not _SAFE_USERNAME_PATTERN.match(username):
         return JSONResponse({"error": "아이디는 영문/숫자/_/- 3~32자여야 합니다"}, status_code=400)
     if len(password) < 4:
         return JSONResponse({"error": "비밀번호는 4자 이상이어야 합니다"}, status_code=400)
+    setup_code = _admin_setup_code()
+    if setup_code and not USER_STORE.has_any_users():
+        submitted_code = str(payload.get("setup_code", ""))
+        if not secrets.compare_digest(submitted_code, setup_code):
+            return JSONResponse({"error": "관리자 설정 코드가 올바르지 않습니다"}, status_code=403)
     user = USER_STORE.create_user(username, password)
     if not user:
         return JSONResponse({"error": "이미 사용 중인 아이디입니다"}, status_code=409)
@@ -440,18 +507,24 @@ def login_page(next: str = "/") -> HTMLResponse:
 
 
 @app.post("/login")
-def login_submit(payload: Dict[str, Any]) -> JSONResponse:
+def login_submit(payload: Dict[str, Any], request: Request) -> JSONResponse:
     if not USER_STORE.has_any_users():
         return JSONResponse({"ok": True})
+    limited = _check_login_rate_limit(request)
+    if limited:
+        return limited
     username = str(payload.get("username", "")).strip()
     password = str(payload.get("password", ""))
     user = USER_STORE.get_user(username)
     if not user:
+        _record_login_failure(request)
         return JSONResponse({"error": "존재하지 않는 아이디입니다"}, status_code=401)
     if user["status"] == "pending":
         return JSONResponse({"error": "아직 관리자 승인 대기 중입니다"}, status_code=403)
     if not USER_STORE.verify_login(username, password):
+        _record_login_failure(request)
         return JSONResponse({"error": "비밀번호가 올바르지 않습니다"}, status_code=401)
+    _record_login_success(request)
     token = secrets.token_urlsafe(32)
     _ACTIVE_SESSIONS[token] = username
     response = JSONResponse({"ok": True})
@@ -1253,8 +1326,13 @@ def latest_report(request: Request, format: str = "json") -> Response:
 
 
 @app.post("/api/settings")
-def save_settings(payload: Dict[str, Any]) -> JSONResponse:
-    """알림/Jira/LLM 설정을 저장 - 파일에도 쓰고, 현재 프로세스의 환경변수에도 즉시 반영."""
+def save_settings(payload: Dict[str, Any], request: Request) -> JSONResponse:
+    """알림/Jira/LLM 설정을 저장 - 파일에도 쓰고, 현재 프로세스의 환경변수에도 즉시 반영.
+
+    전역(모든 사용자 공유) 설정이고 Jira/LLM API 키 등 민감정보를 포함하므로 관리자만 변경 가능."""
+    error = _require_admin(request)
+    if error:
+        return error
     SETTINGS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     for key, value in payload.items():
         if value:
@@ -1263,8 +1341,13 @@ def save_settings(payload: Dict[str, Any]) -> JSONResponse:
 
 
 @app.get("/api/settings")
-def load_settings() -> JSONResponse:
-    """저장된 설정을 조회 - 파일에 없으면 환경변수 값으로 보충."""
+def load_settings(request: Request) -> JSONResponse:
+    """저장된 설정을 조회 - 파일에 없으면 환경변수 값으로 보충.
+
+    API 키/웹훅 URL 등 민감정보를 그대로 반환하므로 관리자만 조회 가능."""
+    error = _require_admin(request)
+    if error:
+        return error
     settings: Dict[str, Any] = {}
     if SETTINGS_PATH.exists():
         settings.update(json.loads(SETTINGS_PATH.read_text(encoding="utf-8")))

@@ -94,7 +94,10 @@
 </head>
 <body>
   <div class="card">
-    <h1 class="title">AI Agent 품질관리·운영 모니터링 플랫폼</h1>
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+      <h1 class="title" style="margin:0;">AI Agent 품질관리·운영 모니터링 플랫폼</h1>
+      <button type="button" id="logout-btn" onclick="logout()" style="display:none;">로그아웃</button>
+    </div>
     <p>QA 파이프라인, 리포팅, 모니터링 대시보드입니다.</p>
     <div class="tabs">
       <button type="button" class="tab-btn active" data-tab="settings" onclick="showTab('settings')">설정</button>
@@ -463,6 +466,33 @@
   <div id="viz-tooltip"></div>
 
   <script>
+    // 세션이 만료된 채로(서버 재시작 등) 이 페이지가 열려있으면 이후의 모든 fetch가 401을
+    // 받게 되는데, 그때마다 각 호출부에서 따로 처리하는 대신 여기서 한 번에 가로채서
+    // 로그인 화면으로 보냄 - 기존 fetch() 호출부는 하나도 수정할 필요가 없음.
+    const _originalFetch = window.fetch.bind(window);
+    window.fetch = async function (...args) {
+      const response = await _originalFetch(...args);
+      if (response.status === 401) {
+        window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+      }
+      return response;
+    };
+
+    async function logout() {
+      await fetch('/logout', { method: 'POST' });
+      window.location.href = '/login';
+    }
+
+    async function initAuthUi() {
+      try {
+        const res = await fetch('/api/auth/status');
+        const data = await res.json();
+        document.getElementById('logout-btn').style.display = data.enabled ? '' : 'none';
+      } catch (err) {
+        // 조회 실패해도 화면 자체는 계속 써야 하므로 조용히 무시(로그아웃 버튼만 안 보임)
+      }
+    }
+
     const STATUS_LABELS = {
       idle: '대기중',
       queued: '대기열 등록',
@@ -2046,6 +2076,7 @@
       }
     }
 
+    initAuthUi();
     initTooltipDelegation();
     initPasswordToggleIcons();
     initDatasetHistoryDelegation();

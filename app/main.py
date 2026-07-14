@@ -7,6 +7,8 @@
 import dataclasses
 import json
 import os
+import re
+import secrets
 import socket
 import time
 from contextlib import asynccontextmanager
@@ -17,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
 load_dotenv()  # 로컬 실행 시 .env를 읽어 os.environ에 반영 (Docker는 env_file로 동일한 역할을 함)
 
@@ -168,6 +170,48 @@ async def _record_request_metrics(request: Request, call_next):
     return response
 
 
+SESSION_COOKIE_NAME = "qa_session"
+_ACTIVE_SESSIONS: set = set()  # 로그인 성공 시 발급한 세션 토큰 - 메모리 저장이라 서버 재시작 시 전부 무효화(재로그인 필요)
+_AUTH_EXEMPT_PATHS = {"/login", "/logout", "/health", "/metrics-addon", "/api/auth/status"}  # 로그인 없이 항상 허용(헬스체크/프로메테우스 스크레이핑/로그인 상태 조회)
+_SAFE_NEXT_PATTERN = re.compile(r"^/[A-Za-z0-9/_\-]*$")
+
+
+def _app_password() -> str:
+    """매 요청마다 os.getenv로 새로 읽음(모듈 임포트 시점에 캐싱하지 않음) - 값을 비워두면
+    기존처럼 인증 없이 동작(이 플랫폼은 원래 LAN 내부용으로 설계돼 있음). 공개 도메인에
+    올릴 때만 이 값을 채워 선택적으로 로그인을 켜는 용도."""
+    return os.getenv("APP_PASSWORD", "").strip()
+
+
+def _is_authenticated(request: Request) -> bool:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    return bool(token) and token in _ACTIVE_SESSIONS
+
+
+def _safe_next_path(value: str) -> str:
+    """로그인 후 돌아갈 경로 - 오픈리다이렉트/XSS 방지를 위해 "/"로 시작하는 단순 상대 경로만 허용."""
+    value = value or "/"
+    if value.startswith("//") or not _SAFE_NEXT_PATTERN.match(value):
+        return "/"
+    return value
+
+
+@app.middleware("http")
+async def _require_login(request: Request, call_next):
+    """APP_PASSWORD가 설정된 경우에만 로그인을 강제 - 값이 비어있으면(기본값) 이 미들웨어는
+    아무 일도 하지 않고 기존 동작 그대로 통과시킴."""
+    password = _app_password()
+    if not password:
+        return await call_next(request)
+    path = request.url.path
+    if path in _AUTH_EXEMPT_PATHS or _is_authenticated(request):
+        return await call_next(request)
+    if path.startswith("/api/"):
+        return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
+    next_path = _safe_next_path(path + (f"?{request.url.query}" if request.url.query else ""))
+    return RedirectResponse(url=f"/login?next={next_path}")
+
+
 RUN_REGISTRY: Dict[str, Dict[str, Any]] = {}  # run_id -> {status, progress, result, error, jira_tickets}
 RUN_LOCK = Lock()  # 백그라운드 스레드에서 RUN_REGISTRY를 건드릴 때 쓰는 락
 ACTIVE_DATASET: Optional[str] = None  # 현재 선택된 데이터셋 파일 경로 (없으면 기본 데모 케이스 사용)
@@ -290,6 +334,46 @@ def _set_active_testcase(path: Path, case_count: int) -> None:
     ACTIVE_TESTCASE = _normalize_stored_path(str(path))
     ACTIVE_TESTCASE_CASE_COUNT = case_count
     TESTCASE_ACTIVE_POINTER.write_text(json.dumps({"path": ACTIVE_TESTCASE}), encoding="utf-8")
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_page(next: str = "/") -> HTMLResponse:
+    """로그인 화면 - APP_PASSWORD가 비어있어도(인증 꺼짐) 항상 조회는 가능하지만,
+    그 경우 미들웨어가 애초에 이 경로로 리다이렉트하지 않으므로 사실상 안 쓰임."""
+    html_path = Path(__file__).with_name("templates").joinpath("login.html")
+    html = html_path.read_text(encoding="utf-8").replace("__NEXT__", _safe_next_path(next))
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/login")
+def login_submit(payload: Dict[str, Any]) -> JSONResponse:
+    password = _app_password()
+    if not password:
+        return JSONResponse({"ok": True})
+    if not secrets.compare_digest(str(payload.get("password", "")), password):
+        return JSONResponse({"error": "비밀번호가 올바르지 않습니다"}, status_code=401)
+    token = secrets.token_urlsafe(32)
+    _ACTIVE_SESSIONS.add(token)
+    response = JSONResponse({"ok": True})
+    response.set_cookie(SESSION_COOKIE_NAME, token, httponly=True, samesite="lax", max_age=60 * 60 * 24 * 30)
+    return response
+
+
+@app.post("/logout")
+def logout(request: Request) -> JSONResponse:
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if token:
+        _ACTIVE_SESSIONS.discard(token)
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(SESSION_COOKIE_NAME)
+    return response
+
+
+@app.get("/api/auth/status")
+def auth_status(request: Request) -> JSONResponse:
+    """대시보드가 로그아웃 버튼을 보여줄지 판단하는 용도(인증 자체는 미들웨어가 이미 강제함)."""
+    password = _app_password()
+    return JSONResponse({"enabled": bool(password), "authenticated": (not password) or _is_authenticated(request)})
 
 
 @app.get("/", response_class=HTMLResponse)

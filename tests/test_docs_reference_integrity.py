@@ -61,6 +61,8 @@ DESIGN_SPEC_REFERENCES = [
     ("app/main.py", "def _execute_run"),
     ("app/main.py", "RUN_REGISTRY"),
     ("app/main.py", "_restore_active_dataset"),
+    ("app/main.py", "_require_login"),
+    ("app/main.py", "APP_PASSWORD"),
 ]
 
 PROCESS_SPEC_REFERENCES = [
@@ -90,8 +92,11 @@ USER_MANUAL_REFERENCES = [
     ("app/main.py", '"/api/settings"'),
     ("app/main.py", '"/api/reports/latest"'),
     ("app/main.py", '"/health"'),
+    ("app/main.py", '"/login"'),
+    ("app/main.py", '"/api/auth/status"'),
     ("qa_agent/config_loader.py", "def load_config"),
     (".env.example", "OPENAI_API_KEY"),
+    (".env.example", "APP_PASSWORD"),
 ]
 
 NETWORK_GUIDE_REFERENCES = [

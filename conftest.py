@@ -9,6 +9,7 @@ from quality.test_report import write_test_results_doc
 # app.main이 import 시점에 load_dotenv()를 호출하므로, 개발자의 .env에 실제 값이 있으면
 # 테스트가 그걸 그대로 집어 쓸 수 있음 - 그래서 테스트마다 강제로 비워서 격리시킴
 _SECRET_ENV_VARS = (
+    "APP_PASSWORD",
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_MODEL",

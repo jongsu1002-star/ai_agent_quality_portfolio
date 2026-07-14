@@ -105,6 +105,7 @@ def _render_markdown(report: Dict[str, Any]) -> str:
         "# 최종 품질 리포트",
         "",
         f"- 실행 ID: {report.get('run_id')}",
+        f"- 실행자: {report.get('executed_by') or '-'}",
         f"- 전체 통과율: {report.get('overall_pass_rate', 0.0):.2%}",
         f"- 회귀 탐지 건수: {report.get('regressions_detected', 0)}",
         "",
@@ -162,6 +163,7 @@ def _render_defect_report_markdown(report: Dict[str, Any]) -> str:
         "> 이 문서는 QA 파이프라인 실행이 완료될 때마다 `qa_agent/reporter.py`가 자동으로 재생성합니다. 수동으로 편집하지 마세요.",
         "",
         f"- 실행 ID: {report.get('run_id')}",
+        f"- 실행자: {report.get('executed_by') or '-'}",
         f"- 생성 시각: {datetime.datetime.now().isoformat(timespec='seconds')}",
         f"- 전체 통과율: {report.get('overall_pass_rate', 0.0):.2%}",
         f"- 회귀 탐지 건수: {report.get('regressions_detected', 0)}",
@@ -249,6 +251,7 @@ def list_run_history(reports_dir: str | None = None) -> List[dict]:
                 "dataset_case_count": data.get("dataset_case_count"),
                 "testcase_path": data.get("testcase_path"),
                 "testcase_case_count": data.get("testcase_case_count"),
+                "executed_by": data.get("executed_by"),
             })
         except Exception:
             continue

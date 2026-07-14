@@ -10,16 +10,14 @@ from app.main import app
 
 @pytest.fixture(autouse=True)
 def _isolate_dataset_storage(tmp_path, monkeypatch):
-    """이 파일의 테스트들은 /api/dataset/* 엔드포인트를 TestClient로 실제 호출하므로, 실제
-    reports/datasets 대신 임시 디렉터리를 쓰도록 격리한다 - 격리하지 않으면 라이브 서버가 떠 있는
-    동안 pytest를 돌릴 때마다 사용자의 실제 활성 데이터셋(reports/.active_dataset.json)이
-    테스트 데이터로 덮어써지는 문제가 반복됐다."""
-    dataset_dir = tmp_path / "datasets"
-    dataset_dir.mkdir()
-    monkeypatch.setattr(main_module, "DATASET_DIR", dataset_dir)
-    monkeypatch.setattr(main_module, "ACTIVE_DATASET_POINTER", tmp_path / ".active_dataset.json")
-    monkeypatch.setattr(main_module, "DATASET_HISTORY_PATH", dataset_dir / ".history.json")
-    monkeypatch.setattr(main_module, "ACTIVE_DATASET", None)
+    """이 파일의 테스트들은 /api/dataset/*, /api/run 등을 TestClient로 실제 호출하므로, 실제
+    reports/ 대신 임시 디렉터리를 쓰도록 격리한다 - 격리하지 않으면 라이브 서버가 떠 있는 동안
+    pytest를 돌릴 때마다 사용자의 실제 활성 데이터셋/실행이력이 테스트 데이터로 덮어써지는
+    문제가 반복됐다. 이 테스트들은 로그인하지 않으므로 전부 "shared" 버킷을 쓰는데, 그 버킷의
+    루트(SHARED_REPORTS_ROOT)와 실명 계정 루트(USER_DATA_ROOT)를 각각 임시 경로로 바꿔치기하면
+    dataset_dir/testcase_dir/run 리포트 등 이 버킷이 쓰는 모든 하위 경로가 함께 격리된다."""
+    monkeypatch.setattr(main_module, "SHARED_REPORTS_ROOT", tmp_path)
+    monkeypatch.setattr(main_module, "USER_DATA_ROOT", tmp_path / "users")
 
 
 def test_dataset_upload_json_endpoint(tmp_path):

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>회원가입 - AI Agent 품질관리·운영 모니터링 플랫폼</title>
+  <style>
+    :root {
+      --surface-1: #fcfcfb;
+      --text-primary: #0b0b0b;
+      --text-secondary: #52514e;
+      --text-muted: #898781;
+      --gridline: #e1e0d9;
+      --accent: #2a78d6;
+      --status-critical: #d1453d;
+      --status-good: #0ca30c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: var(--surface-1); color: var(--text-primary);
+      font-family: "Segoe UI", "Malgun Gothic", sans-serif;
+    }
+    .card {
+      width: 100%; max-width: 360px; padding: 2rem; margin: 1rem;
+      background: white; border-radius: 14px; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.12);
+    }
+    h1 { font-size: 1.15rem; margin: 0 0 0.35rem; }
+    p.sub { color: var(--text-secondary); font-size: 0.85rem; margin: 0 0 1.5rem; line-height: 1.5; }
+    label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.4rem; }
+    input {
+      width: 100%; padding: 0.6rem 0.7rem; border-radius: 8px; border: 1px solid var(--gridline);
+      font-size: 0.95rem; margin-bottom: 1rem;
+    }
+    input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    button {
+      width: 100%; padding: 0.65rem; border: none; border-radius: 8px; background: var(--accent);
+      color: white; font-size: 0.95rem; font-weight: 600; cursor: pointer;
+    }
+    button:hover { background: #1d5fb0; }
+    button:disabled { background: var(--gridline); cursor: not-allowed; }
+    #error { color: var(--status-critical); font-size: 0.85rem; margin: -0.5rem 0 1rem; display: none; }
+    #success { color: var(--status-good); font-size: 0.85rem; margin: 0 0 1rem; display: none; line-height: 1.5; }
+    .login-link { text-align: center; font-size: 0.85rem; color: var(--text-secondary); margin-top: 1rem; }
+    .login-link a { color: var(--accent); text-decoration: none; }
+    .login-link a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>회원가입</h1>
+    <p class="sub">가입 신청 후 관리자 승인이 필요합니다(서비스 최초 가입자는 자동으로 관리자가 됩니다).</p>
+    <form id="signup-form">
+      <label for="username">아이디 (영문/숫자/_/- 3~32자)</label>
+      <input id="username" type="text" autocomplete="username" autofocus />
+      <label for="password">비밀번호 (4자 이상)</label>
+      <input id="password" type="password" autocomplete="new-password" />
+      <label for="password-confirm">비밀번호 확인</label>
+      <input id="password-confirm" type="password" autocomplete="new-password" />
+      <div id="error"></div>
+      <div id="success"></div>
+      <button type="submit" id="submit-btn">가입 신청</button>
+    </form>
+    <p class="login-link">이미 계정이 있으신가요? <a href="/login">로그인</a></p>
+  </div>
+  <script>
+    const form = document.getElementById('signup-form');
+    const errorEl = document.getElementById('error');
+    const successEl = document.getElementById('success');
+    const submitBtn = document.getElementById('submit-btn');
+
+    form.addEventListener('submit', async (evt) => {
+      evt.preventDefault();
+      errorEl.style.display = 'none';
+      successEl.style.display = 'none';
+
+      const password = document.getElementById('password').value;
+      const confirm = document.getElementById('password-confirm').value;
+      if (password !== confirm) {
+        errorEl.textContent = '비밀번호가 서로 일치하지 않습니다.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = '처리 중...';
+      try {
+        const response = await fetch('/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: document.getElementById('username').value, password }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          errorEl.textContent = data.error || '가입 신청에 실패했습니다.';
+          errorEl.style.display = 'block';
+          submitBtn.disabled = false;
+          submitBtn.textContent = '가입 신청';
+          return;
+        }
+        if (data.status === 'approved') {
+          // 서비스 최초 가입 = 자동 관리자 승인, 바로 로그인된 상태로 대시보드 이동
+          window.location.href = '/';
+          return;
+        }
+        successEl.textContent = '가입 신청이 완료되었습니다. 관리자 승인 후 로그인할 수 있습니다.';
+        successEl.style.display = 'block';
+        submitBtn.disabled = true;
+        submitBtn.textContent = '신청 완료';
+      } catch (err) {
+        errorEl.textContent = '서버에 연결할 수 없습니다.';
+        errorEl.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = '가입 신청';
+      }
+    });
+  </script>
+</body>
+</html>

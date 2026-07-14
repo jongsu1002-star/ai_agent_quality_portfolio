@@ -9,7 +9,6 @@ from quality.test_report import write_test_results_doc
 # app.main이 import 시점에 load_dotenv()를 호출하므로, 개발자의 .env에 실제 값이 있으면
 # 테스트가 그걸 그대로 집어 쓸 수 있음 - 그래서 테스트마다 강제로 비워서 격리시킴
 _SECRET_ENV_VARS = (
-    "APP_PASSWORD",
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_MODEL",
@@ -39,6 +38,22 @@ def _no_real_secrets_in_tests(monkeypatch):
     """
     for key in _SECRET_ENV_VARS:
         monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_user_store(tmp_path, monkeypatch):
+    """app.main.USER_STORE는 기본적으로 실서비스 data/users.db를 가리키는 싱글턴이라,
+    이 픽스처 없이 /signup·/login 등을 TestClient로 두드리면 실제 계정 DB에 테스트용
+    가입자가 그대로 쌓임 - 매 테스트마다 임시 DB로 바꿔치기해서 격리."""
+    try:
+        import app.main as main_module
+        from qa_agent.users import UserStore
+    except Exception:
+        return
+    isolated_store = UserStore(path=str(tmp_path / "users.db"))
+    monkeypatch.setattr(main_module, "USER_STORE", isolated_store)
+    yield
+    isolated_store.close_thread_connection()
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:

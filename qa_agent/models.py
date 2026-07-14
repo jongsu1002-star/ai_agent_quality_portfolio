@@ -232,6 +232,7 @@ class RunReport:
     dataset_case_count: int = 0  # 위 데이터셋에서 실제로 채점된 케이스 수 (필터링 전 원본 기준)
     testcase_path: Optional[str] = None  # 이 실행이 사용한 테스트 케이스(발화문) 파일 경로 (없으면 데이터셋 자체 question 사용)
     testcase_case_count: int = 0
+    executed_by: Optional[str] = None  # 이 실행을 시작한 사용자 아이디(로그인 계정 시스템 사용 시) - 없으면 "shared"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -249,6 +250,7 @@ class RunReport:
             "dataset_case_count": self.dataset_case_count,
             "testcase_path": self.testcase_path,
             "testcase_case_count": self.testcase_case_count,
+            "executed_by": self.executed_by,
         }
 
 

@@ -62,7 +62,8 @@ DESIGN_SPEC_REFERENCES = [
     ("app/main.py", "RUN_REGISTRY"),
     ("app/main.py", "_restore_active_dataset"),
     ("app/main.py", "_require_login"),
-    ("app/main.py", "APP_PASSWORD"),
+    ("qa_agent/auth.py", "def hash_password"),
+    ("qa_agent/users.py", "class UserStore"),
 ]
 
 PROCESS_SPEC_REFERENCES = [
@@ -96,7 +97,7 @@ USER_MANUAL_REFERENCES = [
     ("app/main.py", '"/api/auth/status"'),
     ("qa_agent/config_loader.py", "def load_config"),
     (".env.example", "OPENAI_API_KEY"),
-    (".env.example", "APP_PASSWORD"),
+    (".env.example", "create_admin.py"),
 ]
 
 NETWORK_GUIDE_REFERENCES = [

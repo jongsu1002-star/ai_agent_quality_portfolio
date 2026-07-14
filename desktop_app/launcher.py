@@ -85,8 +85,13 @@ def _initial_server_url() -> str:
 
 
 def _server_reachable(url: str) -> bool:
+    """서버가 떠 있는지만 확인하는 용도라 /health를 씀 - /api/*는 계정 시스템이 켜져 있으면
+    로그인 없이는 401을 돌려주므로(qa_session 쿠키가 없는 이 익명 요청은 항상 미인증),
+    서버가 멀쩡히 떠 있어도 이 함수가 "연결 안 됨"으로 잘못 판단하게 됨. /health는
+    app/main.py의 _require_login 미들웨어가 로그인 여부와 무관하게 항상 열어두는 예외
+    경로라 이 용도에 맞음."""
     try:
-        with urllib.request.urlopen(f"{url}/api/monitoring/summary", timeout=1.5) as resp:
+        with urllib.request.urlopen(f"{url}/health", timeout=1.5) as resp:
             return resp.status == 200
     except Exception:
         return False

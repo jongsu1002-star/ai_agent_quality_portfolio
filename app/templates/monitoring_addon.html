@@ -52,7 +52,10 @@
 </head>
 <body>
   <div class="card">
-    <h1 class="title">모니터링 애드온 - 성능테스트(k6) · Prometheus/Grafana</h1>
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+      <h1 class="title" style="margin:0;">모니터링 애드온 - 성능테스트(k6) · Prometheus/Grafana</h1>
+      <button type="button" id="logout-btn" onclick="logout()" style="display:none;">로그아웃</button>
+    </div>
     <p>
       이 페이지는 기존 QA 품질관리·운영 모니터링 화면(<a href="/">메인 대시보드</a>)과 완전히 별도로
       동작합니다 - 여기서 무엇을 하든 기존 화면/API에는 영향을 주지 않습니다.
@@ -63,6 +66,7 @@
       <button type="button" class="tab-btn" onclick="window.location.href='/#dashboard'">대시보드</button>
       <button type="button" class="tab-btn" onclick="window.location.href='/#monitoring'">모니터링</button>
       <button type="button" class="tab-btn active">모니터링 애드온</button>
+      <button type="button" class="tab-btn" id="users-nav-btn" onclick="window.location.href='/#users'" style="display:none;">사용자 관리</button>
     </div>
   </div>
 
@@ -204,6 +208,35 @@
   </div>
 
   <script>
+    // 메인 대시보드(index.html)와 같은 이유로 여기도 401을 한 번에 가로채서 로그인 화면으로 보냄 -
+    // 이 페이지는 독립적으로 열릴 수 있어서(북마크 등) 세션 만료를 스스로 처리해야 함.
+    const _originalFetch = window.fetch.bind(window);
+    window.fetch = async function (...args) {
+      const response = await _originalFetch(...args);
+      if (response.status === 401) {
+        window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+      }
+      return response;
+    };
+
+    async function logout() {
+      await fetch('/logout', { method: 'POST' });
+      window.location.href = '/login';
+    }
+
+    async function initAuthUi() {
+      try {
+        const res = await fetch('/api/auth/status');
+        const data = await res.json();
+        const logoutBtn = document.getElementById('logout-btn');
+        logoutBtn.style.display = data.enabled ? '' : 'none';
+        logoutBtn.textContent = data.username ? `로그아웃 (${data.username})` : '로그아웃';
+        document.getElementById('users-nav-btn').style.display = data.is_admin ? '' : 'none';
+      } catch (err) {
+        // 조회 실패해도 화면 자체는 계속 써야 하므로 조용히 무시
+      }
+    }
+
     const GRAFANA_LINK_ENABLED = __GRAFANA_LINK_ENABLED__;
     let k6Page = 1;
     let K6_PAGE_SIZE = 10;
@@ -566,6 +599,7 @@
 
     document.getElementById('k6-target-url').value = window.location.origin;
 
+    initAuthUi();
     loadK6Latest();
     loadK6Runs(1);
     loadSnapshotHistory();

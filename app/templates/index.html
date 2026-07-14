@@ -2171,7 +2171,7 @@
     // 모니터링 애드온 페이지 등 다른 화면에서 특정 탭으로 바로 돌아올 수 있도록
     // (예: /#monitoring), URL 해시로 지정된 탭이 있으면 그 탭을 열어줌
     const initialTab = (location.hash || '').replace('#', '');
-    if (['settings', 'run', 'dashboard', 'monitoring'].includes(initialTab)) {
+    if (['settings', 'run', 'dashboard', 'monitoring', 'users'].includes(initialTab)) {
       showTab(initialTab);
     }
   </script>

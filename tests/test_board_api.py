@@ -134,3 +134,60 @@ def test_comment_on_missing_post_returns_404():
     client = TestClient(app)
     response = client.post("/api/board/posts/999/comments", json={"content": "hi"})
     assert response.status_code == 404
+
+
+def test_cannot_comment_on_hidden_post_of_another_user():
+    """P0: 댓글 작성이 게시글 열람 권한을 우회하던 결함 - 비노출 글의 id를 알아도 작성자/관리자가
+    아니면 댓글을 달 수 없어야 함(그 전엔 "존재 여부"만 확인해서 우회 가능했음)."""
+    admin_client, bob_client = _setup_two_users()
+    carol_client = TestClient(app)
+    _signup(carol_client, "carol", "secret789")
+    admin_client.post("/api/users/carol/approve")
+    _login(carol_client, "carol", "secret789")
+
+    create = bob_client.post("/api/board/posts", json={"board_type": "general", "title": "t", "content": "c"})
+    post_id = create.json()["id"]
+    bob_client.post(f"/api/board/posts/{post_id}/visibility", json={"visible": False})
+
+    # carol(작성자/관리자 아님)은 비노출 글에 댓글을 달 수 없음 - 존재 자체를 알 수 없어야 함
+    comment = carol_client.post(f"/api/board/posts/{post_id}/comments", json={"content": "몰래 댓글"})
+    assert comment.status_code == 404
+
+    # bob(작성자)은 자기 비노출 글에 여전히 댓글을 달 수 있음
+    own_comment = bob_client.post(f"/api/board/posts/{post_id}/comments", json={"content": "내 글 댓글"})
+    assert own_comment.status_code == 200
+
+    # alice(관리자)도 댓글 가능
+    admin_comment = admin_client.post(f"/api/board/posts/{post_id}/comments", json={"content": "관리자 댓글"})
+    assert admin_comment.status_code == 200
+
+
+def test_bulk_delete_requires_admin():
+    admin_client, bob_client = _setup_two_users()
+    create = bob_client.post("/api/board/posts", json={"board_type": "general", "title": "t", "content": "c"})
+    post_id = create.json()["id"]
+
+    response = bob_client.post("/api/board/posts/bulk-delete", json={"ids": [post_id]})
+    assert response.status_code == 403
+    assert admin_client.get(f"/api/board/posts/{post_id}").status_code == 200  # 안 지워짐
+
+
+def test_bulk_delete_removes_multiple_posts_and_reports_not_found():
+    admin_client, bob_client = _setup_two_users()
+    id1 = bob_client.post("/api/board/posts", json={"board_type": "voc", "title": "a", "content": "c"}).json()["id"]
+    id2 = bob_client.post("/api/board/posts", json={"board_type": "voc", "title": "b", "content": "c"}).json()["id"]
+
+    response = admin_client.post("/api/board/posts/bulk-delete", json={"ids": [id1, id2, 999999]})
+    assert response.status_code == 200
+    body = response.json()
+    assert sorted(body["deleted"]) == sorted([id1, id2])
+    assert body["not_found"] == [999999]
+
+    assert admin_client.get(f"/api/board/posts/{id1}").status_code == 404
+    assert admin_client.get(f"/api/board/posts/{id2}").status_code == 404
+
+
+def test_bulk_delete_rejects_empty_ids():
+    admin_client, _bob_client = _setup_two_users()
+    response = admin_client.post("/api/board/posts/bulk-delete", json={"ids": []})
+    assert response.status_code == 400

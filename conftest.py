@@ -75,7 +75,7 @@ def _isolate_board_store(tmp_path, monkeypatch):
     isolated_store = BoardStore(path=str(tmp_path / "board.db"))
     monkeypatch.setattr(main_module, "BOARD_STORE", isolated_store)
     board_module.configure(isolated_store, main_module._current_username, main_module._is_admin_effective)
-    voc_analysis_module.configure(isolated_store, main_module._current_username, main_module._load_settings_dict, main_module._llm_judge_kwargs, main_module._independent_judge_kwargs)
+    voc_analysis_module.configure(isolated_store, main_module._current_username, main_module._load_settings_dict, main_module._llm_judge_kwargs, main_module._independent_judge_kwargs, main_module._is_admin_effective)
     monkeypatch.setattr(voc_analysis_module, "VOC_ANALYSIS_DIR", tmp_path / "voc_analysis")
     monkeypatch.setattr(voc_analysis_module, "VOC_UPLOAD_DIR", tmp_path / "voc_analysis" / "uploads")
     yield
@@ -83,5 +83,26 @@ def _isolate_board_store(tmp_path, monkeypatch):
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
-    """pytest 실행이 끝날 때마다 자동으로 호출되는 훅 - docs/테스트_결과.md를 재생성."""
-    write_test_results_doc(terminalreporter.stats, exitstatus)
+    """전체 스위트 실행만 종합 결과 문서를 갱신한다.
+
+    특정 파일/테스트만 실행하거나 0건이 수집된 실행이 마지막 종합 결과를 덮어쓰면, 좁은 검증을
+    전체 통과로 오해할 수 있다. 선택 실행 결과는 터미널에만 남기고 문서는 보존한다.
+    """
+    stats = terminalreporter.stats
+    total = sum(len(stats.get(key, [])) for key in ("passed", "failed", "skipped", "error"))
+    if total == 0:
+        terminalreporter.write_line("[test-report] 수집된 테스트가 없어 docs/테스트_결과.md를 갱신하지 않습니다.")
+        return
+
+    try:
+        file_or_dir = list(config.getoption("file_or_dir") or [])
+    except (ValueError, AttributeError):
+        file_or_dir = []
+    full_path_args = not file_or_dir or all(str(path).replace("\\", "/").rstrip("/") in (".", "tests") for path in file_or_dir)
+    raw_args = tuple(str(arg) for arg in config.invocation_params.args)
+    selection_flags = ("-k", "-m", "--lf", "--last-failed", "--ff", "--failed-first", "--sw", "--stepwise", "--collect-only")
+    has_selection_filter = any(arg == flag or arg.startswith(flag + "=") for arg in raw_args for flag in selection_flags)
+    if not full_path_args or has_selection_filter:
+        terminalreporter.write_line("[test-report] 선택 실행이므로 docs/테스트_결과.md를 갱신하지 않습니다.")
+        return
+    write_test_results_doc(stats, exitstatus)

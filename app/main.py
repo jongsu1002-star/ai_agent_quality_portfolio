@@ -688,6 +688,7 @@ DOC_FILES = {
     "scenario_test_report": "테스트_시나리오_보고서.md",
     "defect_report": "결함보고서.md",
     "readme": "README.md",
+    "voc_quality_report": "VOC_분석_파이프라인_품질평가_보고서.md",
 }
 # readme는 docs/가 아니라 프로젝트 최상위에 있는 파일이라 별도 경로로 서빙
 DOC_ROOT_KEYS = {"readme"}
@@ -1172,6 +1173,17 @@ def _independent_judge_kwargs(settings: Dict[str, Any]) -> Tuple[Dict[str, Any],
 
     synthetic_settings = dict(settings)
     synthetic_settings["llm_provider"] = judge_provider
+    # 버그였던 지점: llm_model/llm_key_value/llm_key_name/llm_endpoint는 "현재 선택된(주로
+    # 생성용) provider"에 종속된 값인데, 이걸 그대로 들고 있으면 독립 Judge가 반대 provider로
+    # 바뀌어도 예전 provider의 모델명/키가 그대로 흘러 들어감 - 실제로 primary=openai(모델
+    # gpt-4o-mini)일 때 judge_provider=anthropic으로 바뀌었는데도 model="gpt-4o-mini"가
+    # 그대로 전달되어 Anthropic API가 404(모델 없음)를 반환하는 실제 장애로 나타났었음.
+    # provider가 실제로 바뀌는 경우엔 이 오염 가능성이 있는 필드들을 전부 지워서, provider별
+    # 전용 키(openai_api_key/anthropic_api_key)와 그 provider의 기본 모델(env var 폴백)만
+    # 쓰이도록 강제한다.
+    if judge_provider != primary_provider:
+        for stale_key in ("llm_model", "llm_key_value", "llm_key_name", "llm_endpoint"):
+            synthetic_settings.pop(stale_key, None)
     kwargs = _llm_judge_kwargs(synthetic_settings)
     return kwargs, judge_provider != primary_provider
 
@@ -1449,7 +1461,7 @@ from app.routers import voc_analysis as _voc_analysis_module
 _board_module.configure(BOARD_STORE, _current_username, _is_admin_effective)
 app.include_router(_board_module.router)
 
-_voc_analysis_module.configure(BOARD_STORE, _current_username, _load_settings_dict, _llm_judge_kwargs, _independent_judge_kwargs)
+_voc_analysis_module.configure(BOARD_STORE, _current_username, _load_settings_dict, _llm_judge_kwargs, _independent_judge_kwargs, _is_admin_effective)
 app.include_router(_voc_analysis_module.router)
 
 

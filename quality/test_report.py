@@ -80,7 +80,9 @@ def render_test_results_markdown(stats: Dict[str, List[Any]], exitstatus: int) -
     for row in grouped_rows:
         lines.append(f"| `{row['file']}` | {row['description']} | {row['count']} | {row['outcome']} |")
 
-    if failed or errors:
+    if total == 0:
+        lines += ["", "실행된 테스트가 없어 성공 여부를 판정할 수 없습니다.", ""]
+    elif failed or errors:
         lines += ["", "## 실패/오류 상세", ""]
         for report in failed + errors:
             lines.append(f"- `{report.nodeid}`")

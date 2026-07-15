@@ -493,6 +493,7 @@
       </div>
       <div class="board-actions">
         <button type="button" onclick="toggleBoardWriteForm()">글쓰기</button>
+        <button type="button" id="board-bulk-delete-btn" class="btn-danger" style="display:none;" onclick="bulkDeleteSelectedPosts()">선택 삭제</button>
       </div>
       <div id="board-write-form" style="display:none; margin-top:0.75rem;">
         <input id="board-write-title" placeholder="제목" />
@@ -519,7 +520,7 @@
   <div id="tab-voc-analysis" class="tab-panel">
     <div class="card">
       <h2>VOC 자동분석</h2>
-      <p style="color: var(--text-secondary); font-size: 0.9rem;">게시판의 VOC 글은 항상 포함됩니다. 필요하면 Jira 백로그, 외부 엑셀 데이터를 추가해서 함께 분석할 수 있습니다.</p>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">아무것도 선택하지 않으면 게시판의 VOC 글이 기본으로 분석됩니다. Jira/엑셀을 추가로 켤 때는 게시판 VOC 포함 여부를 직접 선택할 수 있습니다.</p>
       <div>
         <label>분석 지시사항 (선택 - 예: "상담 대기시간과 불친절 관련 불만사항을 중심으로 정책 개선안을 제시해줘")</label>
         <textarea id="voc-focus-instruction" rows="2" placeholder="특정 주제나 관점으로 좁혀서 분석하고 싶으면 입력하세요. 비워두면 전체를 종합 분석합니다."></textarea>
@@ -527,6 +528,10 @@
         <input id="voc-item-limit" type="number" min="1" max="150" placeholder="예: 20 (최근 20건만 분석)" />
       </div>
       <div class="grid">
+        <div>
+          <label><input type="checkbox" id="voc-use-board" checked style="width:auto; display:inline-block; margin-right:0.4rem;" /> 게시판 VOC 글 포함 (기본)</label>
+          <p class="chart-hint">해제하면 게시판 VOC 없이 Jira/엑셀 소스만으로 분석합니다.</p>
+        </div>
         <div>
           <label><input type="checkbox" id="voc-use-jira" style="width:auto; display:inline-block; margin-right:0.4rem;" /> Jira 백로그 포함</label>
           <input id="voc-jira-jql" placeholder="JQL (선택, 비우면 설정된 프로젝트 기본값 사용)" style="margin-top:0.4rem;" />
@@ -537,7 +542,7 @@
           <label><input type="checkbox" id="voc-use-excel" style="width:auto; display:inline-block; margin-right:0.4rem;" /> 엑셀 업로드 데이터 포함</label>
           <div class="board-actions">
             <a href="/api/voc-analysis/template"><button type="button" class="btn-secondary">템플릿 다운로드</button></a>
-            <input type="file" id="voc-excel-file" accept=".xlsx,.xls" style="width:auto; margin-top:0;" />
+            <input type="file" id="voc-excel-file" accept=".xlsx" style="width:auto; margin-top:0;" />
             <button type="button" class="btn-secondary" onclick="uploadVocExcel()">업로드</button>
           </div>
           <div id="voc-excel-status" class="chart-hint"></div>
@@ -545,12 +550,18 @@
       </div>
       <div class="board-actions">
         <button type="button" id="voc-run-btn" onclick="runVocAnalysis()">VOC 분석 실행</button>
+        <button type="button" id="voc-cancel-btn" class="btn-secondary" style="display:none;" onclick="cancelVocAnalysis()">취소</button>
       </div>
       <div id="voc-result" style="margin-top:1rem;"></div>
     </div>
     <div class="card">
       <h2>지난 분석 이력</h2>
       <div id="voc-history-list" class="table-view">불러오는 중...</div>
+    </div>
+    <div class="card">
+      <h2>VOC 분석 파이프라인 품질평가 보고서</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">이 기능(게시판 + VOC 자동분석 + 독립 LLM Judge 교차검증)의 실제 구현·테스트 내용을 정리한 보고서입니다.</p>
+      <div id="voc-quality-report" class="doc-viewer"></div>
     </div>
   </div>
 
@@ -649,12 +660,17 @@
 
     async function loadBoardPosts() {
       const el = document.getElementById('board-post-list');
+      const bulkBtn = document.getElementById('board-bulk-delete-btn');
+      bulkBtn.style.display = _canModerate ? '' : 'none';
       const res = await fetch(`/api/board/posts?board_type=${encodeURIComponent(_currentBoardType)}`);
       const data = await res.json();
-      const headerHtml = '<thead><tr><th>제목</th><th>작성자</th><th>작성일</th><th>댓글</th></tr></thead>';
+      const checkboxHeader = _canModerate ? '<th style="width:2rem;"><input type="checkbox" onclick="toggleAllBoardCheckboxes(this)" /></th>' : '';
+      const headerHtml = `<thead><tr>${checkboxHeader}<th>제목</th><th>작성자</th><th>작성일</th><th>댓글</th></tr></thead>`;
       renderPagedHtmlTable('board-post-list', headerHtml, data.items, post => {
         const hiddenBadge = post.visible ? '' : '<span class="board-hidden-badge">비노출</span>';
+        const checkboxCell = _canModerate ? `<td><input type="checkbox" class="board-select-checkbox" value="${post.id}" /></td>` : '';
         return `<tr>
+          ${checkboxCell}
           <td><span class="board-row-title" onclick="openBoardPost(${post.id})">${escapeHtml(post.title)}</span>${hiddenBadge}</td>
           <td>${escapeHtml(post.author)}</td>
           <td>${escapeHtml(formatTimestamp(post.created_at))}</td>
@@ -664,6 +680,22 @@
       if (!data.items.length) {
         el.innerHTML = '<p>등록된 글이 없습니다.</p>';
       }
+    }
+
+    function toggleAllBoardCheckboxes(headerCheckbox) {
+      document.querySelectorAll('.board-select-checkbox').forEach(cb => { cb.checked = headerCheckbox.checked; });
+    }
+
+    async function bulkDeleteSelectedPosts() {
+      const ids = Array.from(document.querySelectorAll('.board-select-checkbox:checked')).map(cb => parseInt(cb.value, 10));
+      if (!ids.length) { alert('삭제할 글을 선택하세요.'); return; }
+      if (!confirm(`선택한 ${ids.length}건을 삭제하시겠습니까? (댓글도 함께 삭제됩니다)`)) return;
+      const res = await fetch('/api/board/posts/bulk-delete', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(err.error || '삭제에 실패했습니다.'); return; }
+      loadBoardPosts();
     }
 
     async function openBoardPost(postId) {
@@ -782,6 +814,7 @@
 
     // ===================== VOC 자동분석 =====================
     let _vocExcelPath = null;
+    let _vocQualityReportLoaded = false;
 
     async function previewJiraIssues() {
       const jql = document.getElementById('voc-jira-jql').value.trim();
@@ -809,19 +842,27 @@
       document.getElementById('voc-use-excel').checked = true;
     }
 
+    let _vocRunAbortController = null;
+
     async function runVocAnalysis() {
       const btn = document.getElementById('voc-run-btn');
+      const cancelBtn = document.getElementById('voc-cancel-btn');
       const useJira = document.getElementById('voc-use-jira').checked;
       const useExcel = document.getElementById('voc-use-excel').checked;
       if (useExcel && !_vocExcelPath) { alert('먼저 엑셀 파일을 업로드하세요.'); return; }
       btn.disabled = true;
       btn.textContent = '분석 중...';
-      document.getElementById('voc-result').innerHTML = '';
+      cancelBtn.style.display = '';
+      // 생성 1회 + 독립 검증 1회, 순차 LLM 호출 2번이라 수십 초가 걸릴 수 있음을 미리 안내
+      document.getElementById('voc-result').innerHTML = '<p class="chart-hint">분석 중입니다(생성 1회 + 독립 검증 1회 순차 호출 - 통상 10~30초, 데이터가 많으면 더 걸릴 수 있습니다). 필요하면 취소할 수 있습니다.</p>';
+      _vocRunAbortController = new AbortController();
       try {
         const itemLimitRaw = document.getElementById('voc-item-limit').value;
         const res = await fetch('/api/voc-analysis/run', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
+          signal: _vocRunAbortController.signal,
           body: JSON.stringify({
+            use_board: document.getElementById('voc-use-board').checked,
             use_jira: useJira,
             jira_jql: document.getElementById('voc-jira-jql').value.trim() || null,
             use_excel: useExcel,
@@ -837,45 +878,82 @@
         }
         _renderVocResult(data);
         loadVocHistory();
+      } catch (err) {
+        if (err.name === 'AbortError') {
+          // 사용자가 직접 취소한 경우 - 요청 자체는 서버에서 계속 처리될 수 있지만(취소는
+          // 클라이언트 대기만 중단), 화면은 조용히 초기 상태로 되돌림(에러로 취급하지 않음)
+          document.getElementById('voc-result').innerHTML = '<p class="chart-hint">분석 대기를 취소했습니다. (참고: 이미 시작된 LLM 호출은 서버에서 계속 진행 중일 수 있습니다.)</p>';
+        } else {
+          document.getElementById('voc-result').innerHTML = `<p style="color:#dc2626;">${escapeHtml(err.message || '분석에 실패했습니다.')}</p>`;
+        }
       } finally {
         btn.disabled = false;
         btn.textContent = 'VOC 분석 실행';
+        cancelBtn.style.display = 'none';
+        _vocRunAbortController = null;
       }
+    }
+
+    function cancelVocAnalysis() {
+      if (_vocRunAbortController) { _vocRunAbortController.abort(); }
     }
 
     function _renderVocResult(record) {
       const result = record.result || {};
       const counts = result.raw_source_counts || {};
+      const considered = counts.considered_by_source || {};
       const params = record.params || {};
-      const issuesHtml = (result.top_issues || []).map(issue => `<tr>
+      const issuesHtml = (result.top_issues || []).map(issue => {
+        // frequency는 LLM 응답값이라 신뢰할 수 없음 - 숫자로 강제 변환해서 스크립트성
+        // 문자열이 그대로 innerHTML에 꽂히는 저장형 XSS 경로를 원천 차단(정수가 아니면 표시 안 함)
+        const freq = Number.isFinite(Number(issue.frequency)) ? Math.trunc(Number(issue.frequency)) : '';
+        return `<tr>
           <td>${escapeHtml(issue.theme || '')}</td>
-          <td>${issue.frequency ?? ''}</td>
+          <td>${freq}</td>
           <td>${escapeHtml(issue.severity || '')}</td>
           <td>${escapeHtml(issue.suggestion || '')}</td>
-        </tr>`).join('');
+        </tr>`;
+      }).join('');
       const focusHtml = params.focus_instruction ? `<p class="chart-hint">지시사항: "${escapeHtml(params.focus_instruction)}"</p>` : '';
+      const dateWarningHtml = (counts.undated_considered || 0) > 0
+        ? `<p style="color:#b45309;">⚠ 날짜가 없는 ${Number(counts.undated_considered)}건은 최근순 여부를 검증할 수 없습니다.</p>`
+        : '';
+      const gate = result.quality_gate || {};
+      const gateApproved = gate.status === 'APPROVED';
+      const gateHtml = gate.status
+        ? `<p style="padding:0.65rem 0.8rem; border-radius:6px; background:${gateApproved ? '#dcfce7' : '#fee2e2'}; color:${gateApproved ? '#166534' : '#991b1b'};">
+            <strong>품질 게이트: ${escapeHtml(gate.status)}</strong>${gateApproved ? ' — 검증을 통과했습니다.' : ' — 정책 확정·승인 보고의 근거로 사용하지 마세요.'}
+          </p>`
+        : '';
       document.getElementById('voc-result').innerHTML = `
         <div class="card">
           <p class="chart-hint">${escapeHtml(record.created_at || '')} · ${escapeHtml(record.created_by || '')} ·
-            게시판 ${counts.board ?? 0}건 / Jira ${counts.jira ?? 0}건 / 엑셀 ${counts.excel ?? 0}건
-            (전체 ${counts.total_available ?? 0}건 중 ${counts.total_considered ?? 0}건 분석)</p>
+            입력: 게시판 ${counts.board ?? 0}건 / Jira ${counts.jira ?? 0}건 / 엑셀 ${counts.excel ?? 0}건 ·
+            실제 분석: 게시판 ${considered.board ?? 0}건 / Jira ${considered.jira ?? 0}건 / 엑셀 ${considered.excel ?? 0}건
+            (전체 ${counts.total_available ?? 0}건 중 ${counts.total_considered ?? 0}건)</p>
           ${focusHtml}
+          ${dateWarningHtml}
           <p>${escapeHtml(result.summary || '')}</p>
           <table><thead><tr><th>이슈 주제</th><th>빈도</th><th>심각도</th><th>개선안</th></tr></thead>
             <tbody>${issuesHtml || '<tr><td colspan="4">이슈가 없습니다.</td></tr>'}</tbody></table>
           ${_renderJudgeBadge(result.judge)}
+          ${gateHtml}
         </div>`;
     }
 
     function _renderJudgeBadge(judge) {
       if (!judge) return '';
       const verdict = judge.verdict || 'SKIPPED';
-      const badgeClass = verdict === 'PASS' ? 'judge-badge-pass' : (verdict === 'FAIL' ? 'judge-badge-fail' : 'judge-badge-skipped');
-      const crossModelText = judge.cross_model ? '다른 모델로 교차 검증' : '동일 모델로 검증(교차검증 아님)';
+      const badgeClass = verdict === 'PASS' ? 'judge-badge-pass' : ((verdict === 'FAIL' || verdict === 'ERROR') ? 'judge-badge-fail' : 'judge-badge-skipped');
+      let crossModelText = '동일 모델 검증 완료(교차검증 아님)';
+      if (verdict === 'ERROR') crossModelText = '교차검증 실패';
+      else if (verdict === 'SKIPPED') crossModelText = '교차검증 미실행';
+      else if (judge.cross_model) crossModelText = '다른 모델로 교차 검증 완료';
+      else if (verdict === 'FAIL' && !Object.keys(judge.criteria || {}).length) crossModelText = '결정적 사전 검증 실패';
       const criteria = judge.criteria || {};
-      const criteriaLabels = { relevance: '관련성', root_cause_addressing: '근본원인 대응', feasibility: '실행가능성', measurability: '검증가능성' };
+      const criteriaLabels = { relevance: '관련성', root_cause_addressing: '근본원인 대응', feasibility: '실행가능성', measurability: '검증가능성', example_ids_valid: '근거 ID 유효성' };
       const criteriaHtml = Object.keys(criteria).length
-        ? `<div class="judge-criteria">${Object.entries(criteriaLabels).map(([key, label]) =>
+        ? `<div class="judge-criteria">${Object.entries(criteriaLabels).filter(([key]) => Object.prototype.hasOwnProperty.call(criteria, key)).map(([key, label]) =>
             `<span>${criteria[key] ? '✅' : '❌'} ${label}</span>`).join('')}</div>`
         : '';
       return `
@@ -891,15 +969,28 @@
       const el = document.getElementById('voc-history-list');
       const res = await fetch('/api/voc-analysis/history');
       const items = await res.json();
-      const headerHtml = '<thead><tr><th>일시</th><th>실행자</th><th>요약</th></tr></thead>';
-      renderPagedHtmlTable('voc-history-list', headerHtml, items, item => `<tr>
+      const deleteHeader = _canModerate ? '<th></th>' : '';
+      const headerHtml = `<thead><tr><th>일시</th><th>실행자</th><th>검증</th><th>요약</th>${deleteHeader}</tr></thead>`;
+      renderPagedHtmlTable('voc-history-list', headerHtml, items, item => {
+        const deleteCell = _canModerate ? `<td><button type="button" class="btn-danger" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="event.stopPropagation(); deleteVocAnalysis('${item.id}')">삭제</button></td>` : '';
+        return `<tr>
           <td><span class="board-row-title" onclick="loadVocAnalysisRecord('${item.id}')">${escapeHtml(formatTimestamp(item.created_at))}</span></td>
           <td>${escapeHtml(item.created_by || '')}</td>
+          <td>${escapeHtml(item.quality_gate_status || item.judge_verdict || '-')}</td>
           <td>${escapeHtml((item.summary || '').slice(0, 80))}</td>
-        </tr>`);
+          ${deleteCell}
+        </tr>`;
+      });
       if (!items.length) {
         el.innerHTML = '<p>지난 분석 이력이 없습니다.</p>';
       }
+    }
+
+    async function deleteVocAnalysis(id) {
+      if (!confirm('이 분석 이력을 삭제하시겠습니까?')) return;
+      const res = await fetch(`/api/voc-analysis/${id}`, { method: 'DELETE' });
+      if (!res.ok) { const err = await res.json(); alert(err.error || '삭제에 실패했습니다.'); return; }
+      loadVocHistory();
     }
 
     async function loadVocAnalysisRecord(id) {
@@ -1488,6 +1579,10 @@
       }
       if (name === 'voc-analysis') {
         loadVocHistory();
+        if (!_vocQualityReportLoaded) {
+          _vocQualityReportLoaded = true;
+          viewDoc('voc_quality_report', 'voc-quality-report');
+        }
       }
     }
 

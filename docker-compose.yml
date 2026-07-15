@@ -5,6 +5,7 @@ services:
       - "8000:8000"
     environment:
       PYTHONUNBUFFERED: "1"
+      TZ: "Asia/Seoul"
     env_file:
       - .env
     volumes:

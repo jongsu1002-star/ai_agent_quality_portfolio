@@ -117,8 +117,11 @@ def load_voc_excel(path: str | Path) -> List[Dict[str, str]]:
     의미가 없으므로 건너뜀."""
     path = Path(path)
     suffix = path.suffix.lower()
-    if suffix not in {".xlsx", ".xls"}:
-        raise ValueError(f"Unsupported VOC excel format: {suffix}")
+    if suffix != ".xlsx":
+        # .xls(구형 바이너리 포맷)는 pandas가 읽으려면 xlrd 의존성이 별도로 필요한데
+        # requirements.txt에 없어 실제로는 처리에 실패함 - 있지도 않은 지원을 광고하지
+        # 않도록 .xlsx만 허용(라우터/화면의 허용 확장자와 반드시 일치시킬 것)
+        raise ValueError(f"Unsupported VOC excel format: {suffix} (.xlsx만 지원합니다)")
     df = pd.read_excel(path)
     records = df.to_dict(orient="records")
     records = [{k: (None if isinstance(v, float) and pd.isna(v) else v) for k, v in row.items()} for row in records]

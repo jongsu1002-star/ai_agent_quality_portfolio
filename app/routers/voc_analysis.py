@@ -8,6 +8,9 @@ app/main.py와의 결합은 monitoring_addon.py/board.py와 동일하게 `config
 from __future__ import annotations
 
 import json
+import logging
+import os
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -22,19 +25,29 @@ from qa_agent.llm_client import OpenAIJudgeClient
 from qa_agent.voc_analysis import MAX_ITEMS_FOR_PROMPT, run_voc_analysis_with_judge
 
 router = APIRouter(prefix="/api/voc-analysis")
+logger = logging.getLogger(__name__)
 
 VOC_ANALYSIS_DIR = Path("reports") / "voc_analysis"
 VOC_UPLOAD_DIR = VOC_ANALYSIS_DIR / "uploads"
 
-_state: Dict[str, Any] = {"store": None, "current_username": None, "load_settings": None, "llm_kwargs": None, "independent_judge_kwargs": None}
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5MB - VOC 엑셀 업로드는 몇백 행 수준이면 충분, 대용량 업로드로
+                                     # 메모리를 고갈시키는 것을 막기 위한 상한
+ALLOWED_UPLOAD_EXTENSIONS = {".xlsx"}  # qa_agent/excel_io.py::load_voc_excel과 반드시 일치시킬 것
+ALLOWED_UPLOAD_CONTENT_TYPES = {
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/octet-stream",  # 브라우저/OS에 따라 엑셀 파일에 이 MIME이 붙는 경우가 흔함
+}
+
+_state: Dict[str, Any] = {"store": None, "current_username": None, "load_settings": None, "llm_kwargs": None, "independent_judge_kwargs": None, "is_admin": None}
 
 
-def configure(store: BoardStore, current_username_fn, load_settings_fn, llm_kwargs_fn, independent_judge_kwargs_fn) -> None:
+def configure(store: BoardStore, current_username_fn, load_settings_fn, llm_kwargs_fn, independent_judge_kwargs_fn, is_admin_fn) -> None:
     _state["store"] = store
     _state["current_username"] = current_username_fn
     _state["load_settings"] = load_settings_fn
     _state["llm_kwargs"] = llm_kwargs_fn
     _state["independent_judge_kwargs"] = independent_judge_kwargs_fn
+    _state["is_admin"] = is_admin_fn
 
 
 def _store() -> BoardStore:
@@ -45,11 +58,24 @@ def _username(request: Request) -> str:
     return _state["current_username"](request)
 
 
-def _resolve_upload_path(raw_path: str) -> Optional[Path]:
+def _user_analysis_dir(username: str) -> Path:
+    """인증 미사용(shared)은 기존 경로를 유지하고, 계정 사용 시 결과를 사용자별로 격리."""
+    if username == "shared":
+        return VOC_ANALYSIS_DIR
+    return VOC_ANALYSIS_DIR / "users" / username
+
+
+def _user_upload_dir(username: str) -> Path:
+    if username == "shared":
+        return VOC_UPLOAD_DIR
+    return _user_analysis_dir(username) / "uploads"
+
+
+def _resolve_upload_path(raw_path: str, username: str = "shared") -> Optional[Path]:
     """경로 조작(../ 등) 방지 - VOC_UPLOAD_DIR 안의 파일만 허용."""
     try:
         resolved = Path(raw_path).resolve()
-        base = VOC_UPLOAD_DIR.resolve()
+        base = _user_upload_dir(username).resolve()
         resolved.relative_to(base)
     except (ValueError, OSError):
         return None
@@ -67,20 +93,50 @@ def voc_template() -> Response:
     )
 
 
+def _safe_upload_filename(filename: str) -> str:
+    """Path(...).name으로 경로 구분자를 제거해 베이스네임만 남김 - "../../etc/passwd" 같은
+    입력도 안전한 마지막 세그먼트로 축소됨(디렉터리 탈출/임의 경로 쓰기 방지)."""
+    return Path(filename or "").name or "upload.xlsx"
+
+
 @router.post("/excel/upload")
-async def upload_voc_excel(file: UploadFile = File(...)) -> JSONResponse:
-    """VOC 외부 데이터 엑셀 업로드 - 파싱해 미리보기까지 함께 반환."""
-    VOC_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    content = await file.read()
+async def upload_voc_excel(request: Request, file: UploadFile = File(...)) -> JSONResponse:
+    """VOC 외부 데이터 엑셀 업로드 - 파싱해 미리보기까지 함께 반환.
+
+    저장 전에 확장자/MIME/용량을 먼저 걸러내고, 파싱 실패나 유효한 행이 없는 경우 저장했던
+    파일을 즉시 삭제한다(디스크에 검증 실패한 파일이 남지 않도록)."""
+    safe_name = _safe_upload_filename(file.filename or "")
+    extension = Path(safe_name).suffix.lower()
+    if extension not in ALLOWED_UPLOAD_EXTENSIONS:
+        return JSONResponse({"error": f"지원하지 않는 파일 형식입니다({extension or '확장자 없음'}). .xlsx만 지원합니다."}, status_code=400)
+    if file.content_type and file.content_type not in ALLOWED_UPLOAD_CONTENT_TYPES:
+        return JSONResponse({"error": f"지원하지 않는 파일 형식입니다(Content-Type: {file.content_type})"}, status_code=400)
+
+    # 크기 제한보다 1바이트 더 읽어서, 정확히 상한과 같은 파일은 통과시키면서도 그보다 큰
+    # 파일은 전체를 메모리에 다 올리지 않고 바로 걸러냄
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        return JSONResponse({"error": f"파일이 너무 큽니다(최대 {MAX_UPLOAD_BYTES // (1024 * 1024)}MB)"}, status_code=413)
+    if not content:
+        return JSONResponse({"error": "빈 파일입니다"}, status_code=400)
+
+    upload_dir = _user_upload_dir(_username(request))
+    upload_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    path = VOC_UPLOAD_DIR / f"{stamp}_{file.filename}"
+    path = upload_dir / f"{stamp}_{safe_name}"
     path.write_bytes(content)
     try:
         rows = load_voc_excel(path)
+        if not rows:
+            path.unlink(missing_ok=True)
+            return JSONResponse({"error": "유효한 content가 있는 행이 없습니다"}, status_code=400)
     except ValueError as exc:
+        path.unlink(missing_ok=True)
         return JSONResponse({"error": str(exc)}, status_code=400)
-    if not rows:
-        return JSONResponse({"error": "유효한 content가 있는 행이 없습니다"}, status_code=400)
+    except Exception:
+        path.unlink(missing_ok=True)
+        logger.exception("VOC Excel parsing failed")
+        return JSONResponse({"error": "엑셀 파일을 처리하지 못했습니다. 파일 형식과 내용을 확인하세요."}, status_code=400)
     return JSONResponse({"excel_path": str(path), "row_count": len(rows), "preview": rows[:5]})
 
 
@@ -98,15 +154,22 @@ def jira_preview(jql: Optional[str] = None, max_results: int = 50) -> JSONRespon
         issues = fetch_backlog_issues(jira_config, jql=jql, max_results=max_results)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
-    except Exception as exc:
-        return JSONResponse({"error": f"Jira 조회 실패: {exc}"}, status_code=502)
+    except Exception:
+        logger.exception("VOC Jira preview failed")
+        return JSONResponse({"error": "Jira 조회에 실패했습니다. 연결 설정과 권한을 확인하세요."}, status_code=502)
     return JSONResponse({"issues": issues, "count": len(issues)})
 
 
 @router.post("/run")
 def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
-    """게시판 VOC 글(항상 포함) + 선택적 Jira/엑셀 소스를 모아 LLM 분석을 동기 실행."""
-    board_posts = _store().list_posts("voc", limit=300, include_hidden=False)
+    """게시판 VOC 글 + 선택적 Jira/엑셀 소스를 모아 LLM 분석을 동기 실행.
+
+    use_board 기본값은 True(아무것도 지정하지 않으면 게시판 VOC를 씀 - 기존 동작과 동일한
+    하위호환 기본값). Jira/엑셀을 추가로 켤 때는 게시판 VOC를 포함할지 여부를 명시적으로
+    선택할 수 있음(use_board=false로 게시판을 빼고 외부 소스만 분석하는 것도 가능)."""
+    board_posts: List[Dict[str, Any]] = []
+    if payload.get("use_board", True):
+        board_posts = _store().list_posts("voc", limit=300, include_hidden=False)
 
     jira_issues: List[Dict[str, Any]] = []
     if payload.get("use_jira"):
@@ -119,18 +182,24 @@ def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
         }
         try:
             jira_issues = fetch_backlog_issues(jira_config, jql=payload.get("jira_jql"), max_results=payload.get("jira_max_results", 50))
-        except Exception as exc:
-            return JSONResponse({"error": f"Jira 조회 실패: {exc}"}, status_code=502)
+        except Exception:
+            logger.exception("VOC Jira retrieval failed")
+            return JSONResponse({"error": "Jira 조회에 실패했습니다. 연결 설정과 권한을 확인하세요."}, status_code=502)
 
     excel_rows: List[Dict[str, Any]] = []
+    if payload.get("use_excel") and not payload.get("excel_path"):
+        return JSONResponse({"error": "엑셀 사용을 선택했지만 업로드된 파일이 없습니다"}, status_code=400)
     if payload.get("use_excel") and payload.get("excel_path"):
-        resolved = _resolve_upload_path(payload["excel_path"])
+        resolved = _resolve_upload_path(payload["excel_path"], _username(request))
         if not resolved:
             return JSONResponse({"error": "invalid excel_path"}, status_code=400)
         try:
             excel_rows = load_voc_excel(resolved)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception:
+            logger.exception("VOC Excel loading failed")
+            return JSONResponse({"error": "엑셀 데이터를 불러오지 못했습니다. 파일을 다시 업로드하세요."}, status_code=400)
 
     settings = _state["load_settings"]()
     llm_kwargs = _state["llm_kwargs"](settings)
@@ -149,11 +218,16 @@ def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
     # 미지정이면 기본 상한 그대로 사용
     raw_item_limit = payload.get("item_limit")
     item_limit = MAX_ITEMS_FOR_PROMPT
-    if raw_item_limit:
+    if raw_item_limit is not None:
         try:
-            item_limit = max(1, min(int(raw_item_limit), MAX_ITEMS_FOR_PROMPT))
+            if isinstance(raw_item_limit, bool):
+                raise ValueError
+            parsed_item_limit = int(raw_item_limit)
         except (TypeError, ValueError):
             return JSONResponse({"error": "item_limit은 숫자여야 합니다"}, status_code=400)
+        if parsed_item_limit < 1:
+            return JSONResponse({"error": "item_limit은 1 이상이어야 합니다"}, status_code=400)
+        item_limit = min(parsed_item_limit, MAX_ITEMS_FOR_PROMPT)
 
     try:
         result = run_voc_analysis_with_judge(
@@ -162,16 +236,22 @@ def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
         )
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
-    except Exception as exc:
-        return JSONResponse({"error": f"VOC 분석 실패: {exc}"}, status_code=502)
+    except Exception:
+        logger.exception("VOC analysis generation failed")
+        return JSONResponse({"error": "VOC 분석 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요."}, status_code=502)
 
-    VOC_ANALYSIS_DIR.mkdir(parents=True, exist_ok=True)
-    analysis_id = f"voc_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    analysis_dir = _user_analysis_dir(_username(request))
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+    # 초 단위 타임스탬프만 쓰면 같은 초에 완료된 두 요청의 결과 파일이 서로 덮어써서 감사
+    # 기록이 유실될 수 있었음(실제로 지적된 결함) - 마이크로초 + uuid 접미사로 사실상
+    # 충돌 불가능하게 하면서도, 파일명 앞부분은 여전히 타임스탬프라 정렬/식별이 쉬움
+    analysis_id = f"voc_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:8]}"
     record = {
         "id": analysis_id,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "created_by": _username(request),
         "params": {
+            "use_board": bool(payload.get("use_board", True)),
             "use_jira": bool(payload.get("use_jira")),
             "jira_jql": payload.get("jira_jql"),
             "use_excel": bool(payload.get("use_excel")),
@@ -181,29 +261,67 @@ def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
         },
         "result": result,
     }
-    (VOC_ANALYSIS_DIR / f"{analysis_id}.json").write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_analysis_record_atomically(analysis_id, record, analysis_dir)
     return JSONResponse(record)
 
 
+def _write_analysis_record_atomically(analysis_id: str, record: Dict[str, Any], analysis_dir: Optional[Path] = None) -> None:
+    """같은 디렉터리에 임시 파일로 먼저 쓴 뒤 os.replace()로 원자적 교체 - 쓰는 도중에
+    프로세스가 죽거나 같은 파일을 읽는 다른 요청이 있어도 반쯤 쓰인 JSON을 보는 일이 없음."""
+    target_dir = analysis_dir or VOC_ANALYSIS_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+    final_path = target_dir / f"{analysis_id}.json"
+    tmp_path = target_dir / f".{analysis_id}.json.tmp"
+    tmp_path.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp_path, final_path)
+
+
 @router.get("/history")
-def analysis_history() -> JSONResponse:
-    if not VOC_ANALYSIS_DIR.exists():
+def analysis_history(request: Request) -> JSONResponse:
+    analysis_dir = _user_analysis_dir(_username(request))
+    if not analysis_dir.exists():
         return JSONResponse([])
     records = []
-    for path in sorted(VOC_ANALYSIS_DIR.glob("voc_*.json"), reverse=True):
+    for path in sorted(analysis_dir.glob("voc_*.json"), reverse=True):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            records.append({"id": data["id"], "created_at": data["created_at"], "created_by": data.get("created_by"), "summary": data.get("result", {}).get("summary", "")})
+            result = data.get("result", {})
+            records.append({
+                "id": data["id"],
+                "created_at": data["created_at"],
+                "created_by": data.get("created_by"),
+                "summary": result.get("summary", ""),
+                "judge_verdict": result.get("judge", {}).get("verdict"),
+                "quality_gate_status": result.get("quality_gate", {}).get("status"),
+            })
         except Exception:
             continue
     return JSONResponse(records)
 
 
+def _safe_analysis_path(analysis_id: str, username: str = "shared") -> Optional[Path]:
+    if not analysis_id.startswith("voc_") or "/" in analysis_id or "\\" in analysis_id or ".." in analysis_id:
+        return None
+    return _user_analysis_dir(username) / f"{analysis_id}.json"
+
+
+@router.delete("/{analysis_id}")
+def delete_analysis(analysis_id: str, request: Request) -> JSONResponse:
+    """VOC 분석 이력 삭제 - 게시글 삭제와 동일하게 관리자만 가능(이력 관리 기능)."""
+    if not _state["is_admin"](request):
+        return JSONResponse({"error": "forbidden (admin only)"}, status_code=403)
+    path = _safe_analysis_path(analysis_id, _username(request))
+    if not path or not path.exists():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    path.unlink()
+    return JSONResponse({"deleted": True})
+
+
 @router.get("/{analysis_id}")
-def analysis_detail(analysis_id: str) -> JSONResponse:
+def analysis_detail(analysis_id: str, request: Request) -> JSONResponse:
     if "/" in analysis_id or "\\" in analysis_id or ".." in analysis_id:
         return JSONResponse({"error": "invalid id"}, status_code=400)
-    path = VOC_ANALYSIS_DIR / f"{analysis_id}.json"
+    path = _user_analysis_dir(_username(request)) / f"{analysis_id}.json"
     if not path.exists():
         return JSONResponse({"error": "not found"}, status_code=404)
     return JSONResponse(json.loads(path.read_text(encoding="utf-8")))

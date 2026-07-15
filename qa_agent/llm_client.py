@@ -134,8 +134,12 @@ class OpenAIJudgeClient:
         }
         payload = {
             "model": self.model,
-            "max_tokens": 1024,
-            "temperature": 0,
+            "max_tokens": 2048,
+            # temperature를 일부러 안 보냄 - 확장 사고(extended thinking)를 쓰는 최신 모델
+            # (예: claude-sonnet-5)은 temperature 파라미터 자체를 거부함
+            # ("`temperature` is deprecated for this model" 400 에러로 실제 확인됨).
+            # 다른 모델은 temperature 생략 시 Anthropic API가 기본값(1.0)을 쓰지만, 판정
+            # 프롬프트는 어차피 "JSON만 답하라"는 강한 형식 제약이 있어 실질적 영향은 적음.
             "system": system_prompt + "\n\nRespond with ONLY a single JSON object -- no markdown code fences, no extra text.",
             "messages": [{"role": "user", "content": user_prompt}],
         }

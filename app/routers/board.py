@@ -104,6 +104,32 @@ def delete_post(post_id: int, request: Request) -> JSONResponse:
     return JSONResponse({"deleted": True})
 
 
+@router.post("/posts/bulk-delete")
+def bulk_delete_posts(payload: Dict[str, Any], request: Request) -> JSONResponse:
+    """목록에서 여러 개를 선택해 한 번에 삭제 - 단건 삭제와 동일하게 관리자만 가능.
+
+    존재하지 않는 id는 조용히 건너뛰고 응답의 not_found에 모아서 알려줌(하나가 잘못됐다고
+    나머지 정상 id의 삭제까지 막지 않음)."""
+    if not _state["is_admin"](request):
+        return JSONResponse({"error": "forbidden (admin only)"}, status_code=403)
+    raw_ids = payload.get("ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return JSONResponse({"error": "ids는 비어 있지 않은 배열이어야 합니다"}, status_code=400)
+    deleted: list = []
+    not_found: list = []
+    for raw_id in raw_ids:
+        try:
+            post_id = int(raw_id)
+        except (TypeError, ValueError):
+            not_found.append(raw_id)
+            continue
+        if _store().delete_post(post_id):
+            deleted.append(post_id)
+        else:
+            not_found.append(post_id)
+    return JSONResponse({"deleted": deleted, "not_found": not_found})
+
+
 @router.post("/posts/{post_id}/visibility")
 def set_post_visibility(post_id: int, payload: Dict[str, Any], request: Request) -> JSONResponse:
     """노출/비노출 전환 - 작성자 또는 관리자만 가능."""
@@ -120,7 +146,11 @@ def set_post_visibility(post_id: int, payload: Dict[str, Any], request: Request)
 
 @router.post("/posts/{post_id}/comments")
 def add_comment(post_id: int, payload: Dict[str, Any], request: Request) -> JSONResponse:
-    if not _store().get_post(post_id):
+    """댓글 작성 전, 게시글 열람 권한을 GET /posts/{id}와 동일하게 검사 - 예전엔 게시글
+    "존재 여부"만 확인해서, 비노출 글의 id를 아는 사용자가 댓글을 달거나(그 글이 존재한다는
+    사실을 역으로 추측) 할 수 있었던 우회 지점."""
+    post = _store().get_post(post_id)
+    if not post or (not post["visible"] and not _can_modify(request, post["author"])):
         return JSONResponse({"error": "post not found"}, status_code=404)
     comment = _store().add_comment(post_id, _username(request), str(payload.get("content") or ""))
     if not comment:

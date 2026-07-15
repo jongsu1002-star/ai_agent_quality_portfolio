@@ -83,3 +83,13 @@ def test_write_test_results_doc_creates_file(tmp_path):
     path = write_test_results_doc(stats, exitstatus=0, docs_dir=str(tmp_path))
     assert path.exists()
     assert "모든 테스트가 통과했습니다" in path.read_text(encoding="utf-8")
+
+
+def test_render_test_results_markdown_does_not_call_zero_tests_a_success():
+    stats = {"passed": [], "failed": [], "skipped": [], "error": []}
+
+    markdown = render_test_results_markdown(stats, exitstatus=0)
+
+    assert "총 테스트 수: 0" in markdown
+    assert "성공 여부를 판정할 수 없습니다" in markdown
+    assert "모든 테스트가 통과했습니다" not in markdown

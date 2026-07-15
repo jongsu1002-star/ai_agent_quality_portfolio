@@ -97,6 +97,45 @@ def build_testcase_template_workbook() -> BytesIO:
     return output
 
 
+def build_voc_import_template_workbook() -> BytesIO:
+    """VOC 자동분석에 외부 데이터를 얹을 때 쓰는 엑셀 양식 - source/date/category/content 4컬럼."""
+    template = pd.DataFrame([
+        {"source": "고객센터", "date": "2026-07-01", "category": "결제", "content": "결제 실패 후 재시도가 안 됩니다."},
+        {"source": "앱스토어 리뷰", "date": "2026-07-02", "category": "UI", "content": "버튼이 너무 작아서 누르기 힘들어요."},
+    ])
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        template.to_excel(writer, index=False, sheet_name="voc")
+    output.seek(0)
+    return output
+
+
+def load_voc_excel(path: str | Path) -> List[Dict[str, str]]:
+    """VOC 외부 데이터 엑셀을 {source, date, category, content} 레코드 목록으로 변환.
+
+    load_dataset()/load_testcase()와 동일한 NaN 스크럽 패턴 - content가 빈 행은 분석에
+    의미가 없으므로 건너뜀."""
+    path = Path(path)
+    suffix = path.suffix.lower()
+    if suffix not in {".xlsx", ".xls"}:
+        raise ValueError(f"Unsupported VOC excel format: {suffix}")
+    df = pd.read_excel(path)
+    records = df.to_dict(orient="records")
+    records = [{k: (None if isinstance(v, float) and pd.isna(v) else v) for k, v in row.items()} for row in records]
+    result = []
+    for row in records:
+        content = str(row.get("content") or row.get("내용") or "").strip()
+        if not content:
+            continue
+        result.append({
+            "source": str(row.get("source") or row.get("출처") or "excel"),
+            "date": str(row.get("date") or row.get("일자") or ""),
+            "category": str(row.get("category") or row.get("분류") or ""),
+            "content": content,
+        })
+    return result
+
+
 def build_template_workbook() -> BytesIO:
     """예시 2행이 담긴 빈 Excel 양식을 메모리(BytesIO)에서 생성 - /api/dataset/template이 반환."""
     template = pd.DataFrame([

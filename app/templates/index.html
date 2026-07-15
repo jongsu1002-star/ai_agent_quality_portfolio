@@ -74,7 +74,21 @@
     .logout-btn { background: white; border: 1px solid var(--gridline); color: var(--text-secondary); padding: 0.55rem 0.9rem; }
     .logout-btn:hover { background: #f8fafc; }
     pre { background: #111827; color: #f9fafb; padding: 1rem; border-radius: 8px; overflow-x: auto; }
-    input, select { width: 100%; padding: 0.7rem; margin-top: 0.45rem; border: 1px solid #cbd5e1; border-radius: 8px; box-sizing: border-box; }
+    input, select, textarea { width: 100%; padding: 0.7rem; margin-top: 0.45rem; border: 1px solid #cbd5e1; border-radius: 8px; box-sizing: border-box; font-family: inherit; }
+    .board-row-title { cursor: pointer; color: #1d4ed8; font-weight: 600; }
+    .board-row-title:hover { text-decoration: underline; }
+    .board-hidden-badge { display: inline-block; margin-left: 0.4rem; padding: 0.1rem 0.5rem; border-radius: 999px; background: #fee2e2; color: #991b1b; font-size: 0.75rem; }
+    .board-comment { border-top: 1px solid var(--gridline); padding: 0.6rem 0; }
+    .board-comment-meta { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.25rem; }
+    .board-actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
+    .board-actions button { padding: 0.45rem 0.8rem; font-size: 0.85rem; }
+    .btn-secondary { background: #eef2f7; color: #1f2937; }
+    .btn-danger { background: linear-gradient(90deg, #dc2626, #ef4444); }
+    .judge-badge { display: inline-block; padding: 0.25rem 0.7rem; border-radius: 999px; font-weight: 700; font-size: 0.85rem; }
+    .judge-badge-pass { background: #dcfce7; color: #166534; }
+    .judge-badge-fail { background: #fee2e2; color: #991b1b; }
+    .judge-badge-skipped { background: #fef3c7; color: #92400e; }
+    .judge-criteria { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.4rem; font-size: 0.82rem; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
     .metric { padding: 1rem; background: linear-gradient(135deg, #eff6ff, #dbeafe); border-radius: 10px; font-weight: 600; min-width: 0; overflow-wrap: break-word; word-break: break-word; }
     .status-pill { display: inline-block; margin-top: 0.35rem; padding: 0.2rem 0.6rem; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 0.85rem; }
@@ -105,6 +119,8 @@
       <button type="button" class="tab-btn active" data-tab="settings" onclick="showTab('settings')">설정</button>
       <button type="button" class="tab-btn" data-tab="run" onclick="showTab('run')">실행</button>
       <button type="button" class="tab-btn" data-tab="dashboard" onclick="showTab('dashboard')">대시보드</button>
+      <button type="button" class="tab-btn" data-tab="board" onclick="showTab('board')">게시판</button>
+      <button type="button" class="tab-btn" data-tab="voc-analysis" onclick="showTab('voc-analysis')">VOC 분석</button>
       <button type="button" class="tab-btn" data-tab="monitoring" onclick="showTab('monitoring')">모니터링</button>
       <button type="button" class="tab-btn" title="성능테스트(k6) · Prometheus/Grafana" onclick="window.location.href='/monitoring-addon'">모니터링 애드온</button>
       <button type="button" class="tab-btn" id="users-tab-btn" data-tab="users" onclick="showTab('users')" style="display:none;">사용자 관리</button>
@@ -465,6 +481,79 @@
     </div>
   </div>
 
+  <!-- ===================== 게시판 ===================== -->
+  <div id="tab-board" class="tab-panel">
+    <div class="card">
+      <h2>게시판</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">일반(잡담)/FAQ/VOC(불만 및 요구사항) 게시판입니다. 삭제는 관리자만, 글 수정·노출/비노출 전환은 작성자 본인 또는 관리자가 할 수 있습니다.</p>
+      <div class="doc-tabs">
+        <button type="button" class="board-cat-btn doc-tab-btn active" data-cat="general" onclick="showBoardCategory('general')">일반</button>
+        <button type="button" class="board-cat-btn doc-tab-btn" data-cat="faq" onclick="showBoardCategory('faq')">FAQ</button>
+        <button type="button" class="board-cat-btn doc-tab-btn" data-cat="voc" onclick="showBoardCategory('voc')">VOC</button>
+      </div>
+      <div class="board-actions">
+        <button type="button" onclick="toggleBoardWriteForm()">글쓰기</button>
+      </div>
+      <div id="board-write-form" style="display:none; margin-top:0.75rem;">
+        <input id="board-write-title" placeholder="제목" />
+        <textarea id="board-write-content" rows="4" placeholder="내용" style="margin-top:0.45rem;"></textarea>
+        <div class="board-actions">
+          <button type="button" onclick="submitBoardPost()">등록</button>
+          <button type="button" class="btn-secondary" onclick="toggleBoardWriteForm()">취소</button>
+        </div>
+      </div>
+      <div id="board-post-list" class="table-view" style="margin-top:0.75rem;">불러오는 중...</div>
+    </div>
+  </div>
+
+  <!-- 게시글 상세+댓글 모달 - #chart-modal과 같은 이유로 탭 바깥에 둠(탭이 숨겨져 있어도
+       정상 동작해야 함) -->
+  <div id="board-post-modal" class="chart-modal-overlay" onclick="if (event.target.id === 'board-post-modal') closeBoardPostModal();">
+    <div class="chart-modal-content">
+      <button type="button" class="chart-modal-close" onclick="closeBoardPostModal()" aria-label="닫기">✕</button>
+      <div id="board-post-modal-body">불러오는 중...</div>
+    </div>
+  </div>
+
+  <!-- ===================== VOC 자동분석 ===================== -->
+  <div id="tab-voc-analysis" class="tab-panel">
+    <div class="card">
+      <h2>VOC 자동분석</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">게시판의 VOC 글은 항상 포함됩니다. 필요하면 Jira 백로그, 외부 엑셀 데이터를 추가해서 함께 분석할 수 있습니다.</p>
+      <div>
+        <label>분석 지시사항 (선택 - 예: "상담 대기시간과 불친절 관련 불만사항을 중심으로 정책 개선안을 제시해줘")</label>
+        <textarea id="voc-focus-instruction" rows="2" placeholder="특정 주제나 관점으로 좁혀서 분석하고 싶으면 입력하세요. 비워두면 전체를 종합 분석합니다."></textarea>
+        <label style="margin-top:0.6rem;">분석 대상 건수 (선택, 기본 150건, 최근순)</label>
+        <input id="voc-item-limit" type="number" min="1" max="150" placeholder="예: 20 (최근 20건만 분석)" />
+      </div>
+      <div class="grid">
+        <div>
+          <label><input type="checkbox" id="voc-use-jira" style="width:auto; display:inline-block; margin-right:0.4rem;" /> Jira 백로그 포함</label>
+          <input id="voc-jira-jql" placeholder="JQL (선택, 비우면 설정된 프로젝트 기본값 사용)" style="margin-top:0.4rem;" />
+          <button type="button" class="btn-secondary" style="margin-top:0.4rem;" onclick="previewJiraIssues()">Jira 미리보기</button>
+          <div id="voc-jira-preview" class="chart-hint"></div>
+        </div>
+        <div>
+          <label><input type="checkbox" id="voc-use-excel" style="width:auto; display:inline-block; margin-right:0.4rem;" /> 엑셀 업로드 데이터 포함</label>
+          <div class="board-actions">
+            <a href="/api/voc-analysis/template"><button type="button" class="btn-secondary">템플릿 다운로드</button></a>
+            <input type="file" id="voc-excel-file" accept=".xlsx,.xls" style="width:auto; margin-top:0;" />
+            <button type="button" class="btn-secondary" onclick="uploadVocExcel()">업로드</button>
+          </div>
+          <div id="voc-excel-status" class="chart-hint"></div>
+        </div>
+      </div>
+      <div class="board-actions">
+        <button type="button" id="voc-run-btn" onclick="runVocAnalysis()">VOC 분석 실행</button>
+      </div>
+      <div id="voc-result" style="margin-top:1rem;"></div>
+    </div>
+    <div class="card">
+      <h2>지난 분석 이력</h2>
+      <div id="voc-history-list" class="table-view">불러오는 중...</div>
+    </div>
+  </div>
+
   <!-- 모든 탭에서 공용으로 쓰는 차트 확대보기 모달 - 특정 탭(예: 대시보드) 안에 두면 그 탭이
        숨겨져 있을 때(display:none) 다른 탭의 차트를 클릭해도 모달이 안 보이다가, 나중에 그
        탭으로 돌아가면 엉뚱하게 모달이 떠 있는 것처럼 보이는 문제가 있어 탭 바깥으로 뺌. -->
@@ -497,6 +586,8 @@
     }
 
     let _isAdmin = false;
+    let _currentUsername = 'shared';
+    let _canModerate = false; // 게시글 삭제 등 "관리자만" 판단 - 서버의 _is_admin_effective와 동일한 규칙(LAN 모드는 전원 허용)
 
     async function initAuthUi() {
       try {
@@ -506,7 +597,9 @@
         logoutBtn.style.display = data.enabled ? '' : 'none';
         logoutBtn.textContent = data.username ? `로그아웃 (${data.username})` : '로그아웃';
         _isAdmin = !!data.is_admin;
-        const canSeeSettings = !data.enabled || _isAdmin; // 계정 시스템이 꺼진 LAN 모드에서는 전원이 사실상 운영자
+        _currentUsername = data.username || 'shared';
+        _canModerate = !data.enabled || _isAdmin; // 계정 시스템이 꺼진 LAN 모드에서는 전원이 사실상 운영자
+        const canSeeSettings = _canModerate;
         document.getElementById('users-tab-btn').style.display = _isAdmin ? '' : 'none';
         document.getElementById('connection-settings-card').style.display = canSeeSettings ? '' : 'none';
         if (canSeeSettings) {
@@ -515,6 +608,306 @@
       } catch (err) {
         // 조회 실패해도 화면 자체는 계속 써야 하므로 조용히 무시(로그아웃 버튼만 안 보임)
       }
+    }
+
+    function _canEditBoardItem(author) {
+      return author === _currentUsername || _canModerate;
+    }
+
+    // ===================== 게시판 =====================
+    let _currentBoardType = 'general';
+
+    function showBoardCategory(type) {
+      _currentBoardType = type;
+      document.querySelectorAll('.board-cat-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.cat === type));
+      document.getElementById('board-write-form').style.display = 'none';
+      loadBoardPosts();
+    }
+
+    function toggleBoardWriteForm() {
+      const form = document.getElementById('board-write-form');
+      const showing = form.style.display !== 'none';
+      form.style.display = showing ? 'none' : 'block';
+      if (!showing) {
+        document.getElementById('board-write-title').value = '';
+        document.getElementById('board-write-content').value = '';
+      }
+    }
+
+    async function submitBoardPost() {
+      const title = document.getElementById('board-write-title').value.trim();
+      const content = document.getElementById('board-write-content').value.trim();
+      if (!title) { alert('제목을 입력하세요.'); return; }
+      const res = await fetch('/api/board/posts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ board_type: _currentBoardType, title, content }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(err.error || '등록에 실패했습니다.'); return; }
+      toggleBoardWriteForm();
+      loadBoardPosts();
+    }
+
+    async function loadBoardPosts() {
+      const el = document.getElementById('board-post-list');
+      const res = await fetch(`/api/board/posts?board_type=${encodeURIComponent(_currentBoardType)}`);
+      const data = await res.json();
+      const headerHtml = '<thead><tr><th>제목</th><th>작성자</th><th>작성일</th><th>댓글</th></tr></thead>';
+      renderPagedHtmlTable('board-post-list', headerHtml, data.items, post => {
+        const hiddenBadge = post.visible ? '' : '<span class="board-hidden-badge">비노출</span>';
+        return `<tr>
+          <td><span class="board-row-title" onclick="openBoardPost(${post.id})">${escapeHtml(post.title)}</span>${hiddenBadge}</td>
+          <td>${escapeHtml(post.author)}</td>
+          <td>${escapeHtml(formatTimestamp(post.created_at))}</td>
+          <td>${post.comment_count}</td>
+        </tr>`;
+      });
+      if (!data.items.length) {
+        el.innerHTML = '<p>등록된 글이 없습니다.</p>';
+      }
+    }
+
+    async function openBoardPost(postId) {
+      const res = await fetch(`/api/board/posts/${postId}`);
+      if (!res.ok) { alert('글을 찾을 수 없습니다.'); return; }
+      const post = await res.json();
+      _renderBoardPostModal(post);
+      document.getElementById('board-post-modal').style.display = 'flex';
+    }
+
+    function closeBoardPostModal() {
+      document.getElementById('board-post-modal').style.display = 'none';
+    }
+
+    function _renderBoardPostModal(post) {
+      const canEdit = _canEditBoardItem(post.author);
+      const commentsHtml = post.comments.map(c => `
+        <div class="board-comment">
+          <div class="board-comment-meta">${escapeHtml(c.author)} · ${escapeHtml(formatTimestamp(c.created_at))}
+            ${_canModerate ? `<button type="button" class="btn-danger" style="padding:0.2rem 0.5rem; font-size:0.75rem; margin-left:0.4rem;" onclick="deleteBoardComment(${c.id}, ${post.id})">삭제</button>` : ''}
+          </div>
+          <div>${escapeHtml(c.content)}</div>
+        </div>`).join('') || '<p class="chart-hint">댓글이 없습니다.</p>';
+
+      const actions = [];
+      if (canEdit) {
+        actions.push(`<button type="button" class="btn-secondary" onclick="startEditBoardPost(${post.id})">수정</button>`);
+        actions.push(`<button type="button" class="btn-secondary" onclick="toggleBoardPostVisibility(${post.id}, ${post.visible ? 'false' : 'true'})">${post.visible ? '비노출로 전환' : '노출로 전환'}</button>`);
+      }
+      if (_canModerate) {
+        actions.push(`<button type="button" class="btn-danger" onclick="deleteBoardPost(${post.id})">삭제</button>`);
+      }
+
+      document.getElementById('board-post-modal-body').innerHTML = `
+        <h2>${escapeHtml(post.title)}${post.visible ? '' : '<span class="board-hidden-badge">비노출</span>'}</h2>
+        <p class="chart-hint">${escapeHtml(post.author)} · ${escapeHtml(formatTimestamp(post.created_at))}</p>
+        <div id="board-post-view-${post.id}">
+          <p style="white-space:pre-wrap;">${escapeHtml(post.content)}</p>
+          <div class="board-actions">${actions.join('')}</div>
+        </div>
+        <h3 style="margin-top:1.25rem;">댓글 (${post.comments.length})</h3>
+        <div id="board-comment-list">${commentsHtml}</div>
+        <div class="board-actions">
+          <textarea id="board-comment-input-${post.id}" rows="2" placeholder="댓글을 입력하세요" style="margin-top:0;"></textarea>
+        </div>
+        <div class="board-actions">
+          <button type="button" onclick="submitBoardComment(${post.id})">댓글 등록</button>
+        </div>`;
+    }
+
+    function startEditBoardPost(postId) {
+      const view = document.getElementById(`board-post-view-${postId}`);
+      const titleEl = document.querySelector(`#board-post-modal-body h2`);
+      const currentTitle = titleEl.childNodes[0].textContent;
+      const currentContent = view.querySelector('p').textContent;
+      view.innerHTML = `
+        <input id="board-edit-title-${postId}" value="${escapeHtml(currentTitle)}" />
+        <textarea id="board-edit-content-${postId}" rows="4" style="margin-top:0.45rem;">${escapeHtml(currentContent)}</textarea>
+        <div class="board-actions">
+          <button type="button" onclick="saveEditBoardPost(${postId})">저장</button>
+          <button type="button" class="btn-secondary" onclick="openBoardPost(${postId})">취소</button>
+        </div>`;
+    }
+
+    async function saveEditBoardPost(postId) {
+      const title = document.getElementById(`board-edit-title-${postId}`).value.trim();
+      const content = document.getElementById(`board-edit-content-${postId}`).value.trim();
+      if (!title) { alert('제목을 입력하세요.'); return; }
+      const res = await fetch(`/api/board/posts/${postId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, content }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(err.error || '수정에 실패했습니다.'); return; }
+      openBoardPost(postId);
+      loadBoardPosts();
+    }
+
+    async function toggleBoardPostVisibility(postId, visible) {
+      const res = await fetch(`/api/board/posts/${postId}/visibility`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visible }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(err.error || '전환에 실패했습니다.'); return; }
+      openBoardPost(postId);
+      loadBoardPosts();
+    }
+
+    async function deleteBoardPost(postId) {
+      if (!confirm('이 글을 삭제하시겠습니까? (댓글도 함께 삭제됩니다)')) return;
+      const res = await fetch(`/api/board/posts/${postId}`, { method: 'DELETE' });
+      if (!res.ok) { const err = await res.json(); alert(err.error || '삭제에 실패했습니다.'); return; }
+      closeBoardPostModal();
+      loadBoardPosts();
+    }
+
+    async function submitBoardComment(postId) {
+      const input = document.getElementById(`board-comment-input-${postId}`);
+      const content = input.value.trim();
+      if (!content) return;
+      const res = await fetch(`/api/board/posts/${postId}/comments`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      if (!res.ok) { const err = await res.json(); alert(err.error || '댓글 등록에 실패했습니다.'); return; }
+      openBoardPost(postId);
+      loadBoardPosts();
+    }
+
+    async function deleteBoardComment(commentId, postId) {
+      if (!confirm('이 댓글을 삭제하시겠습니까?')) return;
+      const res = await fetch(`/api/board/comments/${commentId}`, { method: 'DELETE' });
+      if (!res.ok) { const err = await res.json(); alert(err.error || '삭제에 실패했습니다.'); return; }
+      openBoardPost(postId);
+      loadBoardPosts();
+    }
+
+    // ===================== VOC 자동분석 =====================
+    let _vocExcelPath = null;
+
+    async function previewJiraIssues() {
+      const jql = document.getElementById('voc-jira-jql').value.trim();
+      const el = document.getElementById('voc-jira-preview');
+      el.textContent = '조회 중...';
+      const params = new URLSearchParams();
+      if (jql) params.set('jql', jql);
+      const res = await fetch(`/api/voc-analysis/jira-preview?${params.toString()}`);
+      const data = await res.json();
+      if (!res.ok) { el.textContent = data.error || 'Jira 조회에 실패했습니다.'; return; }
+      el.textContent = `${data.count}건 조회됨`;
+    }
+
+    async function uploadVocExcel() {
+      const fileInput = document.getElementById('voc-excel-file');
+      const statusEl = document.getElementById('voc-excel-status');
+      if (!fileInput.files.length) { alert('업로드할 파일을 선택하세요.'); return; }
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+      const res = await fetch('/api/voc-analysis/excel/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) { statusEl.textContent = data.error || '업로드에 실패했습니다.'; return; }
+      _vocExcelPath = data.excel_path;
+      statusEl.textContent = `${data.row_count}건 업로드됨`;
+      document.getElementById('voc-use-excel').checked = true;
+    }
+
+    async function runVocAnalysis() {
+      const btn = document.getElementById('voc-run-btn');
+      const useJira = document.getElementById('voc-use-jira').checked;
+      const useExcel = document.getElementById('voc-use-excel').checked;
+      if (useExcel && !_vocExcelPath) { alert('먼저 엑셀 파일을 업로드하세요.'); return; }
+      btn.disabled = true;
+      btn.textContent = '분석 중...';
+      document.getElementById('voc-result').innerHTML = '';
+      try {
+        const itemLimitRaw = document.getElementById('voc-item-limit').value;
+        const res = await fetch('/api/voc-analysis/run', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            use_jira: useJira,
+            jira_jql: document.getElementById('voc-jira-jql').value.trim() || null,
+            use_excel: useExcel,
+            excel_path: _vocExcelPath,
+            focus_instruction: document.getElementById('voc-focus-instruction').value.trim() || null,
+            item_limit: itemLimitRaw ? parseInt(itemLimitRaw, 10) : null,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          document.getElementById('voc-result').innerHTML = `<p style="color:#dc2626;">${escapeHtml(data.error || '분석에 실패했습니다.')}</p>`;
+          return;
+        }
+        _renderVocResult(data);
+        loadVocHistory();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'VOC 분석 실행';
+      }
+    }
+
+    function _renderVocResult(record) {
+      const result = record.result || {};
+      const counts = result.raw_source_counts || {};
+      const params = record.params || {};
+      const issuesHtml = (result.top_issues || []).map(issue => `<tr>
+          <td>${escapeHtml(issue.theme || '')}</td>
+          <td>${issue.frequency ?? ''}</td>
+          <td>${escapeHtml(issue.severity || '')}</td>
+          <td>${escapeHtml(issue.suggestion || '')}</td>
+        </tr>`).join('');
+      const focusHtml = params.focus_instruction ? `<p class="chart-hint">지시사항: "${escapeHtml(params.focus_instruction)}"</p>` : '';
+      document.getElementById('voc-result').innerHTML = `
+        <div class="card">
+          <p class="chart-hint">${escapeHtml(record.created_at || '')} · ${escapeHtml(record.created_by || '')} ·
+            게시판 ${counts.board ?? 0}건 / Jira ${counts.jira ?? 0}건 / 엑셀 ${counts.excel ?? 0}건
+            (전체 ${counts.total_available ?? 0}건 중 ${counts.total_considered ?? 0}건 분석)</p>
+          ${focusHtml}
+          <p>${escapeHtml(result.summary || '')}</p>
+          <table><thead><tr><th>이슈 주제</th><th>빈도</th><th>심각도</th><th>개선안</th></tr></thead>
+            <tbody>${issuesHtml || '<tr><td colspan="4">이슈가 없습니다.</td></tr>'}</tbody></table>
+          ${_renderJudgeBadge(result.judge)}
+        </div>`;
+    }
+
+    function _renderJudgeBadge(judge) {
+      if (!judge) return '';
+      const verdict = judge.verdict || 'SKIPPED';
+      const badgeClass = verdict === 'PASS' ? 'judge-badge-pass' : (verdict === 'FAIL' ? 'judge-badge-fail' : 'judge-badge-skipped');
+      const crossModelText = judge.cross_model ? '다른 모델로 교차 검증' : '동일 모델로 검증(교차검증 아님)';
+      const criteria = judge.criteria || {};
+      const criteriaLabels = { relevance: '관련성', root_cause_addressing: '근본원인 대응', feasibility: '실행가능성', measurability: '검증가능성' };
+      const criteriaHtml = Object.keys(criteria).length
+        ? `<div class="judge-criteria">${Object.entries(criteriaLabels).map(([key, label]) =>
+            `<span>${criteria[key] ? '✅' : '❌'} ${label}</span>`).join('')}</div>`
+        : '';
+      return `
+        <div style="margin-top:1rem; padding-top:0.75rem; border-top:1px solid var(--gridline);">
+          <span class="judge-badge ${badgeClass}">독립 검증: ${escapeHtml(verdict)}</span>
+          <span class="chart-hint" style="margin-left:0.5rem;">${escapeHtml(crossModelText)}</span>
+          ${criteriaHtml}
+          ${judge.reasoning ? `<p class="chart-hint" style="margin-top:0.4rem;">${escapeHtml(judge.reasoning)}</p>` : ''}
+        </div>`;
+    }
+
+    async function loadVocHistory() {
+      const el = document.getElementById('voc-history-list');
+      const res = await fetch('/api/voc-analysis/history');
+      const items = await res.json();
+      const headerHtml = '<thead><tr><th>일시</th><th>실행자</th><th>요약</th></tr></thead>';
+      renderPagedHtmlTable('voc-history-list', headerHtml, items, item => `<tr>
+          <td><span class="board-row-title" onclick="loadVocAnalysisRecord('${item.id}')">${escapeHtml(formatTimestamp(item.created_at))}</span></td>
+          <td>${escapeHtml(item.created_by || '')}</td>
+          <td>${escapeHtml((item.summary || '').slice(0, 80))}</td>
+        </tr>`);
+      if (!items.length) {
+        el.innerHTML = '<p>지난 분석 이력이 없습니다.</p>';
+      }
+    }
+
+    async function loadVocAnalysisRecord(id) {
+      const res = await fetch(`/api/voc-analysis/${id}`);
+      if (!res.ok) { alert('분석 기록을 찾을 수 없습니다.'); return; }
+      const record = await res.json();
+      _renderVocResult(record);
+      window.scrollTo({ top: document.getElementById('voc-result').offsetTop - 20, behavior: 'smooth' });
     }
 
     async function loadUsers() {
@@ -1089,6 +1482,12 @@
       }
       if (name === 'users') {
         loadUsers();
+      }
+      if (name === 'board') {
+        loadBoardPosts();
+      }
+      if (name === 'voc-analysis') {
+        loadVocHistory();
       }
     }
 
@@ -2178,7 +2577,7 @@
     // 모니터링 애드온 페이지 등 다른 화면에서 특정 탭으로 바로 돌아올 수 있도록
     // (예: /#monitoring), URL 해시로 지정된 탭이 있으면 그 탭을 열어줌
     const initialTab = (location.hash || '').replace('#', '');
-    if (['settings', 'run', 'dashboard', 'monitoring', 'users'].includes(initialTab)) {
+    if (['settings', 'run', 'dashboard', 'monitoring', 'users', 'board', 'voc-analysis'].includes(initialTab)) {
       showTab(initialTab);
     }
   </script>

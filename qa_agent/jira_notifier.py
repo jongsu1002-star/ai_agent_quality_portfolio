@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import base64
 import json
 from typing import Any, Dict, List
 
 import requests
+
+from .jira_client import basic_auth_header
 
 
 class JiraNotifier:
@@ -29,8 +30,7 @@ class JiraNotifier:
 
     def _auth_header(self) -> str:
         """Jira Cloud REST API의 Basic Auth 헤더 - base64(email:api_token) 형식."""
-        credentials = f"{self.config['email']}:{self.config['api_token']}".encode("utf-8")
-        return "Basic " + base64.b64encode(credentials).decode("ascii")
+        return basic_auth_header(self.config["email"], self.config["api_token"])
 
     def _ticket_exists(self, base_url: str, headers: Dict[str, str], run_id: str, category: str) -> bool:
         """같은 실행/카테고리로 이미 만들어진 티켓이 있는지 JQL로 검색."""

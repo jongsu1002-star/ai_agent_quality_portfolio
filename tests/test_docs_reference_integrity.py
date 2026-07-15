@@ -64,6 +64,14 @@ DESIGN_SPEC_REFERENCES = [
     ("app/main.py", "_require_login"),
     ("qa_agent/auth.py", "def hash_password"),
     ("qa_agent/users.py", "class UserStore"),
+    ("qa_agent/board.py", "class BoardStore"),
+    ("qa_agent/voc_analysis.py", "def run_voc_analysis"),
+    ("qa_agent/jira_client.py", "def fetch_backlog_issues"),
+    ("app/routers/board.py", 'prefix="/api/board"'),
+    ("app/routers/voc_analysis.py", 'prefix="/api/voc-analysis"'),
+    ("qa_agent/voc_analysis.py", "def run_independent_judge"),
+    ("qa_agent/voc_analysis.py", "def run_voc_analysis_with_judge"),
+    ("app/main.py", "def _independent_judge_kwargs"),
 ]
 
 PROCESS_SPEC_REFERENCES = [
@@ -81,6 +89,11 @@ PROCESS_SPEC_REFERENCES = [
     ("conftest.py", "_no_real_secrets_in_tests"),
     ("conftest.py", "pytest_terminal_summary"),
     ("quality/test_report.py", "def write_test_results_doc"),
+    ("app/routers/voc_analysis.py", "def run_analysis"),
+    ("qa_agent/voc_analysis.py", "def build_voc_items"),
+    ("qa_agent/voc_analysis.py", "def build_prompts"),
+    ("qa_agent/voc_analysis.py", "def run_voc_analysis_with_judge"),
+    ("qa_agent/voc_analysis.py", "def build_judge_prompts"),
 ]
 
 USER_MANUAL_REFERENCES = [
@@ -98,6 +111,8 @@ USER_MANUAL_REFERENCES = [
     ("qa_agent/config_loader.py", "def load_config"),
     (".env.example", "OPENAI_API_KEY"),
     (".env.example", "create_admin.py"),
+    ("app/routers/board.py", '"/posts/{post_id}/visibility"'),
+    ("app/routers/voc_analysis.py", '"/run"'),
 ]
 
 NETWORK_GUIDE_REFERENCES = [

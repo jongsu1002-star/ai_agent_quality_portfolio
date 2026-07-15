@@ -56,6 +56,32 @@ def _isolate_user_store(tmp_path, monkeypatch):
     isolated_store.close_thread_connection()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_board_store(tmp_path, monkeypatch):
+    """BOARD_STORE와 VOC 분석 산출물도 같은 이유로 격리.
+
+    app/routers/board.py·voc_analysis.py는 app.main이 import 시점에 한 번 호출한
+    configure()로 받은 스토어 참조를 자기 모듈의 _state 딕셔너리에 따로 들고 있어서,
+    main_module.BOARD_STORE만 monkeypatch해서는 라우터가 여전히 원래(실서비스) 스토어를
+    바라봄 - 라우터의 configure()를 다시 호출해 격리된 스토어로 바꿔치기해야 함. VOC 분석
+    결과 파일 경로(reports/voc_analysis/)도 모듈 상수라 같은 이유로 tmp_path로 바꿔치기."""
+    try:
+        import app.main as main_module
+        from app.routers import board as board_module
+        from app.routers import voc_analysis as voc_analysis_module
+        from qa_agent.board import BoardStore
+    except Exception:
+        return
+    isolated_store = BoardStore(path=str(tmp_path / "board.db"))
+    monkeypatch.setattr(main_module, "BOARD_STORE", isolated_store)
+    board_module.configure(isolated_store, main_module._current_username, main_module._is_admin_effective)
+    voc_analysis_module.configure(isolated_store, main_module._current_username, main_module._load_settings_dict, main_module._llm_judge_kwargs, main_module._independent_judge_kwargs)
+    monkeypatch.setattr(voc_analysis_module, "VOC_ANALYSIS_DIR", tmp_path / "voc_analysis")
+    monkeypatch.setattr(voc_analysis_module, "VOC_UPLOAD_DIR", tmp_path / "voc_analysis" / "uploads")
+    yield
+    isolated_store.close_thread_connection()
+
+
 def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
     """pytest 실행이 끝날 때마다 자동으로 호출되는 훅 - docs/테스트_결과.md를 재생성."""
     write_test_results_doc(terminalreporter.stats, exitstatus)

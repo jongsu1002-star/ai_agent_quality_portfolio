@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from threading import Event, Lock, Thread
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Request, UploadFile
@@ -45,6 +45,7 @@ except Exception as _addon_config_error:
     K6_HISTORY_ENABLED = False
     GRAFANA_LINK_ENABLED = False
 
+from qa_agent.board import BoardStore
 from qa_agent.config_loader import Config
 from qa_agent.excel_io import build_template_workbook, build_testcase_template_workbook, load_dataset, load_testcase
 from qa_agent.jira_notifier import JiraNotifier
@@ -143,6 +144,7 @@ app = FastAPI(title="AI Agent Quality Platform", lifespan=_lifespan)
 METRICS = MetricsCollector()  # 모니터링 탭이 조회하는 서버 운영 지표(요청수/응답시간/에러율) 싱글턴
 EXTERNAL_MONITOR = ExternalMonitorRegistry(path=str(Path("reports") / "monitoring_targets.json"))  # 외부 URL 합성 모니터링 대상 저장소
 USER_STORE = UserStore(path=str(Path("data") / "users.db"))  # 계정(가입/승인/역할) 저장소 - monitoring_addon과 같은 SQLite 패턴
+BOARD_STORE = BoardStore(path=str(Path("data") / "board.db"))  # 게시판(일반/FAQ/VOC) + 댓글 저장소
 
 MONITORING_ADDON_DB = None  # 모니터링 애드온 전용 SQLite (기존 어떤 저장소도 대체하지 않음)
 if MONITORING_ADDON_ENABLED and MONITORING_ADDON_DB_ENABLED:
@@ -238,6 +240,17 @@ def _is_admin(request: Request) -> bool:
         return False
     user = USER_STORE.get_user(username)
     return bool(user and user["role"] == "admin")
+
+
+def _is_admin_effective(request: Request) -> bool:
+    """게시판 삭제 등 "관리자만" 판단에 쓰는 실질 관리자 체크.
+
+    _require_admin과 동일한 이유로, 계정이 하나도 없는 LAN 모드에서는 접속자 전원이 사실상
+    단일 운영자이므로 True를 돌려줌 - 그렇지 않으면 그 모드에서 아무도 게시글을 삭제할 수
+    없는 회귀가 생김."""
+    if not USER_STORE.has_any_users():
+        return True
+    return _is_admin(request)
 
 
 def _require_admin(request: Request) -> Optional[JSONResponse]:
@@ -1107,6 +1120,62 @@ def _defect_report_docs_dir(username: str) -> str:
     return "docs" if username == _SHARED_BUCKET else str(_user_reports_dir(username))
 
 
+def _llm_judge_kwargs(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """LLM 연동 provider별로 설정 필드가 달라서(custom=key_name/base_url 직접 지정,
+    anthropic/openai=키만 지정) 분기 처리. "none"이면 아무 키도 안 넣어 완전히 비활성화됨.
+
+    OpenAIJudgeClient(**kwargs) 생성자에 그대로 넣을 수 있는 형태(provider/api_key/model/
+    base_url/key_name)로 반환 - _execute_run(QA 파이프라인)과 VOC 분석 라우터가 동일하게
+    재사용."""
+    provider = (payload.get("llm_provider") or "openai").lower()
+    kwargs: Dict[str, Any] = {"provider": provider}
+    if provider == "custom":
+        kwargs["api_key"] = payload.get("llm_key_value") or ""
+        kwargs["key_name"] = payload.get("llm_key_name") or "Authorization"
+        kwargs["base_url"] = payload.get("llm_endpoint") or ""
+    elif provider == "anthropic":
+        api_key = payload.get("llm_key_value") or payload.get("anthropic_api_key")
+        if api_key:
+            kwargs["api_key"] = api_key
+    elif provider != "none":
+        api_key = payload.get("llm_key_value") or payload.get("openai_api_key")
+        if api_key:
+            kwargs["api_key"] = api_key
+    if payload.get("llm_model"):
+        kwargs["model"] = payload["llm_model"]
+    return kwargs
+
+
+def _independent_judge_kwargs(settings: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    """VOC 분석 결과를 검증할 "독립 Judge" 클라이언트 설정 - 생성에 쓴 provider와 일부러
+    다른 provider를 골라 자기평가 편향(생성 모델이 자기 산출물을 관대하게 채점하는 문제)을
+    막음. openai/anthropic 키가 둘 다 있어야 진짜 교차 검증(cross_model=True)이 되고,
+    하나만 있으면 같은 provider로 폴백(cross_model=False로 그 사실을 그대로 노출 - 교차
+    검증이 안 됐는데 됐다고 위장하지 않음).
+
+    Tuple[kwargs, cross_model]을 반환 - kwargs는 _llm_judge_kwargs와 동일하게
+    OpenAIJudgeClient(**kwargs) 생성자에 바로 넣을 수 있는 형태."""
+    primary_provider = (settings.get("llm_provider") or "openai").lower()
+    has_openai = bool(settings.get("openai_api_key"))
+    has_anthropic = bool(settings.get("anthropic_api_key"))
+
+    if primary_provider == "openai" and has_anthropic:
+        judge_provider = "anthropic"
+    elif primary_provider == "anthropic" and has_openai:
+        judge_provider = "openai"
+    elif primary_provider not in ("openai", "anthropic") and has_anthropic:
+        judge_provider = "anthropic"
+    elif primary_provider not in ("openai", "anthropic") and has_openai:
+        judge_provider = "openai"
+    else:
+        judge_provider = primary_provider
+
+    synthetic_settings = dict(settings)
+    synthetic_settings["llm_provider"] = judge_provider
+    kwargs = _llm_judge_kwargs(synthetic_settings)
+    return kwargs, judge_provider != primary_provider
+
+
 def _execute_run(username: str, run_id: str, techniques: List[str], category_filter: Optional[List[str]], payload: Dict[str, Any]) -> None:
     """백그라운드 스레드에서 실제 파이프라인을 실행 (POST /api/run이 이 함수를 스레드로 띄움).
 
@@ -1157,24 +1226,7 @@ def _execute_run(username: str, run_id: str, techniques: List[str], category_fil
         for key, value in connector_payload.items():
             if hasattr(config.connector, key) and value not in (None, ""):
                 setattr(config.connector, key, value)
-        # LLM 연동 provider별로 설정 필드가 달라서(custom=key_name/base_url 직접 지정,
-        # anthropic/openai=키만 지정) 분기 처리. "none"이면 아무 키도 안 넣어 완전히 비활성화됨
-        provider = (payload.get("llm_provider") or "openai").lower()
-        config.llm_judge["provider"] = provider
-        if provider == "custom":
-            config.llm_judge["api_key"] = payload.get("llm_key_value") or ""
-            config.llm_judge["key_name"] = payload.get("llm_key_name") or "Authorization"
-            config.llm_judge["base_url"] = payload.get("llm_endpoint") or ""
-        elif provider == "anthropic":
-            api_key = payload.get("llm_key_value") or payload.get("anthropic_api_key")
-            if api_key:
-                config.llm_judge["api_key"] = api_key
-        elif provider != "none":
-            api_key = payload.get("llm_key_value") or payload.get("openai_api_key")
-            if api_key:
-                config.llm_judge["api_key"] = api_key
-        if payload.get("llm_model"):
-            config.llm_judge["model"] = payload["llm_model"]
+        config.llm_judge.update(_llm_judge_kwargs(payload))
 
         def on_progress(done: int, total: int) -> None:
             with RUN_LOCK:
@@ -1340,14 +1392,12 @@ def save_settings(payload: Dict[str, Any], request: Request) -> JSONResponse:
     return JSONResponse({"saved": True, "path": str(SETTINGS_PATH)})
 
 
-@app.get("/api/settings")
-def load_settings(request: Request) -> JSONResponse:
+def _load_settings_dict() -> Dict[str, Any]:
     """저장된 설정을 조회 - 파일에 없으면 환경변수 값으로 보충.
 
-    API 키/웹훅 URL 등 민감정보를 그대로 반환하므로 관리자만 조회 가능."""
-    error = _require_admin(request)
-    if error:
-        return error
+    관리자 게이트가 필요 없는 순수 조회 함수 - HTTP 핸들러(load_settings, 아래)는 이 함수를
+    호출하기 전에 _require_admin으로 막지만, VOC 분석 라우터처럼 서버 내부에서 Jira/LLM
+    설정값만 필요한 곳(민감정보를 HTTP 응답으로 노출하지 않는 경우)은 이 함수를 직접 호출."""
     settings: Dict[str, Any] = {}
     if SETTINGS_PATH.exists():
         settings.update(json.loads(SETTINGS_PATH.read_text(encoding="utf-8")))
@@ -1370,7 +1420,16 @@ def load_settings(request: Request) -> JSONResponse:
     for key, value in env_mappings.items():
         if value:
             settings[key] = value
-    return JSONResponse(settings)
+    return settings
+
+
+@app.get("/api/settings")
+def load_settings(request: Request) -> JSONResponse:
+    """API 키/웹훅 URL 등 민감정보를 그대로 반환하므로 관리자만 조회 가능."""
+    error = _require_admin(request)
+    if error:
+        return error
+    return JSONResponse(_load_settings_dict())
 
 
 @app.get("/api/runs")
@@ -1378,6 +1437,20 @@ def runs(request: Request) -> JSONResponse:
     """실행 이력 요약 목록 (대시보드의 통과율 추이 차트/실행 선택 드롭다운이 사용)."""
     username = _current_username(request)
     return JSONResponse(list_run_history(reports_dir=str(_user_reports_dir(username))))
+
+
+# ===================== 게시판(일반/FAQ/VOC) + VOC 자동분석 =====================
+# monitoring_addon과 동일하게 configure() 의존성 주입으로 붙여서 app/main.py를 더 비대하게
+# 만들지 않음. 모니터링 애드온과 달리 이 기능은 선택 사항이 아니라 핵심 기능이라 try/except로
+# 감싸지 않음(로딩 실패는 다른 애드온처럼 조용히 넘어가면 안 되고 서버 기동 자체가 실패해야 함).
+from app.routers import board as _board_module
+from app.routers import voc_analysis as _voc_analysis_module
+
+_board_module.configure(BOARD_STORE, _current_username, _is_admin_effective)
+app.include_router(_board_module.router)
+
+_voc_analysis_module.configure(BOARD_STORE, _current_username, _load_settings_dict, _llm_judge_kwargs, _independent_judge_kwargs)
+app.include_router(_voc_analysis_module.router)
 
 
 # ===================== 모니터링 애드온 (k6/SQLite 이력/Prometheus) =====================

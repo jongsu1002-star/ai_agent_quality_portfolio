@@ -412,6 +412,50 @@ def quality_dashboard() -> JSONResponse:
     })
 
 
+_REPORT_VERSION_DOC_KEYS = {"voc_quality_report", "voc_defect_report"}
+
+
+def _load_report_versions() -> Dict[str, List[Dict[str, Any]]]:
+    """scripts/snapshot_report_versions.py가 호스트에서 git 이력으로부터 미리 추출해둔
+    스냅샷을 읽음 - 런타임 컨테이너에는 .git이 없으므로(.dockerignore) git을 직접
+    조회하지 않고, 커밋된 정적 JSON 파일만 읽는다.
+
+    DOCS_DIR을 매 호출마다 다시 읽어야 한다(모듈 로드 시점에 경로를 미리 계산해두면
+    conftest.py의 테스트 격리 monkeypatch가 이 함수에는 반영되지 않아, 테스트가 실제
+    저장소의 docs/report_versions.json을 그대로 읽어버리는 문제가 있었음)."""
+    path = DOCS_DIR / "report_versions.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+@router.get("/report-versions/{doc_key}")
+def report_versions(doc_key: str) -> JSONResponse:
+    """해당 문서(품질평가보고서/결함보고서)의 실제 git 개정 이력 목록 - 본문 내용은 빼고
+    커밋/일시/커밋 메시지만 반환(목록 자체를 가볍게 유지, 본문은 선택 시 별도 조회)."""
+    if doc_key not in _REPORT_VERSION_DOC_KEYS:
+        return JSONResponse({"error": "unknown document"}, status_code=404)
+    versions = _load_report_versions().get(doc_key, [])
+    return JSONResponse([
+        {"commit": v["commit"], "date": v["date"], "message": v["message"]}
+        for v in versions
+    ])
+
+
+@router.get("/report-versions/{doc_key}/{commit}")
+def report_version_content(doc_key: str, commit: str) -> JSONResponse:
+    if doc_key not in _REPORT_VERSION_DOC_KEYS:
+        return JSONResponse({"error": "unknown document"}, status_code=404)
+    versions = _load_report_versions().get(doc_key, [])
+    for v in versions:
+        if v["commit"] == commit:
+            return JSONResponse(v)
+    return JSONResponse({"error": "unknown version"}, status_code=404)
+
+
 @router.get("/history")
 def analysis_history(request: Request) -> JSONResponse:
     analysis_dir = _user_analysis_dir(_username(request))

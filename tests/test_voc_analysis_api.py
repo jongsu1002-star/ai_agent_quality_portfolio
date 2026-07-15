@@ -511,3 +511,38 @@ def test_quality_dashboard_includes_curated_defect_status():
     defect = body["defect_status"]
     assert defect["p0_resolved"] == defect["p0_total"]
     assert defect["p1_resolved"] <= defect["p1_total"]
+
+
+def test_report_versions_list_returns_empty_when_no_snapshot_file():
+    client = TestClient(app)
+    response = client.get("/api/voc-analysis/report-versions/voc_quality_report")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_report_versions_rejects_unknown_doc_key():
+    client = TestClient(app)
+    assert client.get("/api/voc-analysis/report-versions/not_a_real_doc").status_code == 404
+    assert client.get("/api/voc-analysis/report-versions/not_a_real_doc/abc123").status_code == 404
+
+
+def test_report_version_content_round_trip(monkeypatch):
+    snapshot = {
+        "voc_quality_report": [
+            {"commit": "abc1234", "date": "2026-07-15 10:00:00 +0900", "message": "첫 작성", "content": "# 옛날 버전 내용"},
+            {"commit": "def5678", "date": "2026-07-15 12:00:00 +0900", "message": "개정", "content": "# 최신 버전 내용"},
+        ]
+    }
+    voc_analysis_module.DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    (voc_analysis_module.DOCS_DIR / "report_versions.json").write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
+
+    client = TestClient(app)
+    listing = client.get("/api/voc-analysis/report-versions/voc_quality_report").json()
+    assert [v["commit"] for v in listing] == ["abc1234", "def5678"]
+    assert "content" not in listing[0]
+
+    content_response = client.get("/api/voc-analysis/report-versions/voc_quality_report/abc1234")
+    assert content_response.status_code == 200
+    assert content_response.json()["content"] == "# 옛날 버전 내용"
+
+    assert client.get("/api/voc-analysis/report-versions/voc_quality_report/does-not-exist").status_code == 404

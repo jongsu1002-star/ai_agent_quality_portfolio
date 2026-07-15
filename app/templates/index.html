@@ -576,18 +576,28 @@
     </div>
     <div class="card">
       <h2>VOC 분석 파이프라인 품질 지표 차트</h2>
-      <p style="color: var(--text-secondary); font-size: 0.9rem;">아래 보고서 본문(마크다운)에는 그래프를 그릴 수 없어, 같은 실측치를 이 페이지에 직접 차트로 렌더링했습니다. <strong>이 카드는 서버 API(<code>/api/voc-analysis/quality-dashboard</code>)에서 매번 실시간으로 다시 계산한 값을 보여줍니다</strong> — pytest를 새로 돌리거나 VOC 분석을 새로 실행하면 다음 새로고침에 바로 반영됩니다(결함 수정 현황만은 예외 - 코드 리뷰로 사람이 검토·확정하는 값이라 자동 계산 대상이 아님).</p>
+      <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 0 0 0.4rem;">아래 보고서 본문(마크다운)에는 그래프를 그릴 수 없어, 같은 실측치를 이 페이지에 직접 차트로 렌더링했습니다.</p>
+      <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 0 0 0.4rem;"><strong>이 카드는 서버 API(<code>/api/voc-analysis/quality-dashboard</code>)에서 매번 실시간으로 다시 계산한 값을 보여줍니다.</strong><br>pytest를 새로 돌리거나 VOC 분석을 새로 실행하면 다음 새로고침에 바로 반영됩니다.</p>
+      <p class="chart-hint" style="margin: 0 0 0.8rem;">※ 결함 수정 현황만은 예외입니다 — 코드 리뷰로 사람이 검토·확정하는 값이라 자동 계산 대상이 아닙니다.</p>
       <div id="voc-quality-dashboard"><p class="chart-hint">불러오는 중...</p></div>
     </div>
 
     <div class="card">
       <h2>VOC 분석 파이프라인 품질평가 보고서</h2>
       <p style="color: var(--text-secondary); font-size: 0.9rem;">이 기능(게시판 + VOC 자동분석 + 독립 LLM Judge 교차검증)의 실제 구현·테스트 내용을 정리한 보고서입니다.</p>
+      <div class="board-actions" style="margin-bottom:0.6rem;">
+        <label for="voc-quality-report-version" style="font-size:0.85rem; color:var(--text-secondary);">개정 버전:</label>
+        <select id="voc-quality-report-version" onchange="loadVocReportVersion('voc_quality_report', 'voc-quality-report', this.value)"><option value="">불러오는 중...</option></select>
+      </div>
       <div id="voc-quality-report" class="doc-viewer"></div>
     </div>
     <div class="card">
       <h2>VOC 분석 파이프라인 결함보고서</h2>
       <p style="color: var(--text-secondary); font-size: 0.9rem;">이 기능에 대한 독립 코드 리뷰에서 발견된 결함(P0/P1) 상세입니다. QA 파이프라인 실행 결과로 자동 생성되는 대시보드 탭의 "결함보고서"와는 별개 문서입니다.</p>
+      <div class="board-actions" style="margin-bottom:0.6rem;">
+        <label for="voc-defect-report-version" style="font-size:0.85rem; color:var(--text-secondary);">개정 버전:</label>
+        <select id="voc-defect-report-version" onchange="loadVocReportVersion('voc_defect_report', 'voc-defect-report', this.value)"><option value="">불러오는 중...</option></select>
+      </div>
       <div id="voc-defect-report" class="doc-viewer"></div>
     </div>
   </div>
@@ -1643,6 +1653,40 @@
       _docViewerState[viewerId] = { key, content: data.content };
     }
 
+    async function loadVocReportVersionList(docKey, selectId) {
+      const select = document.getElementById(selectId);
+      try {
+        const res = await fetch(`/api/voc-analysis/report-versions/${docKey}`);
+        const versions = await res.json();
+        const options = ['<option value="">최신(현재)</option>'];
+        for (const v of versions) {
+          const shortDate = (v.date || '').slice(0, 16).replace('T', ' ');
+          const shortMessage = v.message.length > 40 ? v.message.slice(0, 40) + '…' : v.message;
+          options.push(`<option value="${escapeHtml(v.commit)}">${escapeHtml(shortDate)} · ${escapeHtml(shortMessage)} (${escapeHtml(v.commit)})</option>`);
+        }
+        select.innerHTML = options.join('');
+      } catch (err) {
+        select.innerHTML = '<option value="">최신(현재)</option>';
+      }
+    }
+
+    async function loadVocReportVersion(docKey, viewerId, commit) {
+      const viewer = document.getElementById(viewerId);
+      if (!commit) {
+        viewDoc(docKey, viewerId);
+        return;
+      }
+      viewer.innerHTML = '<p>불러오는 중...</p>';
+      try {
+        const res = await fetch(`/api/voc-analysis/report-versions/${docKey}/${commit}`);
+        if (!res.ok) { viewer.innerHTML = '<p>해당 버전을 불러올 수 없습니다.</p>'; return; }
+        const data = await res.json();
+        viewer.innerHTML = `<p class="chart-hint">⚠ 과거 버전(${escapeHtml(data.date || '')} · ${escapeHtml(data.message || '')}) - 현재 최신 내용이 아닙니다.</p>` + renderMarkdown(data.content);
+      } catch (err) {
+        viewer.innerHTML = '<p>해당 버전을 불러오지 못했습니다.</p>';
+      }
+    }
+
     function downloadTextAsFile(filename, content) {
       const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
       const url = URL.createObjectURL(blob);
@@ -1695,6 +1739,8 @@
           _vocReportsLoaded = true;
           viewDoc('voc_quality_report', 'voc-quality-report');
           viewDoc('voc_defect_report', 'voc-defect-report');
+          loadVocReportVersionList('voc_quality_report', 'voc-quality-report-version');
+          loadVocReportVersionList('voc_defect_report', 'voc-defect-report-version');
         }
       }
     }

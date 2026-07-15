@@ -1,6 +1,9 @@
 services:
   qa-platform:
-    build: .
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     ports:
       - "8000:8000"
     environment:

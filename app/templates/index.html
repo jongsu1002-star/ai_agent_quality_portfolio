@@ -1440,6 +1440,8 @@
       scenario_test_report: '테스트_시나리오_보고서.md',
       defect_report: '결함보고서.md',
       readme: 'README.md',
+      voc_quality_report: 'VOC_분석_파이프라인_품질평가_보고서.md',
+      voc_defect_report: 'VOC_분석_파이프라인_결함보고서.md',
     };
 
     function docKeyForFilename(filename) {
@@ -1451,8 +1453,14 @@
       let html = escapeHtml(text);
       html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
       html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      // voc_quality_report/voc_defect_report는 항상 VOC 분석 탭 안에 같이 렌더링돼 있으므로
+      // (viewDoc으로 다시 불러오는 대신) 그 자리로 스크롤만 하면 됨 - 상세는
+      // renderInlineMarkdown 아래 주석 참고.
+      const SCROLL_TARGET_ELEMENT_ID = { voc_quality_report: 'voc-quality-report', voc_defect_report: 'voc-defect-report' };
       html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, label, href) => {
         const docKey = href.endsWith('.md') ? docKeyForFilename(href.split('#')[0]) : null;
+        const scrollTargetId = docKey ? SCROLL_TARGET_ELEMENT_ID[docKey] : null;
+        if (scrollTargetId) return `<a href="#${scrollTargetId}" onclick="document.getElementById('${scrollTargetId}').scrollIntoView({behavior:'smooth', block:'start'}); return false;">${label}</a>`;
         if (docKey) return `<a href="#" onclick="viewDoc('${docKey}'); return false;">${label}</a>`;
         return `<a href="${href}" target="_blank" rel="noopener">${label}</a>`;
       });

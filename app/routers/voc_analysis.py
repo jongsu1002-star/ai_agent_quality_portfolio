@@ -45,16 +45,17 @@ ALLOWED_UPLOAD_CONTENT_TYPES = {
     "text/json",
 }
 
-_state: Dict[str, Any] = {"store": None, "current_username": None, "load_settings": None, "llm_kwargs": None, "independent_judge_kwargs": None, "is_admin": None}
+_state: Dict[str, Any] = {"store": None, "current_username": None, "load_settings": None, "llm_kwargs": None, "independent_judge_kwargs": None, "is_admin": None, "app_version": None}
 
 
-def configure(store: BoardStore, current_username_fn, load_settings_fn, llm_kwargs_fn, independent_judge_kwargs_fn, is_admin_fn) -> None:
+def configure(store: BoardStore, current_username_fn, load_settings_fn, llm_kwargs_fn, independent_judge_kwargs_fn, is_admin_fn, app_version_fn=None) -> None:
     _state["store"] = store
     _state["current_username"] = current_username_fn
     _state["load_settings"] = load_settings_fn
     _state["llm_kwargs"] = llm_kwargs_fn
     _state["independent_judge_kwargs"] = independent_judge_kwargs_fn
     _state["is_admin"] = is_admin_fn
+    _state["app_version"] = app_version_fn or (lambda: {"server_started_at": None, "git_sha": None})
 
 
 def _store() -> BoardStore:
@@ -270,6 +271,7 @@ def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
         "id": analysis_id,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "created_by": _username(request),
+        "app_version": _state["app_version"](),
         "params": {
             "use_board": bool(payload.get("use_board", True)),
             "use_jira": bool(payload.get("use_jira")),

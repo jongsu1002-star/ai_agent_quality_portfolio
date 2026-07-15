@@ -10,6 +10,7 @@ import os
 import re
 import secrets
 import socket
+import subprocess
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -139,6 +140,35 @@ async def _lifespan(_app: FastAPI):
     _ensure_monitoring_addon_thread_started()
     yield
 
+
+def _detect_git_sha() -> Optional[str]:
+    """빌드/배포 시점의 커밋을 추적용으로 기록 - 실패해도(git 없음/얕은 clone 등) 서버 기동을
+    막지 않도록 예외를 전부 삼키고 None을 반환한다.
+
+    Docker 이미지는 .dockerignore가 .git을 빌드 컨텍스트에서 제외하므로 컨테이너 안에서는
+    git 명령 자체가 항상 실패한다 - Dockerfile이 빌드 시점에 호스트의 커밋을 GIT_SHA
+    환경변수로 구워 넣으므로 그 값을 최우선으로 쓰고, 없을 때만(로컬 개발 실행) git
+    서브프로세스로 폴백한다."""
+    env_value = os.environ.get("GIT_SHA")
+    if env_value and env_value != "unknown":
+        return env_value
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=Path(__file__).resolve().parent.parent,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        return result.stdout.strip() or None if result.returncode == 0 else None
+    except Exception:
+        return None
+
+
+SERVER_STARTED_AT = datetime.now().isoformat()  # 이 프로세스가 기동된 시각 - "이 결과가 최신 코드로
+                                                  # 만들어졌는가"를 판단하려면 결과 생성 시각과 비교 필요
+GIT_SHA = _detect_git_sha()  # 이 프로세스가 구동 중인 소스의 커밋 - 결과가 어느 코드 버전에서
+                              # 나온 것인지 사후에 추적하기 위함(reports/voc_analysis/*.json에도 함께 기록)
 
 app = FastAPI(title="AI Agent Quality Platform", lifespan=_lifespan)
 METRICS = MetricsCollector()  # 모니터링 탭이 조회하는 서버 운영 지표(요청수/응답시간/에러율) 싱글턴
@@ -627,9 +657,19 @@ def index() -> HTMLResponse:
 
 @app.get("/health")
 def healthcheck() -> JSONResponse:
-    """헬스체크 - monitoring.HealthChecker에 위임."""
+    """헬스체크 - monitoring.HealthChecker에 위임.
+
+    server_started_at/git_sha는 "지금 응답 중인 이 프로세스가 어느 시점의 어느 커밋으로
+    기동됐는가"를 판단하기 위한 필드 - 재배포 없이 오래된 프로세스가 떠 있는 상태를
+    구분하는 데 씀."""
     status = HealthChecker().check()
-    return JSONResponse({"service": status.service, "status": status.status, "details": status.details})
+    return JSONResponse({
+        "service": status.service,
+        "status": status.status,
+        "details": status.details,
+        "server_started_at": SERVER_STARTED_AT,
+        "git_sha": GIT_SHA,
+    })
 
 
 @app.get("/api/monitoring/summary")
@@ -1462,7 +1502,10 @@ from app.routers import voc_analysis as _voc_analysis_module
 _board_module.configure(BOARD_STORE, _current_username, _is_admin_effective)
 app.include_router(_board_module.router)
 
-_voc_analysis_module.configure(BOARD_STORE, _current_username, _load_settings_dict, _llm_judge_kwargs, _independent_judge_kwargs, _is_admin_effective)
+_voc_analysis_module.configure(
+    BOARD_STORE, _current_username, _load_settings_dict, _llm_judge_kwargs, _independent_judge_kwargs, _is_admin_effective,
+    app_version_fn=lambda: {"server_started_at": SERVER_STARTED_AT, "git_sha": GIT_SHA},
+)
 app.include_router(_voc_analysis_module.router)
 
 

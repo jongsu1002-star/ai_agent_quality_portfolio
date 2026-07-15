@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from quality.test_report import write_test_results_doc
@@ -25,6 +27,18 @@ _SECRET_ENV_VARS = (
     "JIRA_TOKEN",
     "JIRA_PROJECT",
 )
+
+
+@pytest.fixture(autouse=True)
+def _restore_os_environ_after_test(monkeypatch):
+    """app/main.py::save_settings()는 요청 본문의 값을 os.environ[KEY] = value로 직접
+    반영한다(monkeypatch를 거치지 않는 실제 애플리케이션 동작). monkeypatch는 자신이 직접
+    바꾼 값만 되돌리므로, 이런 앱 코드의 직접 mutation은 테스트가 끝나도 그대로 남아 다음
+    테스트로 새어나갈 수 있다. os.environ 객체 자체를 테스트 시작 시점의 얕은 복사본으로
+    바꿔치기해두면, 그 안에서 일어나는 모든 mutation(monkeypatch를 거치든 앱 코드가 직접
+    하든)이 복사본에만 남고, 테스트가 끝나면 monkeypatch가 원본 os.environ으로 자동
+    복원한다."""
+    monkeypatch.setattr(os, "environ", os.environ.copy())
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +68,33 @@ def _isolate_user_store(tmp_path, monkeypatch):
     monkeypatch.setattr(main_module, "USER_STORE", isolated_store)
     yield
     isolated_store.close_thread_connection()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_shared_reports_and_settings(tmp_path, monkeypatch):
+    """SETTINGS_PATH/SHARED_REPORTS_ROOT/USER_DATA_ROOT/EXTERNAL_MONITOR/결함보고서 출력 위치를
+    tmp_path로 격리.
+
+    이 픽스처가 없으면 "shared" 버킷(로그인 안 한 요청·계정 시스템 꺼짐)이 실제
+    reports/settings.json·reports/run_*.json·reports/exports/·docs/결함보고서.md를,
+    "alice" 등 테스트에서 쓰는 실명 계정이 실제 reports/users/{username}/을 직접
+    덮어쓴다 - 실서비스 계정과 겹치는 이름을 테스트가 우연히 재사용하면(예: alice) 진짜
+    사용자 데이터가 테스트 산출물로 뒤섞인다. USER_STORE/BOARD_STORE와 같은 이유로
+    모듈 전역 상수라 monkeypatch로 바꿔치기해야 하며, 값을 참조하는 함수(_user_reports_dir/
+    _defect_report_docs_dir)는 모두 호출 시점에 이 상수를 다시 읽으므로 상수만 바꿔도
+    전부 격리된다(코드 자체를 바꿀 필요 없음)."""
+    try:
+        import app.main as main_module
+        from monitoring.external_monitor import ExternalMonitorRegistry
+    except Exception:
+        return
+    tmp_settings_path = tmp_path / "reports" / "settings.json"
+    tmp_settings_path.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(main_module, "SETTINGS_PATH", tmp_settings_path)
+    monkeypatch.setattr(main_module, "SHARED_REPORTS_ROOT", tmp_path / "reports")
+    monkeypatch.setattr(main_module, "USER_DATA_ROOT", tmp_path / "reports" / "users")
+    monkeypatch.setattr(main_module, "EXTERNAL_MONITOR", ExternalMonitorRegistry(path=str(tmp_path / "reports" / "monitoring_targets.json")))
+    monkeypatch.setattr(main_module, "_defect_report_docs_dir", lambda username: str(tmp_path / "docs"))
 
 
 @pytest.fixture(autouse=True)

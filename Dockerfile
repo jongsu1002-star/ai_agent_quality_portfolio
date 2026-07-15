@@ -19,6 +19,12 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN mkdir -p /app/reports/exports /app/data
+
+# .dockerignore가 .git을 빌드 컨텍스트에서 제외하므로(이미지 크기/보안), 컨테이너 안에서
+# `git rev-parse`를 실행해도 항상 실패한다 - 호스트에서 빌드 시점에 커밋을 계산해 빌드
+# 인자로 주입하고, app/main.py::_detect_git_sha()가 이 환경변수를 최우선으로 읽는다.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status == 200 else 1)"

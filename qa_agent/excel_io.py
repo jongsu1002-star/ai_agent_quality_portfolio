@@ -98,10 +98,12 @@ def build_testcase_template_workbook() -> BytesIO:
 
 
 def build_voc_import_template_workbook() -> BytesIO:
-    """VOC 자동분석에 외부 데이터를 얹을 때 쓰는 엑셀 양식 - source/date/category/content 4컬럼."""
+    """VOC 자동분석에 외부 데이터를 얹을 때 쓰는 엑셀 양식 - source/date/category/content 4컬럼.
+
+    date는 필수 항목이 아님을 양식에서부터 보여주기 위해 두 번째 예시 행은 date를 비워둠."""
     template = pd.DataFrame([
         {"source": "고객센터", "date": "2026-07-01", "category": "결제", "content": "결제 실패 후 재시도가 안 됩니다."},
-        {"source": "앱스토어 리뷰", "date": "2026-07-02", "category": "UI", "content": "버튼이 너무 작아서 누르기 힘들어요."},
+        {"source": "앱스토어 리뷰", "date": "", "category": "UI", "content": "버튼이 너무 작아서 누르기 힘들어요."},
     ])
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -110,11 +112,60 @@ def build_voc_import_template_workbook() -> BytesIO:
     return output
 
 
+def build_voc_json_template() -> bytes:
+    """VOC 외부 데이터 JSON 양식 - 엑셀 양식과 동일한 필드/의미(date는 선택)."""
+    template = [
+        {"source": "고객센터", "date": "2026-07-01", "category": "결제", "content": "결제 실패 후 재시도가 안 됩니다."},
+        {"source": "앱스토어 리뷰", "date": "", "category": "UI", "content": "버튼이 너무 작아서 누르기 힘들어요."},
+    ]
+    return json.dumps(template, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def _is_na_scalar(value: object) -> bool:
+    """pandas가 반환하는 결측치(NaN/NaT/None)를 형식에 관계없이 판별.
+
+    date처럼 선택적인 열은 엑셀에서 빈 셀일 때 float NaN이 아니라 pandas Timestamp의
+    NaT로 들어올 수 있어, `isinstance(v, float)`만으로는 걸러지지 않고 문자열 "NaT"가
+    그대로 노출되는 문제가 있었다. pd.isna()는 스칼라 대부분(NaN/NaT/None)에 동작하지만
+    리스트/배열류에는 모호한 진리값 오류를 낼 수 있어 예외 시 결측 아님으로 안전하게 처리."""
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _field(row: Dict[str, object], *keys: str) -> str:
+    """row에서 keys를 순서대로 찾아 결측치(NaN/NaT/None)가 아닌 첫 값을 문자열로 반환.
+
+    Excel/JSON 왕복 시 빈 셀이 float NaN으로 들어올 수 있는데, NaN은 파이썬 진리값으로
+    참(bool(float('nan')) == True)이라 `row.get(k) or ...` 방식의 폴백은 NaN을 걸러내지
+    못하고 문자열 "nan"이 그대로 값으로 남는 문제가 있었다."""
+    for key in keys:
+        value = row.get(key)
+        if not _is_na_scalar(value) and value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _normalize_voc_record(row: Dict[str, object]) -> Dict[str, str] | None:
+    """source/date/category/content 4필드로 정규화. content 없는 행은 None(호출부가 skip)."""
+    content = _field(row, "content", "내용").strip()
+    if not content:
+        return None
+    return {
+        "source": _field(row, "source", "출처") or "excel",
+        "date": _field(row, "date", "일자"),
+        "category": _field(row, "category", "분류"),
+        "content": content,
+    }
+
+
 def load_voc_excel(path: str | Path) -> List[Dict[str, str]]:
     """VOC 외부 데이터 엑셀을 {source, date, category, content} 레코드 목록으로 변환.
 
-    load_dataset()/load_testcase()와 동일한 NaN 스크럽 패턴 - content가 빈 행은 분석에
-    의미가 없으므로 건너뜀."""
+    date는 선택 항목 - 비어 있어도 오류 없이 빈 문자열로 처리한다(정렬 시 항상 뒤로 감,
+    qa_agent/voc_analysis.py::_date_sort_key). content가 빈 행은 분석에 의미가 없으므로
+    건너뛴다."""
     path = Path(path)
     suffix = path.suffix.lower()
     if suffix != ".xlsx":
@@ -124,18 +175,32 @@ def load_voc_excel(path: str | Path) -> List[Dict[str, str]]:
         raise ValueError(f"Unsupported VOC excel format: {suffix} (.xlsx만 지원합니다)")
     df = pd.read_excel(path)
     records = df.to_dict(orient="records")
-    records = [{k: (None if isinstance(v, float) and pd.isna(v) else v) for k, v in row.items()} for row in records]
     result = []
     for row in records:
-        content = str(row.get("content") or row.get("내용") or "").strip()
-        if not content:
+        normalized = _normalize_voc_record(row)
+        if normalized is not None:
+            result.append(normalized)
+    return result
+
+
+def load_voc_json(path: str | Path) -> List[Dict[str, str]]:
+    """VOC 외부 데이터 JSON(배열 형태)을 {source, date, category, content} 레코드 목록으로 변환.
+
+    load_voc_excel()과 동일한 필드 규칙(date 선택)을 공유한다."""
+    path = Path(path)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"JSON 형식이 올바르지 않습니다: {exc}") from exc
+    if not isinstance(raw, list):
+        raise ValueError("JSON 최상위는 배열([...])이어야 합니다")
+    result = []
+    for row in raw:
+        if not isinstance(row, dict):
             continue
-        result.append({
-            "source": str(row.get("source") or row.get("출처") or "excel"),
-            "date": str(row.get("date") or row.get("일자") or ""),
-            "category": str(row.get("category") or row.get("분류") or ""),
-            "content": content,
-        })
+        normalized = _normalize_voc_record(row)
+        if normalized is not None:
+            result.append(normalized)
     return result
 
 

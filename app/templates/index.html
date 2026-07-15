@@ -553,12 +553,14 @@
           <div id="voc-jira-preview" class="chart-hint"></div>
         </div>
         <div>
-          <label><input type="checkbox" id="voc-use-excel" style="width:auto; display:inline-block; margin-right:0.4rem;" /> 엑셀 업로드 데이터 포함</label>
+          <label><input type="checkbox" id="voc-use-excel" style="width:auto; display:inline-block; margin-right:0.4rem;" /> 엑셀/JSON 업로드 데이터 포함</label>
           <div class="board-actions">
-            <a href="/api/voc-analysis/template"><button type="button" class="btn-secondary">템플릿 다운로드</button></a>
-            <input type="file" id="voc-excel-file" accept=".xlsx" style="width:auto; margin-top:0;" />
+            <a href="/api/voc-analysis/template"><button type="button" class="btn-secondary">엑셀 템플릿</button></a>
+            <a href="/api/voc-analysis/template.json"><button type="button" class="btn-secondary">JSON 템플릿</button></a>
+            <input type="file" id="voc-excel-file" accept=".xlsx,.json" style="width:auto; margin-top:0;" />
             <button type="button" class="btn-secondary" onclick="uploadVocExcel()">업로드</button>
           </div>
+          <p class="chart-hint">date(일자)는 선택 항목입니다 - 비워둬도 오류 없이 처리됩니다.</p>
           <div id="voc-excel-status" class="chart-hint"></div>
         </div>
       </div>

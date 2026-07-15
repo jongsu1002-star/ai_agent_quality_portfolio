@@ -1,4 +1,5 @@
 import io
+import json
 import pathlib
 import re
 
@@ -302,6 +303,66 @@ def test_voc_excel_upload_deletes_saved_file_when_no_valid_rows():
     upload = client.post("/api/voc-analysis/excel/upload", files={"file": ("empty.xlsx", empty_rows, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     assert upload.status_code == 400
     assert list(voc_analysis_module.VOC_UPLOAD_DIR.glob("*empty.xlsx")) == []
+
+
+def test_voc_excel_upload_accepts_rows_with_missing_date():
+    """date는 선택 항목 - 컬럼 자체가 없어도 오류 없이 업로드/파싱돼야 한다."""
+    client = TestClient(app)
+    rows_without_date = [{"source": "s", "category": "c", "content": "날짜 없는 VOC"}]
+    upload = client.post(
+        "/api/voc-analysis/excel/upload",
+        files={"file": ("no_date.xlsx", _build_voc_xlsx_bytes(rows=rows_without_date), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert upload.status_code == 200
+    body = upload.json()
+    assert body["row_count"] == 1
+    assert body["preview"][0]["date"] == ""
+
+
+def test_voc_json_template_and_upload_round_trip():
+    client = TestClient(app)
+    template = client.get("/api/voc-analysis/template.json")
+    assert template.status_code == 200
+    rows = json.loads(template.content)
+    assert isinstance(rows, list) and len(rows) == 2
+    assert set(rows[0].keys()) == {"source", "date", "category", "content"}
+
+    upload = client.post(
+        "/api/voc-analysis/excel/upload",
+        files={"file": ("voc.json", json.dumps(rows).encode("utf-8"), "application/json")},
+    )
+    assert upload.status_code == 200
+    body = upload.json()
+    assert body["row_count"] == 2
+
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+    run = client.post("/api/voc-analysis/run", json={"use_jira": False, "use_excel": True, "excel_path": body["excel_path"]})
+    assert run.status_code == 200
+    assert run.json()["result"]["raw_source_counts"]["excel"] == 2
+
+
+def test_voc_json_upload_accepts_rows_with_missing_date():
+    client = TestClient(app)
+    payload = json.dumps([{"source": "s", "category": "c", "content": "날짜 없는 VOC"}]).encode("utf-8")
+    upload = client.post("/api/voc-analysis/excel/upload", files={"file": ("no_date.json", payload, "application/json")})
+    assert upload.status_code == 200
+    body = upload.json()
+    assert body["row_count"] == 1
+    assert body["preview"][0]["date"] == ""
+
+
+def test_voc_json_upload_rejects_invalid_json_syntax():
+    client = TestClient(app)
+    upload = client.post("/api/voc-analysis/excel/upload", files={"file": ("broken.json", b"{not valid json", "application/json")})
+    assert upload.status_code == 400
+    assert list(voc_analysis_module.VOC_UPLOAD_DIR.glob("*broken.json")) == []
+
+
+def test_voc_json_upload_rejects_non_array_top_level():
+    client = TestClient(app)
+    payload = json.dumps({"source": "s", "content": "배열이 아님"}).encode("utf-8")
+    upload = client.post("/api/voc-analysis/excel/upload", files={"file": ("notarray.json", payload, "application/json")})
+    assert upload.status_code == 400
 
 
 def test_jira_preview_success(monkeypatch):

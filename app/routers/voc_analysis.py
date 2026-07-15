@@ -19,7 +19,12 @@ from fastapi import APIRouter, Request, UploadFile, File
 from fastapi.responses import JSONResponse, Response
 
 from qa_agent.board import BoardStore
-from qa_agent.excel_io import build_voc_import_template_workbook, load_voc_excel
+from qa_agent.excel_io import (
+    build_voc_import_template_workbook,
+    build_voc_json_template,
+    load_voc_excel,
+    load_voc_json,
+)
 from qa_agent.jira_client import fetch_backlog_issues
 from qa_agent.llm_client import OpenAIJudgeClient
 from qa_agent.voc_analysis import MAX_ITEMS_FOR_PROMPT, run_voc_analysis_with_judge
@@ -32,10 +37,12 @@ VOC_UPLOAD_DIR = VOC_ANALYSIS_DIR / "uploads"
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5MB - VOC 엑셀 업로드는 몇백 행 수준이면 충분, 대용량 업로드로
                                      # 메모리를 고갈시키는 것을 막기 위한 상한
-ALLOWED_UPLOAD_EXTENSIONS = {".xlsx"}  # qa_agent/excel_io.py::load_voc_excel과 반드시 일치시킬 것
+ALLOWED_UPLOAD_EXTENSIONS = {".xlsx", ".json"}  # qa_agent/excel_io.py::load_voc_excel/load_voc_json과 반드시 일치시킬 것
 ALLOWED_UPLOAD_CONTENT_TYPES = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "application/octet-stream",  # 브라우저/OS에 따라 엑셀 파일에 이 MIME이 붙는 경우가 흔함
+    "application/json",
+    "text/json",
 }
 
 _state: Dict[str, Any] = {"store": None, "current_username": None, "load_settings": None, "llm_kwargs": None, "independent_judge_kwargs": None, "is_admin": None}
@@ -93,6 +100,16 @@ def voc_template() -> Response:
     )
 
 
+@router.get("/template.json")
+def voc_template_json() -> Response:
+    """VOC 외부 데이터(JSON) 업로드용 양식 다운로드 - 엑셀 양식과 동일한 필드."""
+    return Response(
+        build_voc_json_template(),
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=voc_import_template.json"},
+    )
+
+
 def _safe_upload_filename(filename: str) -> str:
     """Path(...).name으로 경로 구분자를 제거해 베이스네임만 남김 - "../../etc/passwd" 같은
     입력도 안전한 마지막 세그먼트로 축소됨(디렉터리 탈출/임의 경로 쓰기 방지)."""
@@ -101,14 +118,15 @@ def _safe_upload_filename(filename: str) -> str:
 
 @router.post("/excel/upload")
 async def upload_voc_excel(request: Request, file: UploadFile = File(...)) -> JSONResponse:
-    """VOC 외부 데이터 엑셀 업로드 - 파싱해 미리보기까지 함께 반환.
+    """VOC 외부 데이터 업로드(.xlsx 또는 .json) - 파싱해 미리보기까지 함께 반환.
 
     저장 전에 확장자/MIME/용량을 먼저 걸러내고, 파싱 실패나 유효한 행이 없는 경우 저장했던
-    파일을 즉시 삭제한다(디스크에 검증 실패한 파일이 남지 않도록)."""
+    파일을 즉시 삭제한다(디스크에 검증 실패한 파일이 남지 않도록). 엔드포인트 경로는 하위
+    호환을 위해 /excel/upload를 유지하지만 실제로는 두 형식을 모두 받는다."""
     safe_name = _safe_upload_filename(file.filename or "")
     extension = Path(safe_name).suffix.lower()
     if extension not in ALLOWED_UPLOAD_EXTENSIONS:
-        return JSONResponse({"error": f"지원하지 않는 파일 형식입니다({extension or '확장자 없음'}). .xlsx만 지원합니다."}, status_code=400)
+        return JSONResponse({"error": f"지원하지 않는 파일 형식입니다({extension or '확장자 없음'}). .xlsx 또는 .json만 지원합니다."}, status_code=400)
     if file.content_type and file.content_type not in ALLOWED_UPLOAD_CONTENT_TYPES:
         return JSONResponse({"error": f"지원하지 않는 파일 형식입니다(Content-Type: {file.content_type})"}, status_code=400)
 
@@ -125,8 +143,9 @@ async def upload_voc_excel(request: Request, file: UploadFile = File(...)) -> JS
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     path = upload_dir / f"{stamp}_{safe_name}"
     path.write_bytes(content)
+    loader = load_voc_json if extension == ".json" else load_voc_excel
     try:
-        rows = load_voc_excel(path)
+        rows = loader(path)
         if not rows:
             path.unlink(missing_ok=True)
             return JSONResponse({"error": "유효한 content가 있는 행이 없습니다"}, status_code=400)
@@ -135,8 +154,8 @@ async def upload_voc_excel(request: Request, file: UploadFile = File(...)) -> JS
         return JSONResponse({"error": str(exc)}, status_code=400)
     except Exception:
         path.unlink(missing_ok=True)
-        logger.exception("VOC Excel parsing failed")
-        return JSONResponse({"error": "엑셀 파일을 처리하지 못했습니다. 파일 형식과 내용을 확인하세요."}, status_code=400)
+        logger.exception("VOC file parsing failed")
+        return JSONResponse({"error": "파일을 처리하지 못했습니다. 파일 형식과 내용을 확인하세요."}, status_code=400)
     return JSONResponse({"excel_path": str(path), "row_count": len(rows), "preview": rows[:5]})
 
 
@@ -193,13 +212,14 @@ def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
         resolved = _resolve_upload_path(payload["excel_path"], _username(request))
         if not resolved:
             return JSONResponse({"error": "invalid excel_path"}, status_code=400)
+        loader = load_voc_json if resolved.suffix.lower() == ".json" else load_voc_excel
         try:
-            excel_rows = load_voc_excel(resolved)
+            excel_rows = loader(resolved)
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         except Exception:
-            logger.exception("VOC Excel loading failed")
-            return JSONResponse({"error": "엑셀 데이터를 불러오지 못했습니다. 파일을 다시 업로드하세요."}, status_code=400)
+            logger.exception("VOC external file loading failed")
+            return JSONResponse({"error": "업로드 데이터를 불러오지 못했습니다. 파일을 다시 업로드하세요."}, status_code=400)
 
     settings = _state["load_settings"]()
     llm_kwargs = _state["llm_kwargs"](settings)

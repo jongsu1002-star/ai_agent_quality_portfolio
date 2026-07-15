@@ -689,6 +689,7 @@ DOC_FILES = {
     "defect_report": "결함보고서.md",
     "readme": "README.md",
     "voc_quality_report": "VOC_분석_파이프라인_품질평가_보고서.md",
+    "voc_defect_report": "VOC_분석_파이프라인_결함보고서.md",
 }
 # readme는 docs/가 아니라 프로젝트 최상위에 있는 파일이라 별도 경로로 서빙
 DOC_ROOT_KEYS = {"readme"}

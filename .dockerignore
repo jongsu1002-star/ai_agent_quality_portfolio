@@ -1,0 +1,17 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.pytest_runtime
+data
+reports
+*.env
+.env
+.env.local
+dist
+build
+*.spec
+node_modules
+.claude

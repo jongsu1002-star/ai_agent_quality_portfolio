@@ -89,6 +89,20 @@
     .judge-badge-fail { background: #fee2e2; color: #991b1b; }
     .judge-badge-skipped { background: #fef3c7; color: #92400e; }
     .judge-criteria { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.4rem; font-size: 0.82rem; }
+    .voc-chart-block { margin-bottom: 1.6rem; }
+    .voc-chart-block:last-child { margin-bottom: 0; }
+    .voc-chart-title { font-size: 0.85rem; font-weight: 700; color: var(--text-primary, #1f2937); margin: 0 0 0.7rem; }
+    .voc-bar-row { display: grid; grid-template-columns: 9.5rem 1fr 2.6rem; align-items: center; gap: 0.6rem; font-size: 0.82rem; margin-bottom: 0.4rem; }
+    .voc-bar-label { color: var(--text-secondary, #4b5563); overflow-wrap: anywhere; }
+    .voc-bar-track { background: #eef2f7; border-radius: 999px; height: 0.6rem; overflow: hidden; }
+    .voc-bar-fill { height: 100%; border-radius: 999px; }
+    .voc-bar-fill.accent { background: linear-gradient(90deg, #2563eb, #3b82f6); }
+    .voc-bar-fill.pass { background: #16a34a; }
+    .voc-bar-fill.fail { background: #dc2626; }
+    .voc-bar-value { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+    .voc-chart-note { font-size: 0.8rem; color: var(--text-secondary, #4b5563); margin: 0.5rem 0 0; }
+    .voc-chart-legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.78rem; color: var(--text-secondary, #4b5563); margin-top: 0.5rem; }
+    .voc-chart-legend .dot { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 999px; margin-right: 0.35rem; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
     .metric { padding: 1rem; background: linear-gradient(135deg, #eff6ff, #dbeafe); border-radius: 10px; font-weight: 600; min-width: 0; overflow-wrap: break-word; word-break: break-word; }
     .status-pill { display: inline-block; margin-top: 0.35rem; padding: 0.2rem 0.6rem; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 0.85rem; }
@@ -559,9 +573,56 @@
       <div id="voc-history-list" class="table-view">불러오는 중...</div>
     </div>
     <div class="card">
+      <h2>VOC 분석 파이프라인 품질 지표 차트</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">아래 보고서 본문(마크다운)에는 그래프를 그릴 수 없어, 같은 실측치를 이 페이지에 직접 차트로 렌더링했습니다. 수치 출처는 <code>docs/테스트_결과.md</code>·<code>VOC_분석_파이프라인_결함보고서.md</code>·2장의 실제 Judge 판정입니다.</p>
+
+      <div class="voc-chart-block">
+        <p class="voc-chart-title">테스트 추이 — 1차 구현 → 코드 리뷰 → 최종(신규 테스트 기준)</p>
+        <div class="voc-bar-row"><div class="voc-bar-label">1차 구현</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:56.6%;"></div></div><div class="voc-bar-value">73</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">최종(결함수정 후)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:100%;"></div></div><div class="voc-bar-value">129</div></div>
+        <p class="voc-chart-note">1차 73개는 전부 PASS였지만 모킹 기반이라 실제 Anthropic 호출은 3개 시나리오 모두 ERROR였음. P0 7건·P1 6건 수정 후 129개로 증가, 실제 API 호출까지 성공.</p>
+      </div>
+
+      <div class="voc-chart-block">
+        <p class="voc-chart-title">점검 범위 — 테스트 레이어별 건수</p>
+        <div class="voc-bar-row"><div class="voc-bar-label">함수 단위(voc_analysis)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:100%;"></div></div><div class="voc-bar-value">55</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">HTTP API(voc_analysis)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:56.4%;"></div></div><div class="voc-bar-value">31</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">HTTP API(board)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:20%;"></div></div><div class="voc-bar-value">11</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">Provider 분기</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:16.4%;"></div></div><div class="voc-bar-value">9</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">Jira 클라이언트</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:12.7%;"></div></div><div class="voc-bar-value">7</div></div>
+      </div>
+
+      <div class="voc-chart-block">
+        <p class="voc-chart-title">실제 시나리오 독립 Judge 판정 분포(3건)</p>
+        <div class="voc-bar-row"><div class="voc-bar-label">PASS</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:33%;"></div></div><div class="voc-bar-value">1</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">FAIL</div><div class="voc-bar-track"><div class="voc-bar-fill fail" style="width:67%;"></div></div><div class="voc-bar-value">2</div></div>
+        <div class="voc-chart-legend"><span><span class="dot" style="background:#16a34a;"></span>실제 불만과 정확히 연계</span><span><span class="dot" style="background:#dc2626;"></span>근거 오매핑 또는 지시 범위 이탈 발견</span></div>
+      </div>
+
+      <div class="voc-chart-block">
+        <p class="voc-chart-title">결함 상태 — 코드 리뷰에서 발견된 결함의 수정 현황</p>
+        <div class="voc-bar-row"><div class="voc-bar-label">P0(즉시수정)</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:100%;"></div></div><div class="voc-bar-value">7/7</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">P1(품질개선)</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:100%;"></div></div><div class="voc-bar-value">6/6</div></div>
+        <p class="voc-chart-note">발견 13건 전부 수정 완료, 미해결 결함 0건(상세는 하단 결함보고서 참고).</p>
+      </div>
+
+      <div class="voc-chart-block">
+        <p class="voc-chart-title">잔여 위험 — 검증 완료 범위 대비 남은 한계 항목 수</p>
+        <div class="voc-bar-row"><div class="voc-bar-label">검증 완료 범위</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:100%;"></div></div><div class="voc-bar-value">6</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">잔여 위험(한계)</div><div class="voc-bar-track"><div class="voc-bar-fill fail" style="width:100%;"></div></div><div class="voc-bar-value">6</div></div>
+        <p class="voc-chart-note">잔여 위험 6건은 결함이 아니라 이번 범위 밖으로 명시한 항목(부하 테스트, PII 마스킹, 6단계 에이전트 구조 등) — 상세는 하단 품질평가 보고서 9장 참고.</p>
+      </div>
+    </div>
+
+    <div class="card">
       <h2>VOC 분석 파이프라인 품질평가 보고서</h2>
       <p style="color: var(--text-secondary); font-size: 0.9rem;">이 기능(게시판 + VOC 자동분석 + 독립 LLM Judge 교차검증)의 실제 구현·테스트 내용을 정리한 보고서입니다.</p>
       <div id="voc-quality-report" class="doc-viewer"></div>
+    </div>
+    <div class="card">
+      <h2>VOC 분석 파이프라인 결함보고서</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">이 기능에 대한 독립 코드 리뷰에서 발견된 결함(P0/P1) 상세입니다. QA 파이프라인 실행 결과로 자동 생성되는 대시보드 탭의 "결함보고서"와는 별개 문서입니다.</p>
+      <div id="voc-defect-report" class="doc-viewer"></div>
     </div>
   </div>
 
@@ -814,7 +875,7 @@
 
     // ===================== VOC 자동분석 =====================
     let _vocExcelPath = null;
-    let _vocQualityReportLoaded = false;
+    let _vocReportsLoaded = false;
 
     async function previewJiraIssues() {
       const jql = document.getElementById('voc-jira-jql').value.trim();
@@ -1579,9 +1640,10 @@
       }
       if (name === 'voc-analysis') {
         loadVocHistory();
-        if (!_vocQualityReportLoaded) {
-          _vocQualityReportLoaded = true;
+        if (!_vocReportsLoaded) {
+          _vocReportsLoaded = true;
           viewDoc('voc_quality_report', 'voc-quality-report');
+          viewDoc('voc_defect_report', 'voc-defect-report');
         }
       }
     }

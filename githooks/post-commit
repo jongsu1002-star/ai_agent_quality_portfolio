@@ -1,0 +1,28 @@
+#!/bin/sh
+# report_versions.json 자동 갱신 훅.
+#
+# scripts/snapshot_report_versions.py는 git show로 "이미 커밋된" 문서 이력을 읽으므로,
+# 방금 만든 커밋을 반영하려면 그 커밋이 완전히 끝난 뒤(post-commit)에만 실행할 수 있다
+# (pre-commit 시점엔 이 커밋이 아직 git log에 없음). 그래서 문서 커밋과 버전스냅샷 커밋은
+# 항상 별도 커밋 2개가 된다 - 이 훅이 만드는 후속 커밋을 정상 동작으로 받아들일 것.
+#
+# 이 훅 자신이 만드는 후속 커밋이 다시 post-commit을 트리거해도, 그 커밋은
+# docs/report_versions.json만 건드리므로 snapshot_report_versions.py의
+# _head_touched_tracked_docs() 검사에서 걸러져 재귀 없이 끝난다.
+
+REPO_ROOT=$(git rev-parse --show-toplevel) || exit 0
+cd "$REPO_ROOT" || exit 0
+
+PYTHON_BIN=$(command -v python || command -v python3)
+if [ -z "$PYTHON_BIN" ]; then
+  echo "[post-commit] python을 찾을 수 없어 report_versions.json 자동 갱신을 건너뜁니다." >&2
+  echo "[post-commit] 수동으로 실행하세요: python scripts/snapshot_report_versions.py" >&2
+  exit 0
+fi
+
+"$PYTHON_BIN" scripts/snapshot_report_versions.py --auto-commit-if-changed || {
+  echo "[post-commit] report_versions.json 자동 갱신 실패 - 수동으로 확인해주세요." >&2
+  exit 0
+}
+
+exit 0

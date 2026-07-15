@@ -576,43 +576,41 @@
     </div>
     <div class="card">
       <h2>VOC 분석 파이프라인 품질 지표 차트</h2>
-      <p style="color: var(--text-secondary); font-size: 0.9rem;">아래 보고서 본문(마크다운)에는 그래프를 그릴 수 없어, 같은 실측치를 이 페이지에 직접 차트로 렌더링했습니다. 수치 출처는 <code>docs/테스트_결과.md</code>·<code>VOC_분석_파이프라인_결함보고서.md</code>·2장의 실제 Judge 판정입니다.</p>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">아래 보고서 본문(마크다운)에는 그래프를 그릴 수 없어, 같은 실측치를 이 페이지에 직접 차트로 렌더링했습니다.</p>
+      <p style="background:#fef3c7; color:#92400e; padding:0.5rem 0.75rem; border-radius:6px; font-size:0.82rem;">⚠ <strong>2026-07-15 15:56 KST 스냅샷(커밋 596ed39)</strong> — 이 차트는 실시간 집계가 아니라 그 시점의 실측치를 고정 렌더링한 것입니다. 이후 테스트/결함 현황이 바뀌어도 재배포 전까지는 자동 갱신되지 않습니다. 정확한 최신 수치는 <code>docs/테스트_결과.md</code>(pytest 실행마다 자동 갱신)를 확인하세요.</p>
 
       <div class="voc-chart-block">
         <p class="voc-chart-title">테스트 추이 — 1차 구현 → 코드 리뷰 → 최종(신규 테스트 기준)</p>
-        <div class="voc-bar-row"><div class="voc-bar-label">1차 구현</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:56.6%;"></div></div><div class="voc-bar-value">73</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">최종(결함수정 후)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:100%;"></div></div><div class="voc-bar-value">129</div></div>
-        <p class="voc-chart-note">1차 73개는 전부 PASS였지만 모킹 기반이라 실제 Anthropic 호출은 3개 시나리오 모두 ERROR였음. P0 7건·P1 6건 수정 후 129개로 증가, 실제 API 호출까지 성공.</p>
+        <div class="voc-bar-row"><div class="voc-bar-label">1차 구현</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:51%;"></div></div><div class="voc-bar-value">73</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">최종(결함수정 후)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:100%;"></div></div><div class="voc-bar-value">143</div></div>
+        <p class="voc-chart-note">1차 73개는 전부 PASS였지만 모킹 기반이라 실제 Anthropic 호출은 3개 시나리오 모두 ERROR였음. 이후 두 차례 코드 리뷰(P0 7+P1 6, 이어서 테스트 격리 P0 1건)를 거쳐 143개로 증가.</p>
       </div>
 
       <div class="voc-chart-block">
         <p class="voc-chart-title">점검 범위 — 테스트 레이어별 건수</p>
         <div class="voc-bar-row"><div class="voc-bar-label">함수 단위(voc_analysis)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:100%;"></div></div><div class="voc-bar-value">55</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">HTTP API(voc_analysis)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:56.4%;"></div></div><div class="voc-bar-value">31</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">HTTP API(voc_analysis)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:65.5%;"></div></div><div class="voc-bar-value">36</div></div>
         <div class="voc-bar-row"><div class="voc-bar-label">HTTP API(board)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:20%;"></div></div><div class="voc-bar-value">11</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">테스트 격리 회귀</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:16.4%;"></div></div><div class="voc-bar-value">9</div></div>
         <div class="voc-bar-row"><div class="voc-bar-label">Provider 분기</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:16.4%;"></div></div><div class="voc-bar-value">9</div></div>
         <div class="voc-bar-row"><div class="voc-bar-label">Jira 클라이언트</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:12.7%;"></div></div><div class="voc-bar-value">7</div></div>
       </div>
 
       <div class="voc-chart-block">
-        <p class="voc-chart-title">실제 시나리오 독립 Judge 판정 분포(3건)</p>
+        <p class="voc-chart-title">실제 시나리오 독립 Judge 판정 분포(3건, 서버 재시작 후 재검증)</p>
         <div class="voc-bar-row"><div class="voc-bar-label">PASS</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:33%;"></div></div><div class="voc-bar-value">1</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">FAIL</div><div class="voc-bar-track"><div class="voc-bar-fill fail" style="width:67%;"></div></div><div class="voc-bar-value">2</div></div>
-        <div class="voc-chart-legend"><span><span class="dot" style="background:#16a34a;"></span>실제 불만과 정확히 연계</span><span><span class="dot" style="background:#dc2626;"></span>근거 오매핑 또는 지시 범위 이탈 발견</span></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">FAIL(REJECTED)</div><div class="voc-bar-track"><div class="voc-bar-fill fail" style="width:67%;"></div></div><div class="voc-bar-value">2</div></div>
+        <div class="voc-chart-legend"><span><span class="dot" style="background:#16a34a;"></span>관련 근거로 실제 개선안 생성 + 교차검증 PASS</span><span><span class="dot" style="background:#dc2626;"></span>지시 주제와 관련된 게시글이 현재 게시판에 없어 결정적으로 REJECTED(결함 아님)</span></div>
+        <p class="voc-chart-note">2026-07-15 15:48~15:52 실행, git_sha 596ed39. 현재 게시판 VOC 글이 5건뿐이고(과거 시딩된 보험사 합성 데이터는 그새 삭제됨) 그 중 2개 시나리오의 지시 주제와 무관해 정상적으로 REJECTED됨 - 상세 근거는 하단 결함보고서 "실행 증적" 참고.</p>
       </div>
 
       <div class="voc-chart-block">
         <p class="voc-chart-title">결함 상태 — 코드 리뷰에서 발견된 결함의 수정 현황</p>
-        <div class="voc-bar-row"><div class="voc-bar-label">P0(즉시수정)</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:100%;"></div></div><div class="voc-bar-value">7/7</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">P1(품질개선)</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:100%;"></div></div><div class="voc-bar-value">6/6</div></div>
-        <p class="voc-chart-note">발견 13건 전부 수정 완료, 미해결 결함 0건(상세는 하단 결함보고서 참고).</p>
-      </div>
-
-      <div class="voc-chart-block">
-        <p class="voc-chart-title">잔여 위험 — 검증 완료 범위 대비 남은 한계 항목 수</p>
-        <div class="voc-bar-row"><div class="voc-bar-label">검증 완료 범위</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:100%;"></div></div><div class="voc-bar-value">6</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">잔여 위험(한계)</div><div class="voc-bar-track"><div class="voc-bar-fill fail" style="width:100%;"></div></div><div class="voc-bar-value">6</div></div>
-        <p class="voc-chart-note">잔여 위험 6건은 결함이 아니라 이번 범위 밖으로 명시한 항목(부하 테스트, PII 마스킹, 6단계 에이전트 구조 등) — 상세는 하단 품질평가 보고서 9장 참고.</p>
+        <div class="voc-bar-row"><div class="voc-bar-label">1차 리뷰 P0(즉시수정)</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:100%;"></div></div><div class="voc-bar-value">7/7</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">1차 리뷰 P1(품질개선)</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:100%;"></div></div><div class="voc-bar-value">6/6</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">2차 리뷰 P0(즉시수정)</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:100%;"></div></div><div class="voc-bar-value">4/4</div></div>
+        <div class="voc-bar-row"><div class="voc-bar-label">2차 리뷰 P1(품질개선)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:50%;"></div></div><div class="voc-bar-value">1/2</div></div>
+        <p class="voc-chart-note">2차 리뷰 P1 중 1건(이 차트의 완전 동적화)은 최소 대응(스냅샷 라벨링)만 적용 - 상세는 하단 결함보고서 참고.</p>
       </div>
     </div>
 
@@ -998,7 +996,7 @@
           ${dateWarningHtml}
           <p>${escapeHtml(result.summary || '')}</p>
           <table><thead><tr><th>이슈 주제</th><th>빈도</th><th>심각도</th><th>개선안</th></tr></thead>
-            <tbody>${issuesHtml || '<tr><td colspan="4">이슈가 없습니다.</td></tr>'}</tbody></table>
+            <tbody>${issuesHtml || '<tr><td colspan="4">⚠ 분석 대상 안에서 지시사항과 관련된 근거를 찾지 못했습니다 - "이슈 없음"이 아니라 정책 근거 부족/검토 필요 상태입니다. 지시사항을 비우거나 넓혀서 다시 시도해 보세요.</td></tr>'}</tbody></table>
           ${_renderJudgeBadge(result.judge)}
           ${gateHtml}
         </div>`;
@@ -1012,7 +1010,9 @@
       if (verdict === 'ERROR') crossModelText = '교차검증 실패';
       else if (verdict === 'SKIPPED') crossModelText = '교차검증 미실행';
       else if (judge.cross_model) crossModelText = '다른 모델로 교차 검증 완료';
-      else if (verdict === 'FAIL' && !Object.keys(judge.criteria || {}).length) crossModelText = '결정적 사전 검증 실패';
+      else if (verdict === 'FAIL' && !Object.keys(judge.criteria || {}).length) crossModelText = judge.cross_model_configured
+        ? '교차검증 가능한 설정이었으나, 개선안 자체가 비어 있어 독립 검증을 호출하지 않고 결정적으로 REJECTED 처리함(정책 근거 부족)'
+        : '개선안이 비어 있어 독립 검증을 호출하지 않고 결정적으로 REJECTED 처리함(정책 근거 부족)';
       const criteria = judge.criteria || {};
       const criteriaLabels = { relevance: '관련성', root_cause_addressing: '근본원인 대응', feasibility: '실행가능성', measurability: '검증가능성', example_ids_valid: '근거 ID 유효성' };
       const criteriaHtml = Object.keys(criteria).length

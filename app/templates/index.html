@@ -576,42 +576,8 @@
     </div>
     <div class="card">
       <h2>VOC 분석 파이프라인 품질 지표 차트</h2>
-      <p style="color: var(--text-secondary); font-size: 0.9rem;">아래 보고서 본문(마크다운)에는 그래프를 그릴 수 없어, 같은 실측치를 이 페이지에 직접 차트로 렌더링했습니다.</p>
-      <p style="background:#fef3c7; color:#92400e; padding:0.5rem 0.75rem; border-radius:6px; font-size:0.82rem;">⚠ <strong>2026-07-15 15:56 KST 스냅샷(커밋 596ed39)</strong> — 이 차트는 실시간 집계가 아니라 그 시점의 실측치를 고정 렌더링한 것입니다. 이후 테스트/결함 현황이 바뀌어도 재배포 전까지는 자동 갱신되지 않습니다. 정확한 최신 수치는 <code>docs/테스트_결과.md</code>(pytest 실행마다 자동 갱신)를 확인하세요.</p>
-
-      <div class="voc-chart-block">
-        <p class="voc-chart-title">테스트 추이 — 1차 구현 → 코드 리뷰 → 최종(신규 테스트 기준)</p>
-        <div class="voc-bar-row"><div class="voc-bar-label">1차 구현</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:51%;"></div></div><div class="voc-bar-value">73</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">최종(결함수정 후)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:100%;"></div></div><div class="voc-bar-value">143</div></div>
-        <p class="voc-chart-note">1차 73개는 전부 PASS였지만 모킹 기반이라 실제 Anthropic 호출은 3개 시나리오 모두 ERROR였음. 이후 두 차례 코드 리뷰(P0 7+P1 6, 이어서 테스트 격리 P0 1건)를 거쳐 143개로 증가.</p>
-      </div>
-
-      <div class="voc-chart-block">
-        <p class="voc-chart-title">점검 범위 — 테스트 레이어별 건수</p>
-        <div class="voc-bar-row"><div class="voc-bar-label">함수 단위(voc_analysis)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:100%;"></div></div><div class="voc-bar-value">55</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">HTTP API(voc_analysis)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:65.5%;"></div></div><div class="voc-bar-value">36</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">HTTP API(board)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:20%;"></div></div><div class="voc-bar-value">11</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">테스트 격리 회귀</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:16.4%;"></div></div><div class="voc-bar-value">9</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">Provider 분기</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:16.4%;"></div></div><div class="voc-bar-value">9</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">Jira 클라이언트</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:12.7%;"></div></div><div class="voc-bar-value">7</div></div>
-      </div>
-
-      <div class="voc-chart-block">
-        <p class="voc-chart-title">실제 시나리오 독립 Judge 판정 분포(3건, 서버 재시작 후 재검증)</p>
-        <div class="voc-bar-row"><div class="voc-bar-label">PASS</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:33%;"></div></div><div class="voc-bar-value">1</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">FAIL(REJECTED)</div><div class="voc-bar-track"><div class="voc-bar-fill fail" style="width:67%;"></div></div><div class="voc-bar-value">2</div></div>
-        <div class="voc-chart-legend"><span><span class="dot" style="background:#16a34a;"></span>관련 근거로 실제 개선안 생성 + 교차검증 PASS</span><span><span class="dot" style="background:#dc2626;"></span>지시 주제와 관련된 게시글이 현재 게시판에 없어 결정적으로 REJECTED(결함 아님)</span></div>
-        <p class="voc-chart-note">2026-07-15 15:48~15:52 실행, git_sha 596ed39. 현재 게시판 VOC 글이 5건뿐이고(과거 시딩된 보험사 합성 데이터는 그새 삭제됨) 그 중 2개 시나리오의 지시 주제와 무관해 정상적으로 REJECTED됨 - 상세 근거는 하단 결함보고서 "실행 증적" 참고.</p>
-      </div>
-
-      <div class="voc-chart-block">
-        <p class="voc-chart-title">결함 상태 — 코드 리뷰에서 발견된 결함의 수정 현황</p>
-        <div class="voc-bar-row"><div class="voc-bar-label">1차 리뷰 P0(즉시수정)</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:100%;"></div></div><div class="voc-bar-value">7/7</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">1차 리뷰 P1(품질개선)</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:100%;"></div></div><div class="voc-bar-value">6/6</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">2차 리뷰 P0(즉시수정)</div><div class="voc-bar-track"><div class="voc-bar-fill pass" style="width:100%;"></div></div><div class="voc-bar-value">4/4</div></div>
-        <div class="voc-bar-row"><div class="voc-bar-label">2차 리뷰 P1(품질개선)</div><div class="voc-bar-track"><div class="voc-bar-fill accent" style="width:50%;"></div></div><div class="voc-bar-value">1/2</div></div>
-        <p class="voc-chart-note">2차 리뷰 P1 중 1건(이 차트의 완전 동적화)은 최소 대응(스냅샷 라벨링)만 적용 - 상세는 하단 결함보고서 참고.</p>
-      </div>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">아래 보고서 본문(마크다운)에는 그래프를 그릴 수 없어, 같은 실측치를 이 페이지에 직접 차트로 렌더링했습니다. <strong>이 카드는 서버 API(<code>/api/voc-analysis/quality-dashboard</code>)에서 매번 실시간으로 다시 계산한 값을 보여줍니다</strong> — pytest를 새로 돌리거나 VOC 분석을 새로 실행하면 다음 새로고침에 바로 반영됩니다(결함 수정 현황만은 예외 - 코드 리뷰로 사람이 검토·확정하는 값이라 자동 계산 대상이 아님).</p>
+      <div id="voc-quality-dashboard"><p class="chart-hint">불러오는 중...</p></div>
     </div>
 
     <div class="card">
@@ -1062,6 +1028,80 @@
       const record = await res.json();
       _renderVocResult(record);
       window.scrollTo({ top: document.getElementById('voc-result').offsetTop - 20, behavior: 'smooth' });
+    }
+
+    function _vocBarRow(label, value, max, cls, valueText) {
+      const pct = max > 0 ? Math.max(4, Math.round((value / max) * 100)) : 0;
+      return `<div class="voc-bar-row"><div class="voc-bar-label">${escapeHtml(label)}</div><div class="voc-bar-track"><div class="voc-bar-fill ${cls}" style="width:${pct}%;"></div></div><div class="voc-bar-value">${escapeHtml(valueText !== undefined ? valueText : String(value))}</div></div>`;
+    }
+
+    function _renderVocQualityDashboard(data) {
+      const parts = [];
+      const ts = data.test_summary || {};
+      if (ts.available) {
+        const layerMax = Math.max(1, ...ts.layer_breakdown.map(r => r.count));
+        parts.push(`
+          <div class="voc-chart-block">
+            <p class="voc-chart-title">전체 테스트 스위트 — ${ts.total}개 중 ${ts.passed}개 통과</p>
+            <p class="voc-chart-note">docs/테스트_결과.md 최종 갱신: ${escapeHtml(ts.generated_at)}</p>
+          </div>
+          <div class="voc-chart-block">
+            <p class="voc-chart-title">점검 범위 — 테스트 레이어별 건수</p>
+            ${ts.layer_breakdown.map(row => _vocBarRow(row.label, row.count, layerMax, 'accent')).join('')}
+          </div>`);
+      } else {
+        parts.push(`<div class="voc-chart-block"><p class="chart-hint">⚠ 검증 데이터 없음(${escapeHtml(ts.reason || '테스트 결과 문서를 찾을 수 없음')})</p></div>`);
+      }
+
+      const hist = data.voc_history || {};
+      if (hist.total_runs > 0) {
+        const verdictOrder = ['PASS', 'FAIL', 'SKIPPED', 'ERROR', 'UNKNOWN'];
+        const verdictCls = { PASS: 'pass', FAIL: 'fail', ERROR: 'fail', SKIPPED: 'accent', UNKNOWN: 'accent' };
+        const verdictMax = Math.max(1, ...Object.values(hist.judge_verdict));
+        const verdictRows = verdictOrder.filter(k => hist.judge_verdict[k]).map(k => _vocBarRow(k, hist.judge_verdict[k], verdictMax, verdictCls[k])).join('');
+        parts.push(`
+          <div class="voc-chart-block">
+            <p class="voc-chart-title">독립 Judge 판정 분포 — 전체 실행 이력 ${hist.total_runs}건</p>
+            ${verdictRows}
+          </div>`);
+
+        const gateOrder = ['APPROVED', 'REVIEW_REQUIRED', 'REJECTED', 'UNVERIFIED', 'UNKNOWN'];
+        const gateCls = { APPROVED: 'pass', REVIEW_REQUIRED: 'accent', REJECTED: 'fail', UNVERIFIED: 'accent', UNKNOWN: 'accent' };
+        const gateMax = Math.max(1, ...Object.values(hist.quality_gate));
+        const gateRows = gateOrder.filter(k => hist.quality_gate[k]).map(k => _vocBarRow(k, hist.quality_gate[k], gateMax, gateCls[k])).join('');
+        parts.push(`
+          <div class="voc-chart-block">
+            <p class="voc-chart-title">품질 게이트 판정 분포 — 전체 실행 이력 ${hist.total_runs}건</p>
+            ${gateRows}
+            <p class="voc-chart-note">UNKNOWN은 quality_gate 필드 도입 이전(구버전 코드)에 생성된 결과입니다.</p>
+          </div>`);
+      } else {
+        parts.push('<div class="voc-chart-block"><p class="chart-hint">⚠ 검증 데이터 없음 - 아직 실행된 VOC 분석이 없습니다.</p></div>');
+      }
+
+      const defect = data.defect_status || {};
+      if (defect.p0_total !== undefined) {
+        parts.push(`
+          <div class="voc-chart-block">
+            <p class="voc-chart-title">결함 상태 — 코드 리뷰에서 발견된 결함의 수정 현황</p>
+            ${_vocBarRow('P0(즉시수정)', defect.p0_resolved, defect.p0_total, defect.p0_resolved === defect.p0_total ? 'pass' : 'accent', `${defect.p0_resolved}/${defect.p0_total}`)}
+            ${_vocBarRow('P1(품질개선)', defect.p1_resolved, defect.p1_total, defect.p1_resolved === defect.p1_total ? 'pass' : 'accent', `${defect.p1_resolved}/${defect.p1_total}`)}
+            <p class="voc-chart-note">${escapeHtml(defect.source || '')} · 이 항목만 사람이 검토·확정한 값이라 자동 계산 대상이 아닙니다.</p>
+          </div>`);
+      }
+
+      return parts.join('');
+    }
+
+    async function loadVocQualityDashboard() {
+      const el = document.getElementById('voc-quality-dashboard');
+      try {
+        const res = await fetch('/api/voc-analysis/quality-dashboard');
+        const data = await res.json();
+        el.innerHTML = _renderVocQualityDashboard(data) + `<p class="chart-hint" style="margin-top:0.5rem;">서버 집계 시각: ${escapeHtml(data.generated_at || '')}</p>`;
+      } catch (err) {
+        el.innerHTML = '<p class="chart-hint">품질 지표를 불러오지 못했습니다.</p>';
+      }
     }
 
     async function loadUsers() {
@@ -1650,6 +1690,7 @@
       }
       if (name === 'voc-analysis') {
         loadVocHistory();
+        loadVocQualityDashboard();
         if (!_vocReportsLoaded) {
           _vocReportsLoaded = true;
           viewDoc('voc_quality_report', 'voc-quality-report');

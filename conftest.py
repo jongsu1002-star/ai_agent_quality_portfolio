@@ -119,6 +119,11 @@ def _isolate_board_store(tmp_path, monkeypatch):
     voc_analysis_module.configure(isolated_store, main_module._current_username, main_module._load_settings_dict, main_module._llm_judge_kwargs, main_module._independent_judge_kwargs, main_module._is_admin_effective)
     monkeypatch.setattr(voc_analysis_module, "VOC_ANALYSIS_DIR", tmp_path / "voc_analysis")
     monkeypatch.setattr(voc_analysis_module, "VOC_UPLOAD_DIR", tmp_path / "voc_analysis" / "uploads")
+    # quality-dashboard 엔드포인트가 읽는 docs/테스트_결과.md·reports/exports/도 실제 저장소
+    # 파일이 아니라 격리된 경로를 보게 함(안 그러면 테스트가 이 리포지토리 자신의 실제 문서
+    # 내용에 의존하게 되어, 테스트 결과가 실행 시점의 우연한 문서 상태에 따라 흔들릴 수 있음).
+    monkeypatch.setattr(voc_analysis_module, "DOCS_DIR", tmp_path / "docs")
+    monkeypatch.setattr(voc_analysis_module, "EXPORTS_DIR", tmp_path / "voc_analysis" / "exports")
     yield
     isolated_store.close_thread_connection()
 

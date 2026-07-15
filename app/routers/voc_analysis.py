@@ -10,7 +10,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import uuid
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -296,6 +298,118 @@ def _write_analysis_record_atomically(analysis_id: str, record: Dict[str, Any], 
     tmp_path = target_dir / f".{analysis_id}.json.tmp"
     tmp_path.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp_path, final_path)
+
+
+DOCS_DIR = Path("docs")
+EXPORTS_DIR = Path("reports") / "exports"
+
+# VOC 분석 탭 하단 "점검 범위" 차트가 보여주는 파일 -> 표시 라벨 매핑(순서 유지).
+# docs/테스트_결과.md의 "파일별 결과" 표에서 이 파일들의 건수만 합산해서 쓴다.
+_LAYER_FILE_LABELS = [
+    ("tests/test_voc_analysis.py", "함수 단위(voc_analysis)"),
+    ("tests/test_voc_analysis_api.py", "HTTP API(voc_analysis)"),
+    ("tests/test_board_api.py", "HTTP API(board)"),
+    ("tests/test_isolation_regression.py", "테스트 격리 회귀"),
+    ("tests/test_independent_judge_kwargs.py", "Provider 분기"),
+    ("tests/test_jira_client.py", "Jira 클라이언트"),
+]
+
+_TEST_SUMMARY_RE = re.compile(
+    r"최종 실행 시각: (?P<ts>\S+).*?총 테스트 수: (?P<total>\d+).*?통과: (?P<passed>\d+)",
+    re.DOTALL,
+)
+_TABLE_ROW_RE = re.compile(r"^\|\s*`([^`]+)`\s*\|[^|]*\|\s*(\d+)\s*\|")
+
+
+def _read_test_summary() -> Dict[str, Any]:
+    """docs/테스트_결과.md(pytest 실행마다 자동 갱신)에서 최신 총계/레이어별 건수를 실시간으로 읽음.
+
+    하드코딩된 차트 수치가 재배포 전까지 갱신되지 않던 문제(2차 코드 리뷰 P1-1)의 대응 -
+    매 요청마다 이 문서를 다시 읽으므로 pytest를 새로 돌리면 다음 새로고침에 바로 반영됨."""
+    path = DOCS_DIR / "테스트_결과.md"
+    if not path.exists():
+        return {"available": False, "reason": f"{path} 파일이 없습니다"}
+    text = path.read_text(encoding="utf-8")
+    match = _TEST_SUMMARY_RE.search(text)
+    if not match:
+        return {"available": False, "reason": "문서 형식을 인식하지 못했습니다"}
+    per_file_counts: Counter[str] = Counter()
+    for line in text.splitlines():
+        row = _TABLE_ROW_RE.match(line)
+        if row:
+            per_file_counts[row.group(1)] += int(row.group(2))
+    layer_breakdown = [
+        {"label": label, "count": per_file_counts.get(file_name, 0)}
+        for file_name, label in _LAYER_FILE_LABELS
+        if per_file_counts.get(file_name, 0) > 0
+    ]
+    return {
+        "available": True,
+        "generated_at": match.group("ts"),
+        "total": int(match.group("total")),
+        "passed": int(match.group("passed")),
+        "layer_breakdown": layer_breakdown,
+        "source": str(path),
+    }
+
+
+def _read_latest_audit_manifest() -> Optional[Dict[str, Any]]:
+    manifests = sorted(EXPORTS_DIR.glob("audit_manifest_*.json"), reverse=True)
+    if not manifests:
+        return None
+    try:
+        return json.loads(manifests[0].read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _scan_voc_history() -> Dict[str, Any]:
+    """reports/voc_analysis/(shared + 사용자별) 아래 모든 결과 파일을 스캔해 실제 judge
+    판정/quality_gate 분포를 집계 - 특정 3건이 아니라 지금까지의 전체 실행 이력 기준."""
+    search_roots = [VOC_ANALYSIS_DIR] + sorted((VOC_ANALYSIS_DIR / "users").glob("*")) if (VOC_ANALYSIS_DIR / "users").exists() else [VOC_ANALYSIS_DIR]
+    verdicts: Counter[str] = Counter()
+    gates: Counter[str] = Counter()
+    total = 0
+    for root in search_roots:
+        if not root.exists():
+            continue
+        for path in root.glob("voc_*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            result = data.get("result", {})
+            judge = result.get("judge") or {}
+            gate = result.get("quality_gate") or {}
+            verdicts[judge.get("verdict", "UNKNOWN")] += 1
+            gates[gate.get("status", "UNKNOWN")] += 1
+            total += 1
+    return {"total_runs": total, "judge_verdict": dict(verdicts), "quality_gate": dict(gates)}
+
+
+@router.get("/quality-dashboard")
+def quality_dashboard() -> JSONResponse:
+    """VOC 분석 탭 하단 품질 차트가 쓰는 실시간 집계 API.
+
+    2차 코드 리뷰(P1-1)에서 지적된 "차트가 HTML에 고정값으로 박혀 있어 재배포 전까지
+    최신 상태를 반영하지 못한다"는 문제의 정식 대응 - 테스트/실행 결과 집계는 이 API가
+    매 요청마다 실제 파일을 다시 읽어 계산하고, 프론트는 더 이상 숫자를 하드코딩하지 않는다.
+    결함 수정 현황(defect_status)만은 예외 - 코드 리뷰에서 사람이 검토·확정하는 값이라
+    자동 계산 대상이 아니며, 결함보고서 최신 개정을 따라 이 한 곳에만 유지한다."""
+    test_summary = _read_test_summary()
+    manifest = _read_latest_audit_manifest()
+    history = _scan_voc_history()
+    return JSONResponse({
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "test_summary": test_summary,
+        "latest_audit_manifest": manifest,
+        "voc_history": history,
+        "defect_status": {
+            "p0_resolved": 11, "p0_total": 11,
+            "p1_resolved": 8, "p1_total": 8,
+            "source": "VOC_분석_파이프라인_결함보고서.md(3차 개정) - 사람이 검토·확정한 값, 자동 계산 아님",
+        },
+    })
 
 
 @router.get("/history")

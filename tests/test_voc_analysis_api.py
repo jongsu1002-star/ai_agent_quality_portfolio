@@ -454,3 +454,60 @@ def test_voc_analysis_history_and_uploads_are_isolated_per_user():
         "excel_path": upload.json()["excel_path"],
     })
     assert cross_user_run.status_code == 400
+
+
+def test_quality_dashboard_reports_no_data_when_test_results_doc_missing():
+    """격리된 테스트 환경에는 docs/테스트_결과.md가 없으므로 - 0이나 성공값으로 위장하지
+    않고 available=False로 정직하게 표시해야 한다(2차 리뷰 P1-1)."""
+    client = TestClient(app)
+    response = client.get("/api/voc-analysis/quality-dashboard")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["test_summary"]["available"] is False
+
+
+def test_quality_dashboard_parses_real_test_results_doc(monkeypatch):
+    doc = (
+        "# 테스트 결과\n\n"
+        "- 최종 실행 시각: 2026-07-15T16:00:00\n"
+        "- 총 테스트 수: 10\n"
+        "- 통과: 10\n\n"
+        "## 파일별 결과\n\n"
+        "| 테스트 파일 | 설명 | 건수 | 결과 |\n"
+        "|---|---|---|---|\n"
+        "| `tests/test_voc_analysis.py` | - | 4 | 통과 |\n"
+        "| `tests/test_board_api.py` | - | 6 | 통과 |\n"
+    )
+    voc_analysis_module.DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    (voc_analysis_module.DOCS_DIR / "테스트_결과.md").write_text(doc, encoding="utf-8")
+
+    client = TestClient(app)
+    body = client.get("/api/voc-analysis/quality-dashboard").json()
+    summary = body["test_summary"]
+    assert summary["available"] is True
+    assert summary["total"] == 10
+    assert summary["passed"] == 10
+    labels = {row["label"]: row["count"] for row in summary["layer_breakdown"]}
+    assert labels["함수 단위(voc_analysis)"] == 4
+    assert labels["HTTP API(board)"] == 6
+
+
+def test_quality_dashboard_scans_real_voc_history_for_verdict_distribution():
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "불친절한 상담원 때문에 화가 납니다"})
+    run1 = client.post("/api/voc-analysis/run", json={"use_board": True})
+    assert run1.status_code == 200
+
+    body = client.get("/api/voc-analysis/quality-dashboard").json()
+    history = body["voc_history"]
+    assert history["total_runs"] >= 1
+    assert sum(history["judge_verdict"].values()) == history["total_runs"]
+    assert sum(history["quality_gate"].values()) == history["total_runs"]
+
+
+def test_quality_dashboard_includes_curated_defect_status():
+    client = TestClient(app)
+    body = client.get("/api/voc-analysis/quality-dashboard").json()
+    defect = body["defect_status"]
+    assert defect["p0_resolved"] == defect["p0_total"]
+    assert defect["p1_resolved"] <= defect["p1_total"]

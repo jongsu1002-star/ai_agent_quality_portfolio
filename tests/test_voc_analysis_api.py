@@ -181,7 +181,8 @@ def test_run_response_includes_independent_judge_verdict(monkeypatch):
     data = run.json()
     assert data["result"]["judge"]["verdict"] == "PASS"
     assert data["result"]["interpreter"]["applied"] is True
-    assert _TwoStageFakeClient.call_count == 3  # Interpreter 1회 + 생성 1회 + 독립 검증 1회
+    assert data["result"]["self_check"]["before_verdict"] == "PASS"
+    assert _TwoStageFakeClient.call_count == 4  # Interpreter 1회 + 생성 1회 + 내부 재점검 1회 + 독립 검증 1회
 
     detail = client.get(f"/api/voc-analysis/{data['id']}")
     assert detail.json()["result"]["judge"]["verdict"] == "PASS"

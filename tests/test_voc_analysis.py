@@ -6,6 +6,7 @@ from qa_agent.voc_analysis import (
     build_interpreter_prompt,
     build_judge_prompts,
     build_prompts,
+    build_refine_prompt,
     build_voc_items,
     classify_voc_items,
     normalize_board_post,
@@ -439,13 +440,17 @@ def test_run_voc_analysis_with_judge_survives_judge_failure():
     assert result["judge"]["verdict"] == "ERROR"
 
 
+_VALID_JUDGE_VERDICT_PASS = {"verdict": "PASS", "criteria": {"relevance": True, "root_cause_addressing": True, "feasibility": True, "measurability": True}, "reasoning": "타당함"}
+
+
 def test_run_voc_analysis_with_judge_attaches_verdict():
-    """test_full_voc_analysis_pipeline에 해당: Interpreter -> 생성 -> 독립 검증까지 전체 흐름이 한 번에 성공."""
+    """test_full_voc_analysis_pipeline에 해당: Interpreter -> 생성 -> 내부 재점검 -> 독립 검증까지 전체 흐름이 한 번에 성공."""
     generation_client = _FakeJudgeClient([
         {"classifications": [{"id": "post-1", "intent": "complaint", "topic": "대기시간"}]},  # Interpreter 호출
         _VALID_ANALYSIS_RESULT,  # Summarizer 호출
+        _VALID_JUDGE_VERDICT_PASS,  # 내부 재점검(self-check) 호출 - PASS라 refine은 트리거 안 됨
     ])
-    judge_client = _FakeJudgeClient({"verdict": "PASS", "criteria": {"relevance": True, "root_cause_addressing": True, "feasibility": True, "measurability": True}, "reasoning": "타당함"})
+    judge_client = _FakeJudgeClient(_VALID_JUDGE_VERDICT_PASS)
     board_posts = [{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}]
 
     result = run_voc_analysis_with_judge(generation_client, judge_client, board_posts, [], [])
@@ -453,8 +458,10 @@ def test_run_voc_analysis_with_judge_attaches_verdict():
     assert result["summary"] == _VALID_ANALYSIS_RESULT["summary"]
     assert result["judge"]["verdict"] == "PASS"
     assert result["quality_gate"] == {"status": "APPROVED", "usable_for_policy_decision": True}
-    assert len(generation_client.calls) == 2  # Interpreter 1회 + Summarizer 1회
+    assert len(generation_client.calls) == 3  # Interpreter 1회 + Summarizer 1회 + 내부 재점검 1회
     assert len(judge_client.calls) == 1
+    assert result["self_check"]["before_verdict"] == "PASS"
+    assert result["self_check"]["refine_attempted"] is False
     assert result["interpreter"]["applied"] is True
     assert result["interpreter"]["items"]["post-1"]["intent"] == "complaint"
 
@@ -609,3 +616,85 @@ def test_generate_analysis_retries_when_example_id_is_not_in_input():
 
     assert client.call_count == 2
     assert result["top_issues"][0]["example_ids"] == ["post-1"]
+
+
+# ===================== 내부 재점검(08) + 자가 비평-교정(04~06) =====================
+
+_REFINED_ANALYSIS_RESULT = {
+    "summary": "정정된 요약입니다.",
+    "top_issues": [{"theme": "대기시간(정정)", "frequency": 1, "severity": "high", "suggestion": "인력 충원 및 안내", "example_ids": ["post-1"]}],
+}
+_SELF_CHECK_FAIL = {"verdict": "FAIL", "criteria": {"relevance": False, "root_cause_addressing": True, "feasibility": True, "measurability": True}, "reasoning": "근거 오귀속"}
+_SELF_CHECK_PASS = {"verdict": "PASS", "criteria": {"relevance": True, "root_cause_addressing": True, "feasibility": True, "measurability": True}, "reasoning": "타당함"}
+
+
+def test_build_refine_prompt_includes_previous_result_and_feedback():
+    system_prompt, user_prompt = build_refine_prompt(_VALID_ANALYSIS_RESULT, _SELF_CHECK_FAIL, _VALID_ITEMS)
+    assert "대기시간" in user_prompt  # 이전 결과가 포함됨
+    assert "근거 오귀속" in user_prompt  # 재점검 피드백이 포함됨
+    assert "post-1" in user_prompt  # 원본 항목이 다시 포함됨
+    assert "신뢰 경계" in system_prompt
+
+
+def test_self_check_passes_without_triggering_refine():
+    """내부 재점검이 PASS면 재작성(refine)을 아예 시도하지 않아야 함(불필요한 LLM 호출 방지)."""
+    generation_client = _FakeJudgeClient([
+        {"classifications": [{"id": "post-1", "intent": "complaint", "topic": "대기시간"}]},
+        _VALID_ANALYSIS_RESULT,
+        _SELF_CHECK_PASS,
+    ])
+    judge_client = _FakeJudgeClient(_VALID_JUDGE_VERDICT_PASS)
+    board_posts = [{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}]
+
+    result = run_voc_analysis_with_judge(generation_client, judge_client, board_posts, [], [])
+
+    assert result["self_check"]["refine_attempted"] is False
+    assert result["summary"] == _VALID_ANALYSIS_RESULT["summary"]  # 원본 그대로
+    assert len(generation_client.calls) == 3  # Interpreter + 생성 + 내부 재점검(refine 없음)
+
+
+def test_self_check_fail_triggers_refine_and_replaces_result():
+    """내부 재점검이 FAIL을 내면 1회 재작성을 시도하고, 성공하면 결과가 교체돼야 함."""
+    generation_client = _FakeJudgeClient([
+        {"classifications": [{"id": "post-1", "intent": "complaint", "topic": "대기시간"}]},  # Interpreter
+        _VALID_ANALYSIS_RESULT,  # 생성
+        _SELF_CHECK_FAIL,  # 내부 재점검 -> FAIL
+        _REFINED_ANALYSIS_RESULT,  # 재작성(refine)
+        _SELF_CHECK_PASS,  # 재작성 결과 재점검 -> PASS
+    ])
+    judge_client = _FakeJudgeClient(_VALID_JUDGE_VERDICT_PASS)
+    board_posts = [{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}]
+
+    result = run_voc_analysis_with_judge(generation_client, judge_client, board_posts, [], [])
+
+    assert result["summary"] == _REFINED_ANALYSIS_RESULT["summary"]  # 재작성 결과로 교체됨
+    assert result["self_check"]["before_verdict"] == "FAIL"
+    assert result["self_check"]["refine_attempted"] is True
+    assert result["self_check"]["refine_applied"] is True
+    assert result["self_check"]["after_verdict"] == "PASS"
+    assert len(generation_client.calls) == 5  # Interpreter+생성+재점검+재작성+재재점검, 딱 1회만 재작성(무한루프 방지)
+
+
+def test_self_check_fail_then_refine_schema_violation_keeps_original_result():
+    """재작성 결과가 스키마를 어기면(예: 없는 근거 ID) 원본 결과를 그대로 유지해야 함 -
+    부가 단계(refine)의 실패가 이미 성공한 생성 결과를 잃게 만들면 안 됨."""
+    fabricated_refine = {
+        "summary": "잘못된 재작성",
+        "top_issues": [{"theme": "t", "frequency": 1, "severity": "high", "suggestion": "s", "example_ids": ["post-999"]}],
+    }
+    generation_client = _FakeJudgeClient([
+        {"classifications": [{"id": "post-1", "intent": "complaint", "topic": "대기시간"}]},
+        _VALID_ANALYSIS_RESULT,
+        _SELF_CHECK_FAIL,
+        fabricated_refine,
+    ])
+    judge_client = _FakeJudgeClient(_VALID_JUDGE_VERDICT_PASS)
+    board_posts = [{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}]
+
+    result = run_voc_analysis_with_judge(generation_client, judge_client, board_posts, [], [])
+
+    assert result["summary"] == _VALID_ANALYSIS_RESULT["summary"]  # 원본 유지
+    assert result["self_check"]["refine_attempted"] is True
+    assert result["self_check"]["refine_applied"] is False
+    assert result["self_check"]["after_verdict"] == "REFINE_FAILED"
+    assert len(generation_client.calls) == 4  # 재작성 실패 후 재재점검(recheck)은 호출 안 함(상한 준수)

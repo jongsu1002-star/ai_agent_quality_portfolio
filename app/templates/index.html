@@ -770,7 +770,9 @@
         body: JSON.stringify({ ids }),
       });
       if (!res.ok) { const err = await res.json(); alert(err.error || '삭제에 실패했습니다.'); return; }
+      const result = await res.json();
       loadBoardPosts();
+      showToast((result.not_found || []).length ? `${ids.length - result.not_found.length}건 삭제됨(존재하지 않는 ${result.not_found.length}건 제외)` : `${ids.length}건 삭제되었습니다.`);
     }
 
     async function openBoardPost(postId) {
@@ -1263,12 +1265,24 @@ let _vocActiveRunId = null;
     }
 
     async function approveUser(username) {
-      await fetch(`/api/users/${encodeURIComponent(username)}/approve`, { method: 'POST' });
+      const res = await fetch(`/api/users/${encodeURIComponent(username)}/approve`, { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || '승인하지 못했습니다.', 'error');
+      } else {
+        showToast(`${username} 승인되었습니다.`);
+      }
       loadUsers();
     }
 
     async function rejectUser(username) {
-      await fetch(`/api/users/${encodeURIComponent(username)}/reject`, { method: 'POST' });
+      const res = await fetch(`/api/users/${encodeURIComponent(username)}/reject`, { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || '거부하지 못했습니다.', 'error');
+      } else {
+        showToast(`${username} 거부되었습니다.`);
+      }
       loadUsers();
     }
 
@@ -1280,7 +1294,9 @@ let _vocActiveRunId = null;
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        alert(data.error || '역할을 바꾸지 못했습니다.');
+        showToast(data.error || '역할을 바꾸지 못했습니다.', 'error');
+      } else {
+        showToast(`${username}의 역할을 ${role}(으)로 변경했습니다.`);
       }
       loadUsers();
     }
@@ -2710,11 +2726,14 @@ let _vocActiveRunId = null;
       document.getElementById('mon-target-url').value = '';
       document.getElementById('mon-target-interval').value = '60';
       await loadMonitoringTargets();
+      showToast('모니터링 대상이 등록되었습니다.');
     }
 
     async function removeMonitoringTarget(id) {
-      await fetch(`/api/monitoring/targets/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/monitoring/targets/${id}`, { method: 'DELETE' });
       await loadMonitoringTargets();
+      if (res.ok) { showToast('모니터링 대상이 삭제되었습니다.'); }
+      else { showToast('삭제에 실패했습니다.', 'error'); }
     }
 
     // ---------- 2. 막대그래프: 카테고리별 통과/실패 ----------

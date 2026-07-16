@@ -1009,6 +1009,125 @@ def test_voc_run_executor_wired_to_configured_max_workers():
     assert voc_analysis_module.VOC_RUN_MAX_WORKERS > 0
 
 
+# ===================== 교차검증 매트릭스 (A/B/C/D) =====================
+
+class _XValFakeClient:
+    """provider별 활성화 여부와 응답을 구분하는 페이크 - 매트릭스가 실제로 올바른
+    provider를 호출하는지, 하나라도 비활성이면 실행 자체를 막는지 검증하기 위함."""
+
+    enabled_providers = {"openai", "anthropic"}
+
+    def __init__(self, provider=None, api_key=None, **kwargs):
+        self.provider = provider or "openai"
+        self.api_key = api_key
+        self.calls = []
+
+    @property
+    def enabled(self):
+        return self.provider in _XValFakeClient.enabled_providers
+
+    def judge(self, system_prompt, user_prompt):
+        self.calls.append((system_prompt, user_prompt))
+        if "독립적인 QA 심사관" in system_prompt:
+            return {
+                "verdict": "PASS",
+                "criteria": {"relevance": True, "root_cause_addressing": True, "feasibility": True, "measurability": True},
+                "reasoning": f"{self.provider}가 심사함",
+            }
+        match = re.search(r"- \[([^\]]+)\]", user_prompt)
+        example_id = match.group(1) if match else "post-1"
+        return {
+            "summary": f"{self.provider} 생성 요약",
+            "top_issues": [{"theme": "속도", "frequency": 1, "severity": "high", "suggestion": "즉시 대응", "example_ids": [example_id]}],
+        }
+
+
+@pytest.fixture(autouse=True)
+def _xval_fake_client_reset():
+    _XValFakeClient.enabled_providers = {"openai", "anthropic"}
+    yield
+    _XValFakeClient.enabled_providers = {"openai", "anthropic"}
+
+
+def test_cross_validation_matrix_runs_all_four_groups_and_saves_separately(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "느려요", "content": "응답이 느립니다"})
+
+    run = client.post("/api/voc-analysis/cross-validation-matrix", json={"use_board": True})
+    assert run.status_code == 200
+    data = run.json()
+    groups = {entry["group"] for entry in data["result"]["matrix"]}
+    assert groups == {"A", "B", "C", "D"}
+    assert data["result"]["generations"]["openai"]["summary"] == "openai 생성 요약"
+    assert data["result"]["generations"]["anthropic"]["summary"] == "anthropic 생성 요약"
+
+    # 일반 VOC 분석 이력에는 섞이지 않아야 함(저장 형식이 달라 화면이 깨질 수 있음)
+    regular_history = client.get("/api/voc-analysis/history").json()
+    assert all(item["id"] != data["id"] for item in regular_history)
+
+    xval_history = client.get("/api/voc-analysis/cross-validation-matrix/history").json()
+    assert any(item["id"] == data["id"] for item in xval_history)
+
+
+def test_cross_validation_matrix_requires_both_providers_enabled(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    _XValFakeClient.enabled_providers = {"openai"}  # anthropic 키 미설정 상황을 흉내
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    run = client.post("/api/voc-analysis/cross-validation-matrix", json={"use_board": True})
+    assert run.status_code == 400
+
+
+def test_cross_validation_matrix_without_any_source_returns_400(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    client = TestClient(app)
+    run = client.post("/api/voc-analysis/cross-validation-matrix", json={"use_board": False, "use_jira": False, "use_excel": False})
+    assert run.status_code == 400
+
+
+def test_cross_validation_matrix_detail_hides_focus_instruction_from_third_party(monkeypatch):
+    """P1-2와 동일한 정책이 매트릭스 상세 응답에도 적용돼야 함."""
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    admin = TestClient(app)
+    assert admin.post("/signup", json={"username": "alice", "password": "secret123"}).status_code == 200
+    admin.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    run = admin.post("/api/voc-analysis/cross-validation-matrix", json={"use_board": True, "focus_instruction": "속도만"})
+    assert run.status_code == 200
+    analysis_id = run.json()["id"]
+
+    detail_as_owner = admin.get(f"/api/voc-analysis/cross-validation-matrix/{analysis_id}").json()
+    assert detail_as_owner["params"]["focus_instruction"] == "속도만"
+
+    bob = TestClient(app)
+    assert bob.post("/signup", json={"username": "bob", "password": "secret456"}).status_code == 200
+    assert admin.post("/api/users/bob/approve").status_code == 200
+    assert bob.post("/login", json={"username": "bob", "password": "secret456"}).status_code == 200
+    detail_as_third_party = bob.get(f"/api/voc-analysis/cross-validation-matrix/{analysis_id}")
+    assert detail_as_third_party.status_code == 200
+    assert "focus_instruction" not in detail_as_third_party.json()["params"]
+
+
+def test_cross_validation_matrix_delete_allowed_for_admin_or_owner_only(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    admin = TestClient(app)
+    assert admin.post("/signup", json={"username": "alice", "password": "secret123"}).status_code == 200
+    admin.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+    run = admin.post("/api/voc-analysis/cross-validation-matrix", json={"use_board": True})
+    analysis_id = run.json()["id"]
+
+    bob = TestClient(app)
+    assert bob.post("/signup", json={"username": "bob", "password": "secret456"}).status_code == 200
+    assert admin.post("/api/users/bob/approve").status_code == 200
+    assert bob.post("/login", json={"username": "bob", "password": "secret456"}).status_code == 200
+    assert bob.delete(f"/api/voc-analysis/cross-validation-matrix/{analysis_id}").status_code == 403
+
+    assert admin.delete(f"/api/voc-analysis/cross-validation-matrix/{analysis_id}").status_code == 200
+    assert admin.get(f"/api/voc-analysis/cross-validation-matrix/{analysis_id}").status_code == 404
+
+
 def test_thread_pool_executor_never_exceeds_max_workers_under_load():
     """ThreadPoolExecutor 자체가 max_workers를 실제로 지키는지 - 별도의 소규모 테스트
     전용 풀로 확인(실제 VOC_RUN_EXECUTOR를 건드리면 다른 테스트에 영향을 줄 수 있어

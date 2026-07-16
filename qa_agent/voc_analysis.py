@@ -807,3 +807,92 @@ def run_voc_analysis_with_judge(
         "usable_for_policy_decision": independently_verified,
     }
     return result
+
+
+# ===================== 교차검증 매트릭스 (A/B/C/D) =====================
+# 기존 run_voc_analysis_with_judge는 "생성 1개 provider + 검증 1개 provider(가능하면
+# 반대쪽)"만 실행하는 운영용 단일 실행 경로다. 이 매트릭스는 그와 별개로, 같은 VOC
+# 데이터를 두고 OpenAI/Anthropic 양쪽으로 각각 생성한 뒤 4가지 생성×평가 조합을 전부
+# 심사해 나란히 비교하는 "실험/비교 모드"다 - LLM 호출이 늘어나므로(생성 2회 + 평가 4회
+# = 6회) 운영 경로(POST /run)에는 섞지 않고 별도 함수/엔드포인트로 분리한다.
+CROSS_VALIDATION_GROUPS: Tuple[Dict[str, str], ...] = (
+    {"group": "A", "generation_provider": "openai", "judge_provider": "anthropic", "purpose": "기본 품질검증"},
+    {"group": "B", "generation_provider": "anthropic", "judge_provider": "openai", "purpose": "모델 역할 변경 검증"},
+    {"group": "C", "generation_provider": "openai", "judge_provider": "openai", "purpose": "동일 모델 평가와 비교"},
+    {"group": "D", "generation_provider": "anthropic", "judge_provider": "anthropic", "purpose": "동일 모델 평가와 비교"},
+)
+
+
+def _matrix_gate_status(verdict: Dict[str, Any]) -> Dict[str, Any]:
+    """run_voc_analysis_with_judge와 동일한 판정 규칙을 매트릭스의 각 조합에도 그대로 적용."""
+    judge_verdict = verdict.get("verdict")
+    independently_verified = judge_verdict == "PASS" and verdict.get("cross_model") is True
+    if independently_verified:
+        status = "APPROVED"
+    elif judge_verdict == "PASS":
+        status = "REVIEW_REQUIRED"
+    elif judge_verdict == "FAIL":
+        status = "REJECTED"
+    else:
+        status = "UNVERIFIED"
+    return {"status": status, "usable_for_policy_decision": independently_verified}
+
+
+def run_cross_validation_matrix(
+    openai_client: OpenAIJudgeClient,
+    anthropic_client: OpenAIJudgeClient,
+    board_posts: List[Dict[str, Any]],
+    jira_issues: List[Dict[str, Any]],
+    excel_rows: List[Dict[str, Any]],
+    focus_instruction: str = "",
+    item_limit: int = MAX_ITEMS_FOR_PROMPT,
+) -> Dict[str, Any]:
+    """같은 VOC 데이터로 OpenAI/Anthropic 각각 생성한 뒤, A(OpenAI 생성/Anthropic 평가) ·
+    B(Anthropic 생성/OpenAI 평가) · C(OpenAI 생성/OpenAI 평가) · D(Anthropic 생성/Anthropic
+    평가) 4가지 조합을 전부 심사해 비교표를 만든다. C/D는 "같은 모델이 자기 산출물을 스스로
+    채점하면 더 관대해지는가"를 A/B(교차검증)와 나란히 대조하기 위한 대조군이다.
+
+    생성은 provider당 딱 1회만(OpenAI 1회 + Anthropic 1회) 수행하고, 그 두 결과를 4가지
+    조합의 심사에 재사용한다(생성을 4번 반복하지 않음 - 불필요한 비용 낭비 방지). Interpreter/
+    내부 재점검·자가교정은 이 비교 모드에서는 수행하지 않는다(모델 간 원시 생성 품질 비교가
+    목적이라 범위를 의도적으로 좁힘 - 필요하면 운영 경로인 run_voc_analysis_with_judge를 사용).
+
+    두 provider 모두 실제로 활성화(enabled)돼 있어야 함 - 하나라도 키가 없으면 매트릭스
+    자체가 성립하지 않으므로 ValueError로 즉시 실패(호출부가 400으로 우아하게 응답)."""
+    if not openai_client.enabled or not anthropic_client.enabled:
+        raise ValueError("교차검증 매트릭스를 실행하려면 OpenAI/Anthropic 키가 모두 설정되어 있어야 합니다")
+
+    items, source_counts = build_voc_items(board_posts, jira_issues, excel_rows, item_limit=item_limit)
+    if not items:
+        raise ValueError("분석할 VOC 데이터가 없습니다 (게시판/Jira/엑셀 모두 비어 있음)")
+
+    clients = {"openai": openai_client, "anthropic": anthropic_client}
+    generations: Dict[str, Dict[str, Any]] = {}
+    for provider_name, client in clients.items():
+        generations[provider_name] = _generate_analysis(client, items, source_counts, focus_instruction)
+
+    matrix = []
+    for group in CROSS_VALIDATION_GROUPS:
+        gen_result = generations[group["generation_provider"]]
+        judge_client = clients[group["judge_provider"]]
+        cross_model = group["generation_provider"] != group["judge_provider"]
+        verdict = run_independent_judge(judge_client, gen_result, items, focus_instruction=focus_instruction, cross_model=cross_model)
+        matrix.append({
+            "group": group["group"],
+            "generation_provider": group["generation_provider"],
+            "judge_provider": group["judge_provider"],
+            "purpose": group["purpose"],
+            "summary": gen_result.get("summary"),
+            "top_issues": gen_result.get("top_issues"),
+            "judge": verdict,
+            "quality_gate": _matrix_gate_status(verdict),
+        })
+
+    return {
+        "raw_source_counts": source_counts,
+        "generations": {
+            name: {"summary": g.get("summary"), "top_issues": g.get("top_issues")}
+            for name, g in generations.items()
+        },
+        "matrix": matrix,
+    }

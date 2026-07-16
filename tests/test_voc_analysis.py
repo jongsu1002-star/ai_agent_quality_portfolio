@@ -1,6 +1,9 @@
+import re
+
 import pytest
 
 from qa_agent.voc_analysis import (
+    CROSS_VALIDATION_GROUPS,
     INTENT_LABELS,
     MAX_ITEMS_FOR_PROMPT,
     VocAnalysisCanceled,
@@ -14,6 +17,7 @@ from qa_agent.voc_analysis import (
     normalize_board_post,
     normalize_excel_row,
     normalize_jira_issue,
+    run_cross_validation_matrix,
     run_independent_judge,
     run_voc_analysis,
     run_voc_analysis_with_judge,
@@ -906,3 +910,100 @@ def test_should_cancel_becomes_true_after_generation_stops_before_judge():
     with pytest.raises(VocAnalysisCanceled):
         run_voc_analysis_with_judge(generation_client, judge_client, board_posts, [], [], should_cancel=should_cancel)
     assert judge_client.calls == []  # 독립 Judge는 아예 호출 안 됨(취소가 그 전에 걸림)
+
+
+# ===================== 교차검증 매트릭스 (A/B/C/D) =====================
+
+class _FakeProviderClient:
+    """provider별로 결과에 자기 이름을 남겨서, 매트릭스가 실제로 올바른 조합(어느
+    provider가 생성했고 어느 provider가 채점했는지)을 쓰는지 검증할 수 있게 함."""
+
+    def __init__(self, provider, enabled=True):
+        self.provider = provider
+        self.enabled = enabled
+        self.calls = []
+
+    def judge(self, system_prompt, user_prompt):
+        self.calls.append((system_prompt, user_prompt))
+        if "독립적인 QA 심사관" in system_prompt:
+            return {
+                "verdict": "PASS",
+                "criteria": {"relevance": True, "root_cause_addressing": True, "feasibility": True, "measurability": True},
+                "reasoning": f"{self.provider}가 심사함",
+            }
+        match = re.search(r"- \[([^\]]+)\]", user_prompt)
+        example_id = match.group(1) if match else "post-1"
+        return {
+            "summary": f"{self.provider} 생성 요약",
+            "top_issues": [{"theme": "속도", "frequency": 1, "severity": "high", "suggestion": "즉시 대응", "example_ids": [example_id]}],
+        }
+
+
+def _matrix_board_posts():
+    return [{"id": 1, "title": "느려요", "content": "응답이 느립니다", "created_at": "2026-01-01"}]
+
+
+def test_run_cross_validation_matrix_requires_both_providers_enabled():
+    openai_client = _FakeProviderClient("openai", enabled=True)
+    anthropic_client = _FakeProviderClient("anthropic", enabled=False)
+    with pytest.raises(ValueError):
+        run_cross_validation_matrix(openai_client, anthropic_client, _matrix_board_posts(), [], [])
+    assert openai_client.calls == []  # 한쪽이라도 비활성이면 아예 호출 자체를 안 함(비용 낭비 방지)
+
+
+def test_run_cross_validation_matrix_raises_on_empty_input():
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    with pytest.raises(ValueError):
+        run_cross_validation_matrix(openai_client, anthropic_client, [], [], [])
+
+
+def test_run_cross_validation_matrix_generates_once_per_provider_and_reuses_for_judging():
+    """생성은 provider당 1회씩(OpenAI 1회 + Anthropic 1회)만 하고, 그 결과를 4개 조합
+    심사에 재사용해야 함 - 매번 새로 생성하면 불필요하게 비용이 4배로 늘어남."""
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    run_cross_validation_matrix(openai_client, anthropic_client, _matrix_board_posts(), [], [])
+    # 각 client는 생성 1회 + 심사 2회(자신이 judge_provider로 지정된 조합 2개, 그룹 정의 참고) = 3회
+    assert len(openai_client.calls) == 3
+    assert len(anthropic_client.calls) == 3
+
+
+def test_run_cross_validation_matrix_covers_all_four_groups_with_correct_providers():
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    result = run_cross_validation_matrix(openai_client, anthropic_client, _matrix_board_posts(), [], [])
+
+    matrix_by_group = {entry["group"]: entry for entry in result["matrix"]}
+    assert set(matrix_by_group) == {"A", "B", "C", "D"}
+    assert matrix_by_group["A"]["generation_provider"] == "openai"
+    assert matrix_by_group["A"]["judge_provider"] == "anthropic"
+    assert matrix_by_group["B"]["generation_provider"] == "anthropic"
+    assert matrix_by_group["B"]["judge_provider"] == "openai"
+    assert matrix_by_group["C"]["generation_provider"] == "openai"
+    assert matrix_by_group["C"]["judge_provider"] == "openai"
+    assert matrix_by_group["D"]["generation_provider"] == "anthropic"
+    assert matrix_by_group["D"]["judge_provider"] == "anthropic"
+    # 매트릭스 정의(CROSS_VALIDATION_GROUPS)와 실제 반환값이 항상 일치해야 함
+    assert {g["group"] for g in CROSS_VALIDATION_GROUPS} == {"A", "B", "C", "D"}
+    assert result["generations"]["openai"]["summary"] == "openai 생성 요약"
+    assert result["generations"]["anthropic"]["summary"] == "anthropic 생성 요약"
+
+
+def test_run_cross_validation_matrix_quality_gate_reflects_cross_model_vs_same_model():
+    """A/B(교차)는 cross_model=True라 PASS면 APPROVED, C/D(동일 모델)는 cross_model=False라
+    같은 PASS라도 REVIEW_REQUIRED로 낮게 판정돼야 함 - "동일 모델이 자기 산출물을 채점하면
+    더 관대해질 수 있다"는 대조군 목적과 일치."""
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    result = run_cross_validation_matrix(openai_client, anthropic_client, _matrix_board_posts(), [], [])
+
+    matrix_by_group = {entry["group"]: entry for entry in result["matrix"]}
+    assert matrix_by_group["A"]["judge"]["cross_model"] is True
+    assert matrix_by_group["A"]["quality_gate"]["status"] == "APPROVED"
+    assert matrix_by_group["B"]["judge"]["cross_model"] is True
+    assert matrix_by_group["B"]["quality_gate"]["status"] == "APPROVED"
+    assert matrix_by_group["C"]["judge"]["cross_model"] is False
+    assert matrix_by_group["C"]["quality_gate"]["status"] == "REVIEW_REQUIRED"
+    assert matrix_by_group["D"]["judge"]["cross_model"] is False
+    assert matrix_by_group["D"]["quality_gate"]["status"] == "REVIEW_REQUIRED"

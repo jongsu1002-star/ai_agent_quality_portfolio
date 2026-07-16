@@ -34,7 +34,12 @@ from qa_agent.excel_io import (
 )
 from qa_agent.jira_client import fetch_backlog_issues
 from qa_agent.llm_client import OpenAIJudgeClient
-from qa_agent.voc_analysis import MAX_ITEMS_FOR_PROMPT, VocAnalysisCanceled, run_voc_analysis_with_judge
+from qa_agent.voc_analysis import (
+    MAX_ITEMS_FOR_PROMPT,
+    VocAnalysisCanceled,
+    run_cross_validation_matrix,
+    run_voc_analysis_with_judge,
+)
 
 router = APIRouter(prefix="/api/voc-analysis")
 logger = logging.getLogger(__name__)
@@ -246,16 +251,10 @@ def jira_preview(jql: Optional[str] = None, max_results: int = 50) -> JSONRespon
     return JSONResponse({"issues": issues, "count": len(issues)})
 
 
-def _prepare_voc_run(payload: VocRunRequest, request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse]]:
-    """검증 + 소스 수집(게시판/Jira/엑셀) + LLM 클라이언트 구성 - 동기(/run)와 비동기
-    (/run-async) 두 실행 경로가 완전히 동일한 준비 과정을 공유한다(로직 중복/드리프트
-    방지). 성공하면 (prepared, None), 검증 실패나 소스 조회 실패면 (None, 에러 응답)을
-    반환 - 호출부는 에러가 있으면 그대로 반환하면 된다.
-
-    payload는 Dict[str, Any] 대신 VocRunRequest(Pydantic)로 받는다 - focus_instruction의
-    타입/길이/공백은 이미 Pydantic이 강제했고(비-문자열 값은 여기 도달하기 전에 422),
-    jira_max_results도 이미 1~200 범위로 강제됐다. item_limit만 기존 하위호환 정책
-    (1 미만/불리언 400 거부, 150 초과 클램프)을 유지하려고 여기서 수동 검증한다."""
+def _gather_voc_sources(payload: VocRunRequest, request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse]]:
+    """게시판/Jira/엑셀 소스 수집 - 동기(/run)/비동기(/run-async)/교차검증 매트릭스
+    (/cross-validation-matrix) 세 실행 경로가 공유하는 부분(LLM 클라이언트 구성 이전
+    단계까지). 성공하면 (sources, None), 소스 조회 실패면 (None, 에러 응답)."""
     board_posts: List[Dict[str, Any]] = []
     if payload.use_board:
         board_posts = _store().list_posts("voc", limit=300, include_hidden=False)
@@ -290,6 +289,26 @@ def _prepare_voc_run(payload: VocRunRequest, request: Request) -> Tuple[Optional
         except Exception:
             logger.exception("VOC external file loading failed")
             return None, JSONResponse({"error": "업로드 데이터를 불러오지 못했습니다. 파일을 다시 업로드하세요."}, status_code=400)
+
+    return {"board_posts": board_posts, "jira_issues": jira_issues, "excel_rows": excel_rows}, None
+
+
+def _prepare_voc_run(payload: VocRunRequest, request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse]]:
+    """검증 + 소스 수집(게시판/Jira/엑셀) + LLM 클라이언트 구성 - 동기(/run)와 비동기
+    (/run-async) 두 실행 경로가 완전히 동일한 준비 과정을 공유한다(로직 중복/드리프트
+    방지). 성공하면 (prepared, None), 검증 실패나 소스 조회 실패면 (None, 에러 응답)을
+    반환 - 호출부는 에러가 있으면 그대로 반환하면 된다.
+
+    payload는 Dict[str, Any] 대신 VocRunRequest(Pydantic)로 받는다 - focus_instruction의
+    타입/길이/공백은 이미 Pydantic이 강제했고(비-문자열 값은 여기 도달하기 전에 422),
+    jira_max_results도 이미 1~200 범위로 강제됐다. item_limit만 기존 하위호환 정책
+    (1 미만/불리언 400 거부, 150 초과 클램프)을 유지하려고 여기서 수동 검증한다."""
+    sources, error = _gather_voc_sources(payload, request)
+    if error is not None:
+        return None, error
+    board_posts = sources["board_posts"]
+    jira_issues = sources["jira_issues"]
+    excel_rows = sources["excel_rows"]
 
     settings = _state["load_settings"]()
     llm_kwargs = _state["llm_kwargs"](settings)
@@ -401,6 +420,179 @@ def run_analysis(payload: VocRunRequest, request: Request) -> JSONResponse:
         logger.exception("VOC analysis result save failed")
         return JSONResponse({"error": "분석 결과를 저장하지 못했습니다. 서버 로그를 확인하거나 관리자에게 문의하세요."}, status_code=502)
     return JSONResponse(record)
+
+
+# ===================== 교차검증 매트릭스 (A/B/C/D) =====================
+# 운영용 단일 실행 경로(POST /run, /run-async)와 별개로, 같은 VOC 데이터를 OpenAI/
+# Anthropic 양쪽으로 각각 생성한 뒤 4가지 생성×평가 조합을 전부 비교하는 실험/비교
+# 모드. 저장 형식이 일반 분석 결과(voc_*.json)와 다르므로(result.summary가 아니라
+# result.matrix), 같은 이력/상세 화면이 오작동하지 않도록 별도 하위 폴더에 완전히
+# 분리해서 저장한다(_all_analysis_roots()의 voc_*.json glob과 겹치지 않는 접두사).
+VOC_XVAL_DIR = VOC_ANALYSIS_DIR / "cross_validation"
+
+
+def _user_xval_dir(username: str) -> Path:
+    if username == "shared":
+        return VOC_XVAL_DIR
+    return VOC_XVAL_DIR / "users" / username
+
+
+def _all_xval_roots() -> List[Path]:
+    if (VOC_XVAL_DIR / "users").exists():
+        return [VOC_XVAL_DIR] + sorted((VOC_XVAL_DIR / "users").glob("*"))
+    return [VOC_XVAL_DIR]
+
+
+def _find_xval_file(analysis_id: str) -> Optional[Path]:
+    if not analysis_id.startswith("vocxval_") or "/" in analysis_id or "\\" in analysis_id or ".." in analysis_id:
+        return None
+    for root in _all_xval_roots():
+        candidate = root / f"{analysis_id}.json"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _build_and_save_xval_record(username: str, params: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+    xval_dir = _user_xval_dir(username)
+    xval_dir.mkdir(parents=True, exist_ok=True)
+    analysis_id = f"vocxval_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:8]}"
+    record = {
+        "id": analysis_id,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "created_by": username,
+        "app_version": _state["app_version"](),
+        "params": params,
+        "result": result,
+    }
+    _write_analysis_record_atomically(analysis_id, record, xval_dir)
+    return record
+
+
+def _build_matrix_clients(settings: Dict[str, Any]) -> Tuple[OpenAIJudgeClient, OpenAIJudgeClient]:
+    """설정에서 OpenAI/Anthropic 클라이언트를 각각 명시적으로 구성 - "현재 선택된
+    provider" 개념과 무관하게 둘 다 만들어야 하므로 _independent_judge_kwargs(반대쪽
+    하나만 고르는 함수)는 재사용하지 않는다. provider가 이미 고정돼 있어 llm_model 등
+    다른 provider의 설정이 새어 들어갈 여지도 없음(1차 리뷰 결함 2번과 동일 클래스의
+    오염을 애초에 피하는 설계)."""
+    openai_client = OpenAIJudgeClient(provider="openai", api_key=settings.get("openai_api_key"))
+    anthropic_client = OpenAIJudgeClient(provider="anthropic", api_key=settings.get("anthropic_api_key"))
+    return openai_client, anthropic_client
+
+
+@router.post("/cross-validation-matrix")
+def run_cross_validation(payload: VocRunRequest, request: Request) -> JSONResponse:
+    """같은 VOC 데이터로 OpenAI/Anthropic을 각각 생성·평가에 돌려 A(OpenAI 생성/Anthropic
+    평가)·B(Anthropic 생성/OpenAI 평가)·C(OpenAI 생성/OpenAI 평가, 대조군)·D(Anthropic
+    생성/Anthropic 평가, 대조군) 4가지 조합을 비교하는 실험 모드. 운영용 POST /run과
+    달리 OpenAI/Anthropic 키가 **모두** 설정되어 있어야 하고, LLM 호출이 늘어나(생성
+    2회 + 평가 4회) 더 오래 걸릴 수 있다. 요청 본문 형식은 POST /run과 동일(item_limit
+    정책도 동일하게 수동 검증)."""
+    sources, error = _gather_voc_sources(payload, request)
+    if error is not None:
+        return error
+
+    settings = _state["load_settings"]()
+    openai_client, anthropic_client = _build_matrix_clients(settings)
+
+    focus_instruction = payload.focus_instruction or ""
+    raw_item_limit = payload.item_limit
+    item_limit = MAX_ITEMS_FOR_PROMPT
+    if raw_item_limit is not None:
+        try:
+            if isinstance(raw_item_limit, bool):
+                raise ValueError
+            parsed_item_limit = int(raw_item_limit)
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "item_limit은 숫자여야 합니다"}, status_code=400)
+        if parsed_item_limit < 1:
+            return JSONResponse({"error": "item_limit은 1 이상이어야 합니다"}, status_code=400)
+        item_limit = min(parsed_item_limit, MAX_ITEMS_FOR_PROMPT)
+
+    try:
+        result = run_cross_validation_matrix(
+            openai_client, anthropic_client,
+            sources["board_posts"], sources["jira_issues"], sources["excel_rows"],
+            focus_instruction=focus_instruction, item_limit=item_limit,
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception:
+        logger.exception("VOC cross-validation matrix failed")
+        return JSONResponse({"error": "교차검증 매트릭스 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요."}, status_code=502)
+
+    params = {
+        "use_board": payload.use_board,
+        "use_jira": payload.use_jira,
+        "jira_jql": payload.jira_jql,
+        "use_excel": payload.use_excel,
+        "excel_path": payload.excel_path,
+        "focus_instruction": focus_instruction or None,
+        "item_limit": item_limit,
+    }
+    try:
+        record = _build_and_save_xval_record(_username(request), params, result)
+    except Exception:
+        logger.exception("VOC cross-validation matrix result save failed")
+        return JSONResponse({"error": "매트릭스 결과를 저장하지 못했습니다. 서버 로그를 확인하거나 관리자에게 문의하세요."}, status_code=502)
+    return JSONResponse(record)
+
+
+@router.get("/cross-validation-matrix/history")
+def cross_validation_history(request: Request) -> JSONResponse:
+    """모든 실행자의 교차검증 매트릭스 이력 - 일반 VOC 분석 이력과 동일하게 전원 공개.
+
+    반드시 GET /cross-validation-matrix/{analysis_id}(아래)보다 먼저 등록돼야 함 -
+    FastAPI는 등록 순서대로 매칭을 시도하므로, 뒤에 있으면 "history"라는 문자열이
+    {analysis_id} 경로변수로 잘못 잡아먹힘(아래 상세 라우트와 동일한 이유로 이 라우트도
+    반드시 DELETE/GET용 진짜 catch-all(`/{analysis_id}`, 파일 뒷부분)보다 앞서 있어야 함)."""
+    records = []
+    for root in _all_xval_roots():
+        if not root.exists():
+            continue
+        for path in root.glob("vocxval_*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                matrix = data.get("result", {}).get("matrix", [])
+                records.append({
+                    "id": data["id"],
+                    "created_at": data["created_at"],
+                    "created_by": data.get("created_by"),
+                    "gate_summary": {entry["group"]: entry.get("quality_gate", {}).get("status") for entry in matrix},
+                })
+            except Exception:
+                continue
+    records.sort(key=lambda r: r["created_at"], reverse=True)
+    return JSONResponse(records)
+
+
+@router.get("/cross-validation-matrix/{analysis_id}")
+def cross_validation_detail(analysis_id: str, request: Request) -> JSONResponse:
+    if "/" in analysis_id or "\\" in analysis_id or ".." in analysis_id:
+        return JSONResponse({"error": "invalid id"}, status_code=400)
+    path = _find_xval_file(analysis_id)
+    if not path:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    record = json.loads(path.read_text(encoding="utf-8"))
+    # P1-2와 동일한 정책: excel_path는 전원 제외, jira_jql/focus_instruction은 실행자/관리자만
+    return JSONResponse(_sanitize_analysis_detail_for_viewer(record, request))
+
+
+@router.delete("/cross-validation-matrix/{analysis_id}")
+def delete_cross_validation(analysis_id: str, request: Request) -> JSONResponse:
+    """관리자 또는 실행한 본인만 삭제 가능 - 일반 VOC 분석 이력 삭제 정책과 동일."""
+    path = _find_xval_file(analysis_id)
+    if not path:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    is_owner = record.get("created_by") == _username(request)
+    if not (is_owner or _state["is_admin"](request)):
+        return JSONResponse({"error": "forbidden (admin or the executor who ran it only)"}, status_code=403)
+    path.unlink()
+    return JSONResponse({"deleted": True})
 
 
 def _finish_voc_run(username: str, run_id: str, status: str, result: Optional[Dict[str, Any]] = None, error: Optional[str] = None) -> None:

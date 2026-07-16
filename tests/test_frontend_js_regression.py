@@ -58,6 +58,15 @@ def test_voc_polling_bootstrap_calls_resume_on_page_load():
     assert "_resumeVocRunIfAny();" in html
 
 
+def test_voc_cross_validation_button_wired_to_run_function():
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert 'id="voc-xval-btn"' in html
+    assert 'onclick="runVocCrossValidation()"' in html
+    assert "function runVocCrossValidation" in html
+    assert "function _renderVocCrossValidationResult" in html
+    assert 'id="voc-xval-result"' in html
+
+
 def test_voc_polling_functions_all_defined_in_index_html():
     """P0-3에서 새로 추가된 함수들이 실제로 정의돼 있는지(오탈자로 조용히 빠지는 것 방지)."""
     html = INDEX_HTML.read_text(encoding="utf-8")

@@ -926,6 +926,28 @@
 
 let _vocActiveRunId = null;
     let _vocPollTimer = null;
+    let _vocPollFailureCount = 0;
+
+    const VOC_RUN_STORAGE_KEY = 'voc_active_run';
+    const VOC_POLL_BASE_INTERVAL_MS = 1200;
+    const VOC_POLL_MAX_INTERVAL_MS = 10000;
+    const VOC_POLL_MAX_CONSECUTIVE_FAILURES = 5;
+
+    // 실행 ID + 시작 시각을 sessionStorage에 저장해두면, 폴링 도중 페이지를 새로고침해도
+    // (탭을 닫진 않고) 어떤 실행을 이어서 확인해야 하는지 알 수 있음 - 백그라운드 실행
+    // 자체는 서버에서 계속 진행되므로, 프론트가 그 상태를 다시 붙잡기만 하면 됨.
+    function _saveVocRunToStorage(runId) {
+      try { sessionStorage.setItem(VOC_RUN_STORAGE_KEY, JSON.stringify({ runId, startedAt: Date.now() })); } catch (e) { /* 세션스토리지 사용 불가 환경은 조용히 무시 - 새로고침 복구만 못 할 뿐 기능 자체는 정상 동작 */ }
+    }
+    function _clearVocRunStorage() {
+      try { sessionStorage.removeItem(VOC_RUN_STORAGE_KEY); } catch (e) { /* 위와 동일 */ }
+    }
+    function _loadVocRunFromStorage() {
+      try {
+        const raw = sessionStorage.getItem(VOC_RUN_STORAGE_KEY);
+        return raw ? JSON.parse(raw) : null;
+      } catch (e) { return null; }
+    }
 
     // 예전엔 fetch()의 AbortController로만 "취소"했는데, 그건 브라우저가 응답 대기를
     // 그만두는 것뿐이라 서버에서 이미 시작된 LLM 호출은 계속 진행됐음(취소가 이름만
@@ -959,13 +981,25 @@ let _vocActiveRunId = null;
             item_limit: itemLimitRaw ? parseInt(itemLimitRaw, 10) : null,
           }),
         });
-        const startData = await start.json();
+        const startData = await start.json().catch(() => ({}));
+        if (start.status === 409 && startData.active_run_id) {
+          // 이미 실행 중인 분석이 있음(서버가 사용자당 동시 1건으로 제한) - 실패로
+          // 취급하지 않고 그 실행의 폴링을 이어받음(사용자가 놓친 이전 실행일 수 있음)
+          document.getElementById('voc-result').innerHTML = '<p class="chart-hint">이미 실행 중인 분석이 있어 그 결과를 이어서 확인합니다.</p>';
+          _vocActiveRunId = startData.active_run_id;
+          _saveVocRunToStorage(startData.active_run_id);
+          _vocPollFailureCount = 0;
+          _pollVocRun(startData.active_run_id);
+          return;
+        }
         if (!start.ok || startData.error) {
           document.getElementById('voc-result').innerHTML = `<p style="color:#dc2626;">${escapeHtml(startData.error || '분석에 실패했습니다.')}</p>`;
           _resetVocRunButtons();
           return;
         }
         _vocActiveRunId = startData.run_id;
+        _saveVocRunToStorage(startData.run_id);
+        _vocPollFailureCount = 0;
         _pollVocRun(startData.run_id);
       } catch (err) {
         document.getElementById('voc-result').innerHTML = `<p style="color:#dc2626;">${escapeHtml(err.message || '분석에 실패했습니다.')}</p>`;
@@ -978,18 +1012,60 @@ let _vocActiveRunId = null;
       document.getElementById('voc-run-btn').textContent = 'VOC 분석 실행';
       document.getElementById('voc-cancel-btn').style.display = 'none';
       _vocActiveRunId = null;
+      _vocPollFailureCount = 0;
       if (_vocPollTimer) { clearTimeout(_vocPollTimer); _vocPollTimer = null; }
+      _clearVocRunStorage();
     }
 
+    // 폴링 전체를 try/catch로 감싸 네트워크 예외(오프라인 등)와 서버 오류 응답을 모두
+    // 다루고, runId가 현재 활성 실행(_vocActiveRunId)과 다르면(취소 후 새로 시작한 경우
+    // 등) 이 늦게 도착한 폴링 결과가 새 실행 화면을 덮어쓰지 않도록 즉시 중단한다.
     async function _pollVocRun(runId) {
-      const statusRes = await fetch(`/api/voc-analysis/run-async/${runId}/status`);
-      const status = await statusRes.json();
+      if (runId !== _vocActiveRunId) { return; }
+
+      let statusRes;
+      try {
+        statusRes = await fetch(`/api/voc-analysis/run-async/${runId}/status`);
+      } catch (err) {
+        _handleVocPollFailure(runId, '네트워크 오류로 상태를 확인하지 못했습니다.');
+        return;
+      }
+
+      if (statusRes.status === 404) {
+        // 서버가 재시작됐거나(메모리 기반 registry라 재시작 시 유실됨) TTL이 지나
+        // 정리된 경우 - 무한 폴링하지 않고 명확히 안내한 뒤 버튼을 정상 상태로 복구
+        document.getElementById('voc-result').innerHTML = '<p style="color:#dc2626;">작업 상태를 찾을 수 없습니다(서버 재시작 또는 작업 상태 만료). 다시 실행해주세요.</p>';
+        _resetVocRunButtons();
+        return;
+      }
+      if (!statusRes.ok) {
+        _handleVocPollFailure(runId, `상태 확인 요청이 실패했습니다(HTTP ${statusRes.status}).`);
+        return;
+      }
+
+      let status;
+      try {
+        status = await statusRes.json();
+      } catch (err) {
+        _handleVocPollFailure(runId, '서버 응답을 해석하지 못했습니다.');
+        return;
+      }
+
+      if (runId !== _vocActiveRunId) { return; }  // await 도중에 새 실행이 시작됐을 수 있음
+      _vocPollFailureCount = 0;  // 정상 응답을 받았으니 연속 실패 카운트 초기화
+
       if (status.status === 'done') {
-        const resultRes = await fetch(`/api/voc-analysis/run-async/${runId}/result`);
-        const data = await resultRes.json();
-        _renderVocResult(data);
-        loadVocHistory();
-        showToast('VOC 분석이 완료되었습니다.');
+        try {
+          const resultRes = await fetch(`/api/voc-analysis/run-async/${runId}/result`);
+          if (runId !== _vocActiveRunId) { return; }
+          if (!resultRes.ok) { throw new Error(`HTTP ${resultRes.status}`); }
+          const data = await resultRes.json();
+          _renderVocResult(data);
+          loadVocHistory();
+          showToast('VOC 분석이 완료되었습니다.');
+        } catch (err) {
+          document.getElementById('voc-result').innerHTML = '<p style="color:#dc2626;">분석은 완료됐지만 결과를 불러오지 못했습니다. "지난 분석 이력"에서 다시 확인해주세요.</p>';
+        }
         _resetVocRunButtons();
         return;
       }
@@ -1003,16 +1079,64 @@ let _vocActiveRunId = null;
         _resetVocRunButtons();
         return;
       }
-      // queued/running - 계속 폴링
-      _vocPollTimer = setTimeout(() => _pollVocRun(runId), 1200);
+      // queued/running - 계속 폴링(고정 간격)
+      _vocPollTimer = setTimeout(() => _pollVocRun(runId), VOC_POLL_BASE_INTERVAL_MS);
+    }
+
+    // 일시적 오류(네트워크 끊김, 서버 500 등)는 지수 백오프로 제한된 횟수만 재시도하고,
+    // 그래도 계속 실패하면 무한정 붙잡고 있지 않고 폴링을 종료해 사용자가 버튼을 다시
+    // 쓸 수 있게 한다.
+    function _handleVocPollFailure(runId, message) {
+      if (runId !== _vocActiveRunId) { return; }
+      _vocPollFailureCount += 1;
+      if (_vocPollFailureCount >= VOC_POLL_MAX_CONSECUTIVE_FAILURES) {
+        document.getElementById('voc-result').innerHTML = `<p style="color:#dc2626;">${escapeHtml(message)} (${_vocPollFailureCount}회 연속 실패해 확인을 중단합니다. 잠시 후 다시 시도해주세요.)</p>`;
+        _resetVocRunButtons();
+        return;
+      }
+      const backoffMs = Math.min(VOC_POLL_BASE_INTERVAL_MS * (2 ** _vocPollFailureCount), VOC_POLL_MAX_INTERVAL_MS);
+      _vocPollTimer = setTimeout(() => _pollVocRun(runId), backoffMs);
+    }
+
+    // 페이지가 새로고침되거나 다시 열렸을 때, sessionStorage에 남은 실행 ID가 있으면
+    // 그 폴링을 이어받는다(서버 쪽 백그라운드 작업은 새로고침과 무관하게 계속 진행 중이므로,
+    // 프론트만 다시 붙잡으면 됨). 이미 오래전에 끝났거나 서버 재시작으로 사라진 작업이면
+    // 첫 폴링에서 404로 자연스럽게 정리됨.
+    function _resumeVocRunIfAny() {
+      const saved = _loadVocRunFromStorage();
+      if (!saved || !saved.runId) { return; }
+      _vocActiveRunId = saved.runId;
+      _vocPollFailureCount = 0;
+      const btn = document.getElementById('voc-run-btn');
+      const cancelBtn = document.getElementById('voc-cancel-btn');
+      if (!btn || !cancelBtn) { return; }
+      btn.disabled = true;
+      btn.textContent = '분석 중...';
+      cancelBtn.style.display = '';
+      const elapsedS = Math.max(0, Math.round((Date.now() - (saved.startedAt || Date.now())) / 1000));
+      document.getElementById('voc-result').innerHTML = `<p class="chart-hint">이전에 시작한 분석(${elapsedS}초 전)을 이어서 확인합니다...</p>`;
+      _pollVocRun(saved.runId);
     }
 
     async function cancelVocAnalysis() {
       if (!_vocActiveRunId) return;
-      await fetch(`/api/voc-analysis/run-async/${_vocActiveRunId}/cancel`, { method: 'POST' });
-      // 실제 상태 반영은 다음 폴링에서 서버가 canceled를 돌려줄 때 처리됨(_pollVocRun) -
-      // 여기서 화면을 바로 바꾸지 않는 이유는 마지막 단계가 이미 끝나 done으로
-      // 확정되는 것과 취소 요청이 동시에 일어날 수 있어, 서버의 최종 판단을 신뢰함.
+      try {
+        const res = await fetch(`/api/voc-analysis/run-async/${_vocActiveRunId}/cancel`, { method: 'POST' });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          showToast(data.error || '취소 요청에 실패했습니다.', 'error');
+          return;
+        }
+        const data = await res.json();
+        if (data.canceled === false) {
+          showToast(data.reason ? `취소할 수 없습니다(${data.reason}).` : '이미 종료된 작업입니다.', 'error');
+        }
+        // 실제 상태 반영은 다음 폴링에서 서버가 canceled를 돌려줄 때 처리됨(_pollVocRun) -
+        // 여기서 화면을 바로 바꾸지 않는 이유는 마지막 단계가 이미 끝나 done으로
+        // 확정되는 것과 취소 요청이 동시에 일어날 수 있어, 서버의 최종 판단을 신뢰함.
+      } catch (err) {
+        showToast('취소 요청이 실패했습니다(네트워크 오류).', 'error');
+      }
     }
 
     function _renderVocResult(record) {
@@ -2986,6 +3110,7 @@ let _vocActiveRunId = null;
     loadHistory();
     loadJiraTickets();
     loadMonitoringSummary();
+    _resumeVocRunIfAny();
     viewDoc('user_manual');
     viewDoc('test_results', 'dashboard-doc-viewer', 'dashboard-doc-tab-btn');
 

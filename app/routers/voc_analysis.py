@@ -363,10 +363,32 @@ def _read_latest_audit_manifest() -> Optional[Dict[str, Any]]:
         return None
 
 
+def _all_analysis_roots() -> List[Path]:
+    """reports/voc_analysis/(shared 최상위 + 사용자별 하위 폴더) 전체 검색 대상 - 품질
+    대시보드 집계뿐 아니라 이력 조회/상세/삭제에서도 "모든 실행자"를 찾을 때 공유해서 쓴다."""
+    if (VOC_ANALYSIS_DIR / "users").exists():
+        return [VOC_ANALYSIS_DIR] + sorted((VOC_ANALYSIS_DIR / "users").glob("*"))
+    return [VOC_ANALYSIS_DIR]
+
+
+def _find_analysis_file(analysis_id: str) -> Optional[Path]:
+    """analysis_id 하나로 모든 사용자 폴더를 뒤져 실제 저장된 파일을 찾는다(조회/삭제 공용).
+
+    결과는 실행자별 폴더에 나뉘어 저장되지만(_user_analysis_dir), 이력 조회·상세·삭제는
+    "누가 실행했든" 찾을 수 있어야 하므로 저장 위치를 미리 알 필요 없이 전체를 훑는다."""
+    if not analysis_id.startswith("voc_") or "/" in analysis_id or "\\" in analysis_id or ".." in analysis_id:
+        return None
+    for root in _all_analysis_roots():
+        candidate = root / f"{analysis_id}.json"
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def _scan_voc_history() -> Dict[str, Any]:
     """reports/voc_analysis/(shared + 사용자별) 아래 모든 결과 파일을 스캔해 실제 judge
     판정/quality_gate 분포를 집계 - 특정 3건이 아니라 지금까지의 전체 실행 이력 기준."""
-    search_roots = [VOC_ANALYSIS_DIR] + sorted((VOC_ANALYSIS_DIR / "users").glob("*")) if (VOC_ANALYSIS_DIR / "users").exists() else [VOC_ANALYSIS_DIR]
+    search_roots = _all_analysis_roots()
     verdicts: Counter[str] = Counter()
     gates: Counter[str] = Counter()
     total = 0
@@ -458,41 +480,47 @@ def report_version_content(doc_key: str, commit: str) -> JSONResponse:
 
 @router.get("/history")
 def analysis_history(request: Request) -> JSONResponse:
-    analysis_dir = _user_analysis_dir(_username(request))
-    if not analysis_dir.exists():
-        return JSONResponse([])
+    """모든 실행자의 VOC 분석 이력을 함께 보여준다 - 게시판/Jira 티켓과 마찬가지로 팀
+    공용 산출물이라 조회는 전원 공개, 삭제만 관리자/작성자 본인으로 좁게 제한한다
+    (delete_analysis 참고)."""
     records = []
-    for path in sorted(analysis_dir.glob("voc_*.json"), reverse=True):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            result = data.get("result", {})
-            records.append({
-                "id": data["id"],
-                "created_at": data["created_at"],
-                "created_by": data.get("created_by"),
-                "summary": result.get("summary", ""),
-                "judge_verdict": result.get("judge", {}).get("verdict"),
-                "quality_gate_status": result.get("quality_gate", {}).get("status"),
-            })
-        except Exception:
+    for root in _all_analysis_roots():
+        if not root.exists():
             continue
+        for path in root.glob("voc_*.json"):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                result = data.get("result", {})
+                records.append({
+                    "id": data["id"],
+                    "created_at": data["created_at"],
+                    "created_by": data.get("created_by"),
+                    "summary": result.get("summary", ""),
+                    "judge_verdict": result.get("judge", {}).get("verdict"),
+                    "quality_gate_status": result.get("quality_gate", {}).get("status"),
+                })
+            except Exception:
+                continue
+    records.sort(key=lambda r: r["created_at"], reverse=True)
     return JSONResponse(records)
-
-
-def _safe_analysis_path(analysis_id: str, username: str = "shared") -> Optional[Path]:
-    if not analysis_id.startswith("voc_") or "/" in analysis_id or "\\" in analysis_id or ".." in analysis_id:
-        return None
-    return _user_analysis_dir(username) / f"{analysis_id}.json"
 
 
 @router.delete("/{analysis_id}")
 def delete_analysis(analysis_id: str, request: Request) -> JSONResponse:
-    """VOC 분석 이력 삭제 - 게시글 삭제와 동일하게 관리자만 가능(이력 관리 기능)."""
-    if not _state["is_admin"](request):
-        return JSONResponse({"error": "forbidden (admin only)"}, status_code=403)
-    path = _safe_analysis_path(analysis_id, _username(request))
-    if not path or not path.exists():
+    """VOC 분석 이력 삭제 - 관리자 또는 그 분석을 실행한 본인만 가능. 조회는 전원 공개로
+    풀되(analysis_history), 삭제는 "관리자만"에서 "관리자 또는 실행자 본인"으로 좁혀서
+    허용 - 본인이 실행한 결과는 본인 판단으로 정리할 수 있어야 하지만, 남의 실행 결과를
+    임의로 지우는 것은 여전히 막는다."""
+    path = _find_analysis_file(analysis_id)
+    if not path:
         return JSONResponse({"error": "not found"}, status_code=404)
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    is_owner = record.get("created_by") == _username(request)
+    if not (is_owner or _state["is_admin"](request)):
+        return JSONResponse({"error": "forbidden (admin or the executor who ran it only)"}, status_code=403)
     path.unlink()
     return JSONResponse({"deleted": True})
 
@@ -501,7 +529,7 @@ def delete_analysis(analysis_id: str, request: Request) -> JSONResponse:
 def analysis_detail(analysis_id: str, request: Request) -> JSONResponse:
     if "/" in analysis_id or "\\" in analysis_id or ".." in analysis_id:
         return JSONResponse({"error": "invalid id"}, status_code=400)
-    path = _user_analysis_dir(_username(request)) / f"{analysis_id}.json"
-    if not path.exists():
+    path = _find_analysis_file(analysis_id)
+    if not path:
         return JSONResponse({"error": "not found"}, status_code=404)
     return JSONResponse(json.loads(path.read_text(encoding="utf-8")))

@@ -434,7 +434,9 @@ def test_run_with_jira_included(monkeypatch):
     assert run.json()["result"]["raw_source_counts"]["jira"] == 1
 
 
-def test_voc_analysis_history_and_uploads_are_isolated_per_user():
+def test_voc_analysis_history_and_detail_are_visible_to_all_users_but_uploads_stay_isolated():
+    """이력 조회/상세는 게시판·Jira 티켓과 같은 팀 공용 산출물이라 전원 공개로 바뀌었지만
+    (실행자 격리 폐지), 업로드 파일은 여전히 사용자별로 격리됨(별개 정책 - 그대로 유지)."""
     admin = TestClient(app)
     assert admin.post("/signup", json={"username": "alice", "password": "secret123"}).status_code == 200
     admin.post("/api/board/posts", json={"board_type": "voc", "title": "대기", "content": "오래 기다림"})
@@ -447,10 +449,11 @@ def test_voc_analysis_history_and_uploads_are_isolated_per_user():
     admin_run = admin.post("/api/voc-analysis/run", json={"use_board": True}).json()
     bob_run = bob.post("/api/voc-analysis/run", json={"use_board": True}).json()
 
-    assert [item["id"] for item in admin.get("/api/voc-analysis/history").json()] == [admin_run["id"]]
-    assert [item["id"] for item in bob.get("/api/voc-analysis/history").json()] == [bob_run["id"]]
-    assert bob.get(f"/api/voc-analysis/{admin_run['id']}").status_code == 404
-    assert admin.get(f"/api/voc-analysis/{bob_run['id']}").status_code == 404
+    admin_history_ids = {item["id"] for item in admin.get("/api/voc-analysis/history").json()}
+    bob_history_ids = {item["id"] for item in bob.get("/api/voc-analysis/history").json()}
+    assert admin_history_ids == bob_history_ids == {admin_run["id"], bob_run["id"]}
+    assert bob.get(f"/api/voc-analysis/{admin_run['id']}").status_code == 200
+    assert admin.get(f"/api/voc-analysis/{bob_run['id']}").status_code == 200
 
     upload = admin.post("/api/voc-analysis/excel/upload", files={"file": ("voc.xlsx", _build_voc_xlsx_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     assert upload.status_code == 200
@@ -460,6 +463,40 @@ def test_voc_analysis_history_and_uploads_are_isolated_per_user():
         "excel_path": upload.json()["excel_path"],
     })
     assert cross_user_run.status_code == 400
+
+
+def test_voc_analysis_delete_allowed_for_admin_or_owner_only():
+    """삭제는 여전히 좁게 제한됨 - 관리자이거나 그 분석을 실행한 본인만 가능. 관리자도
+    작성자도 아닌 제3자는 남의 실행 결과를 지울 수 없어야 한다."""
+    admin = TestClient(app)
+    assert admin.post("/signup", json={"username": "alice", "password": "secret123"}).status_code == 200
+    admin.post("/api/board/posts", json={"board_type": "voc", "title": "대기", "content": "오래 기다림"})
+
+    bob = TestClient(app)
+    assert bob.post("/signup", json={"username": "bob", "password": "secret456"}).status_code == 200
+    assert admin.post("/api/users/bob/approve").status_code == 200
+    assert bob.post("/login", json={"username": "bob", "password": "secret456"}).status_code == 200
+
+    carol = TestClient(app)
+    assert carol.post("/signup", json={"username": "carol", "password": "secret789"}).status_code == 200
+    assert admin.post("/api/users/carol/approve").status_code == 200
+    assert carol.post("/login", json={"username": "carol", "password": "secret789"}).status_code == 200
+
+    bob_run = bob.post("/api/voc-analysis/run", json={"use_board": True}).json()
+
+    # 제3자(carol)는 자기가 실행하지도, 관리자도 아니므로 거부됨
+    forbidden = carol.delete(f"/api/voc-analysis/{bob_run['id']}")
+    assert forbidden.status_code == 403
+
+    # 실행자 본인(bob)은 자기 결과를 지울 수 있음
+    own_delete = bob.delete(f"/api/voc-analysis/{bob_run['id']}")
+    assert own_delete.status_code == 200
+
+    admin_run = admin.post("/api/voc-analysis/run", json={"use_board": True}).json()
+    # 관리자(admin)는 남이 실행한 것도 지울 수 있음 - 여기선 자기 자신이 실행자이지만
+    # is_admin 경로도 함께 통과하는지 별도로 확인
+    admin_delete = admin.delete(f"/api/voc-analysis/{admin_run['id']}")
+    assert admin_delete.status_code == 200
 
 
 def test_quality_dashboard_reports_no_data_when_test_results_doc_missing():

@@ -1008,10 +1008,13 @@
       const el = document.getElementById('voc-history-list');
       const res = await fetch('/api/voc-analysis/history');
       const items = await res.json();
-      const deleteHeader = _canModerate ? '<th></th>' : '';
-      const headerHtml = `<thead><tr><th>일시</th><th>실행자</th><th>검증</th><th>요약</th>${deleteHeader}</tr></thead>`;
+      // 조회는 모든 실행자의 이력을 함께 보여주되(백엔드가 이미 전원 공개로 병합해서 줌),
+      // 삭제 버튼은 관리자이거나 자신이 실행한 건에만 노출 - 실제 허용 여부는 서버가
+      // 최종 판단하지만(관리자 또는 실행자 본인), 화면에서도 미리 숨겨 혼란을 줄인다.
+      const headerHtml = '<thead><tr><th>일시</th><th>실행자</th><th>검증</th><th>요약</th><th></th></tr></thead>';
       renderPagedHtmlTable('voc-history-list', headerHtml, items, item => {
-        const deleteCell = _canModerate ? `<td><button type="button" class="btn-danger" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="event.stopPropagation(); deleteVocAnalysis('${item.id}')">삭제</button></td>` : '';
+        const canDelete = _canModerate || item.created_by === _currentUsername;
+        const deleteCell = canDelete ? `<td><button type="button" class="btn-danger" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="event.stopPropagation(); deleteVocAnalysis('${item.id}')">삭제</button></td>` : '<td></td>';
         return `<tr>
           <td><span class="board-row-title" onclick="loadVocAnalysisRecord('${item.id}')">${escapeHtml(formatTimestamp(item.created_at))}</span></td>
           <td>${escapeHtml(item.created_by || '')}</td>

@@ -1,10 +1,13 @@
 import pytest
 
 from qa_agent.voc_analysis import (
+    INTENT_LABELS,
     MAX_ITEMS_FOR_PROMPT,
+    build_interpreter_prompt,
     build_judge_prompts,
     build_prompts,
     build_voc_items,
+    classify_voc_items,
     normalize_board_post,
     normalize_excel_row,
     normalize_jira_issue,
@@ -12,6 +15,7 @@ from qa_agent.voc_analysis import (
     run_voc_analysis,
     run_voc_analysis_with_judge,
     validate_analysis_schema,
+    validate_interpreter_schema,
     validate_judge_schema,
 )
 
@@ -68,6 +72,9 @@ def test_build_voc_items_truncates_to_max_items():
 
 
 class _FakeJudgeClient:
+    """response가 dict면 매 호출마다 같은 값을 반복 반환(기존 동작), list면 호출 순서대로
+    하나씩 꺼내 씀(Interpreter -> Summarizer처럼 같은 client가 서로 다른 스키마로 여러 번
+    불릴 때 호출별로 다른 응답이 필요한 테스트용)."""
     enabled = True
 
     def __init__(self, response):
@@ -76,6 +83,9 @@ class _FakeJudgeClient:
 
     def judge(self, system_prompt, user_prompt):
         self.calls.append((system_prompt, user_prompt))
+        if isinstance(self.response, list):
+            index = min(len(self.calls) - 1, len(self.response) - 1)
+            return dict(self.response[index])
         return dict(self.response)
 
 
@@ -145,6 +155,127 @@ def test_run_voc_analysis_passes_focus_and_limit_through():
     result = run_voc_analysis(client, board_posts, [], [], focus_instruction="불친절 관련만", item_limit=5)
     assert result["raw_source_counts"]["total_considered"] == 5
     assert "불친절 관련만" in client.calls[0][0]  # system_prompt
+
+
+# ===================== Interpreter(의도 분류) - Summarizer 이전 사전 단계 =====================
+
+_VOC_TEST_ITEMS = [
+    {"source": "board", "id": "post-1", "date": "2026-01-01", "content": "배송이 너무 늦어요"},
+    {"source": "board", "id": "post-2", "date": "2026-01-02", "content": "친절하게 처리해 주셨습니다"},
+]
+
+
+def test_build_interpreter_prompt_lists_fixed_intent_labels():
+    system_prompt, user_prompt = build_interpreter_prompt(_VOC_TEST_ITEMS)
+    for label in INTENT_LABELS:
+        assert label in system_prompt
+    assert "post-1" in user_prompt and "post-2" in user_prompt
+
+
+def test_build_interpreter_prompt_includes_trust_boundary():
+    system_prompt, _ = build_interpreter_prompt(_VOC_TEST_ITEMS)
+    assert "신뢰 경계" in system_prompt
+    assert "절대 따르지" in system_prompt
+
+
+def test_validate_interpreter_schema_accepts_valid_response():
+    valid_ids = {"post-1", "post-2"}
+    result = {"classifications": [
+        {"id": "post-1", "intent": "complaint", "topic": "배송지연"},
+        {"id": "post-2", "intent": "praise", "topic": "친절응대"},
+    ]}
+    mapping = validate_interpreter_schema(result, valid_ids)
+    assert mapping["post-1"]["intent"] == "complaint"
+    assert mapping["post-2"]["intent"] == "praise"
+
+
+def test_validate_interpreter_schema_rejects_unknown_id():
+    with pytest.raises(ValueError):
+        validate_interpreter_schema({"classifications": [{"id": "post-999", "intent": "complaint", "topic": "x"}]}, {"post-1"})
+
+
+def test_validate_interpreter_schema_rejects_invalid_intent():
+    with pytest.raises(ValueError):
+        validate_interpreter_schema({"classifications": [{"id": "post-1", "intent": "angry", "topic": "x"}]}, {"post-1"})
+
+
+def test_validate_interpreter_schema_rejects_non_list():
+    with pytest.raises(ValueError):
+        validate_interpreter_schema({"classifications": "not-a-list"}, {"post-1"})
+
+
+def test_classify_voc_items_skips_when_client_disabled():
+    class _Disabled:
+        enabled = False
+
+        def judge(self, *a, **k):
+            raise AssertionError("호출되면 안 됨")
+
+    result = classify_voc_items(_Disabled(), _VOC_TEST_ITEMS)
+    assert result == {"applied": False, "verdict": "SKIPPED", "items": {}, "breakdown": {}}
+
+
+def test_classify_voc_items_skips_when_client_is_none():
+    result = classify_voc_items(None, _VOC_TEST_ITEMS)
+    assert result["verdict"] == "SKIPPED"
+
+
+def test_classify_voc_items_returns_breakdown_on_success():
+    client = _FakeJudgeClient({"classifications": [
+        {"id": "post-1", "intent": "complaint", "topic": "배송지연"},
+        {"id": "post-2", "intent": "praise", "topic": "친절응대"},
+    ]})
+    result = classify_voc_items(client, _VOC_TEST_ITEMS)
+    assert result["applied"] is True
+    assert result["verdict"] == "OK"
+    assert result["breakdown"] == {"complaint": 1, "praise": 1}
+    assert result["items"]["post-1"]["topic"] == "배송지연"
+    assert len(client.calls) == 1
+
+
+def test_classify_voc_items_degrades_gracefully_without_crashing_pipeline():
+    """P0에 해당하는 회귀 방지: Interpreter는 부가 단계라, 실패해도 예외를 던지지 않고
+    ERROR로 표시만 하고 넘어가야 함(생성/독립 검증 파이프라인 전체를 막으면 안 됨)."""
+    class _AlwaysBroken:
+        enabled = True
+
+        def judge(self, *a, **k):
+            raise RuntimeError("network down")
+
+    result = classify_voc_items(_AlwaysBroken(), _VOC_TEST_ITEMS)
+    assert result["applied"] is False
+    assert result["verdict"] == "ERROR"
+    assert result["items"] == {}
+
+
+def test_classify_voc_items_retries_once_on_schema_violation():
+    client = _FakeJudgeClient([
+        {"classifications": [{"id": "post-1", "intent": "not-a-real-label", "topic": "x"}]},  # 1차: 위반
+        {"classifications": [  # 2차: 정상
+            {"id": "post-1", "intent": "complaint", "topic": "배송지연"},
+            {"id": "post-2", "intent": "praise", "topic": "친절응대"},
+        ]},
+    ])
+    result = classify_voc_items(client, _VOC_TEST_ITEMS)
+    assert result["applied"] is True
+    assert len(client.calls) == 2
+
+
+def test_build_prompts_tags_items_with_interpreter_intent():
+    """생성(Summarizer) 프롬프트에 Interpreter 분류 결과가 [intent=...] 태그로 반영되고,
+    praise/inquiry는 불만 집계에서 제외하라는 지시가 시스템 프롬프트에 포함돼야 함."""
+    items, counts = build_voc_items([{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}], [], [])
+    interpretations = {"post-1": {"intent": "praise", "topic": "친절응대"}}
+    system_prompt, user_prompt = build_prompts(items, counts, interpretations=interpretations)
+    assert "[intent=praise|topic=친절응대]" in user_prompt
+    assert "praise" in system_prompt and "제외" in system_prompt
+
+
+def test_build_prompts_without_interpretations_has_no_intent_tags():
+    """interpretations를 안 주면(예: SKIPPED) 기존 동작 그대로 - 태그 없이 원문만 들어감(하위호환)."""
+    items, counts = build_voc_items([{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}], [], [])
+    _, user_prompt = build_prompts(items, counts)
+    assert "intent=" not in user_prompt
 
 
 # ===================== 독립 LLM Judge (자기평가 편향 방지) =====================
@@ -309,8 +440,11 @@ def test_run_voc_analysis_with_judge_survives_judge_failure():
 
 
 def test_run_voc_analysis_with_judge_attaches_verdict():
-    """test_full_voc_analysis_pipeline에 해당: 생성 -> 독립 검증까지 전체 흐름이 한 번에 성공."""
-    generation_client = _FakeJudgeClient(_VALID_ANALYSIS_RESULT)
+    """test_full_voc_analysis_pipeline에 해당: Interpreter -> 생성 -> 독립 검증까지 전체 흐름이 한 번에 성공."""
+    generation_client = _FakeJudgeClient([
+        {"classifications": [{"id": "post-1", "intent": "complaint", "topic": "대기시간"}]},  # Interpreter 호출
+        _VALID_ANALYSIS_RESULT,  # Summarizer 호출
+    ])
     judge_client = _FakeJudgeClient({"verdict": "PASS", "criteria": {"relevance": True, "root_cause_addressing": True, "feasibility": True, "measurability": True}, "reasoning": "타당함"})
     board_posts = [{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}]
 
@@ -319,8 +453,10 @@ def test_run_voc_analysis_with_judge_attaches_verdict():
     assert result["summary"] == _VALID_ANALYSIS_RESULT["summary"]
     assert result["judge"]["verdict"] == "PASS"
     assert result["quality_gate"] == {"status": "APPROVED", "usable_for_policy_decision": True}
-    assert len(generation_client.calls) == 1
+    assert len(generation_client.calls) == 2  # Interpreter 1회 + Summarizer 1회
     assert len(judge_client.calls) == 1
+    assert result["interpreter"]["applied"] is True
+    assert result["interpreter"]["items"]["post-1"]["intent"] == "complaint"
 
 
 def test_run_voc_analysis_with_judge_reports_fail_verdict():

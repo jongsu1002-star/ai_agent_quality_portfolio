@@ -1207,11 +1207,30 @@
       return String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
     }
 
-    // 서버가 주는 ISO 형식(YYYY-MM-DDTHH:mm:ss)을 "YYYY-MM-DD HH:mm:ss"(24시간제)로 표시
+    // UTC/오프셋이 포함된 ISO 시각은 항상 한국시간(KST)으로 고정 변환한다 - 이 도구는
+    // 사내 전용이라 어느 PC에서 보든 같은 시각으로 보여야 하는데, 이전에는 getHours() 등
+    // "브라우저 로컬" getter를 썼다. 보는 PC의 OS/브라우저 타임존이 KST가 아니면(예:
+    // UTC로 설정된 PC) 변환이 전혀 안 되고 UTC 시각이 그대로 노출되어 실제보다 9시간
+    // 적게 표시되는 결함이 있었음(게시판 등록 시각이 이상하다는 실제 신고로 발견) -
+    // Intl.DateTimeFormat에 timeZone을 명시해 뷰어의 로컬 설정과 무관하게 고정한다.
+    // 시간대가 없는 기존 값은 서버 로컬 시각(이미 KST)이므로 값 자체를 그대로 표시한다.
     function formatTimestamp(value) {
       if (!value) return '';
-      const match = String(value).match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
-      return match ? `${match[1]} ${match[2]}` : String(value);
+      const text = String(value);
+      if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)) {
+        const date = new Date(text);
+        if (!Number.isNaN(date.getTime())) {
+          const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Asia/Seoul', hour12: false,
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+          }).formatToParts(date).reduce((acc, p) => { acc[p.type] = p.value; return acc; }, {});
+          const hour = parts.hour === '24' ? '00' : parts.hour;  // 자정을 24시로 주는 로케일 보정
+          return `${parts.year}-${parts.month}-${parts.day} ${hour}:${parts.minute}:${parts.second}`;
+        }
+      }
+      const match = text.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}:\d{2})/);
+      return match ? `${match[1]} ${match[2]}` : text;
     }
 
     function showTooltip(evt, text) {

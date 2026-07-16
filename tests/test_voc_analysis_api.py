@@ -29,6 +29,8 @@ class _FakeJudgeClient:
             }
         match = re.search(r"- \[([^\]]+)\]", user_prompt)
         example_id = match.group(1) if match else "post-1"
+        if "classifications" in system_prompt:
+            return {"classifications": [{"id": example_id, "intent": "complaint", "topic": "속도"}]}
         return {"summary": "요약입니다", "top_issues": [{"theme": "속도", "frequency": 1, "severity": "high", "suggestion": "담당자가 즉시 최적화하고 응답시간을 측정", "example_ids": [example_id]}]}
 
 
@@ -148,8 +150,8 @@ def test_use_board_true_combined_with_jira():
 
 
 class _TwoStageFakeClient:
-    """1번째 judge() 호출(생성)엔 summary/top_issues를, 2번째 호출(독립 검증)엔 verdict를
-    반환 - 생성과 심사가 실제로 순차적인 별도 호출인지 확인하는 용도."""
+    """system_prompt 내용으로 단계를 구분해 응답 - Interpreter(의도 분류)/Summarizer(생성)/
+    독립 Judge(검증) 3단계가 실제로 순차적인 별도 호출인지 확인하는 용도."""
 
     enabled = True
     call_count = 0
@@ -159,9 +161,11 @@ class _TwoStageFakeClient:
 
     def judge(self, system_prompt, user_prompt):
         _TwoStageFakeClient.call_count += 1
-        if _TwoStageFakeClient.call_count == 1:
-            return {"summary": "요약", "top_issues": [{"theme": "속도", "frequency": 1, "severity": "high", "suggestion": "담당자가 즉시 최적화하고 응답시간을 측정", "example_ids": ["post-1"]}]}
-        return {"verdict": "PASS", "criteria": {"relevance": True, "root_cause_addressing": True, "feasibility": True, "measurability": True}, "reasoning": "타당함"}
+        if "독립적인 QA 심사관" in system_prompt:
+            return {"verdict": "PASS", "criteria": {"relevance": True, "root_cause_addressing": True, "feasibility": True, "measurability": True}, "reasoning": "타당함"}
+        if "classifications" in system_prompt:
+            return {"classifications": [{"id": "post-1", "intent": "complaint", "topic": "속도"}]}
+        return {"summary": "요약", "top_issues": [{"theme": "속도", "frequency": 1, "severity": "high", "suggestion": "담당자가 즉시 최적화하고 응답시간을 측정", "example_ids": ["post-1"]}]}
 
 
 def test_run_response_includes_independent_judge_verdict(monkeypatch):
@@ -176,7 +180,8 @@ def test_run_response_includes_independent_judge_verdict(monkeypatch):
     assert run.status_code == 200
     data = run.json()
     assert data["result"]["judge"]["verdict"] == "PASS"
-    assert _TwoStageFakeClient.call_count == 2  # 생성 1회 + 독립 검증 1회
+    assert data["result"]["interpreter"]["applied"] is True
+    assert _TwoStageFakeClient.call_count == 3  # Interpreter 1회 + 생성 1회 + 독립 검증 1회
 
     detail = client.get(f"/api/voc-analysis/{data['id']}")
     assert detail.json()["result"]["judge"]["verdict"] == "PASS"

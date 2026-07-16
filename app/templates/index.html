@@ -594,6 +594,10 @@
       <div id="voc-history-list" class="table-view">불러오는 중...</div>
     </div>
     <div class="card">
+      <h2>지난 교차검증 매트릭스 이력</h2>
+      <div id="voc-xval-history-list" class="table-view">불러오는 중...</div>
+    </div>
+    <div class="card">
       <h2>VOC 분석 파이프라인 품질 지표 차트</h2>
       <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 0 0 0.4rem;">아래 보고서 본문(마크다운)에는 그래프를 그릴 수 없어, 같은 실측치를 이 페이지에 직접 차트로 렌더링했습니다.</p>
       <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 0 0 0.4rem;"><strong>이 카드는 서버 API(<code>/api/voc-analysis/quality-dashboard</code>)에서 매번 실시간으로 다시 계산한 값을 보여줍니다.</strong><br>pytest를 새로 돌리거나 VOC 분석을 새로 실행하면 다음 새로고침에 바로 반영됩니다.</p>
@@ -1048,6 +1052,8 @@ let _vocActiveRunId = null;
           return;
         }
         _renderVocCrossValidationResult(data);
+        loadVocCrossValidationHistory();
+        showToast('교차검증 매트릭스 실행이 완료되었습니다.');
       } catch (err) {
         resultEl.innerHTML = `<p style="color:#dc2626;">${escapeHtml(err.message || '교차검증 매트릭스 실행에 실패했습니다.')}</p>`;
       } finally {
@@ -1349,6 +1355,43 @@ let _vocActiveRunId = null;
       const record = await res.json();
       _renderVocResult(record);
       window.scrollTo({ top: document.getElementById('voc-result').offsetTop - 20, behavior: 'smooth' });
+    }
+
+    async function loadVocCrossValidationHistory() {
+      const el = document.getElementById('voc-xval-history-list');
+      const res = await fetch('/api/voc-analysis/cross-validation-matrix/history');
+      const items = await res.json();
+      const headerHtml = '<thead><tr><th>일시</th><th>실행자</th><th>A</th><th>B</th><th>C</th><th>D</th><th></th></tr></thead>';
+      renderPagedHtmlTable('voc-xval-history-list', headerHtml, items, item => {
+        const canDelete = _canModerate || item.created_by === _currentUsername;
+        const deleteCell = canDelete ? `<td><button type="button" class="btn-danger" style="padding:0.3rem 0.6rem; font-size:0.78rem;" onclick="event.stopPropagation(); deleteVocCrossValidation('${item.id}')">삭제</button></td>` : '<td></td>';
+        const gate = item.gate_summary || {};
+        const gateCell = g => `<td>${escapeHtml(gate[g] || '-')}</td>`;
+        return `<tr>
+          <td><span class="board-row-title" onclick="loadVocCrossValidationRecord('${item.id}')">${escapeHtml(formatTimestamp(item.created_at))}</span></td>
+          <td>${escapeHtml(item.created_by || '')}</td>
+          ${gateCell('A')}${gateCell('B')}${gateCell('C')}${gateCell('D')}
+          ${deleteCell}
+        </tr>`;
+      });
+      if (!items.length) {
+        el.innerHTML = '<p>지난 교차검증 매트릭스 이력이 없습니다.</p>';
+      }
+    }
+
+    async function deleteVocCrossValidation(id) {
+      if (!confirm('이 교차검증 매트릭스 이력을 삭제하시겠습니까?')) return;
+      const res = await fetch(`/api/voc-analysis/cross-validation-matrix/${id}`, { method: 'DELETE' });
+      if (!res.ok) { const err = await res.json(); alert(err.error || '삭제에 실패했습니다.'); return; }
+      loadVocCrossValidationHistory();
+    }
+
+    async function loadVocCrossValidationRecord(id) {
+      const res = await fetch(`/api/voc-analysis/cross-validation-matrix/${id}`);
+      if (!res.ok) { alert('교차검증 매트릭스 기록을 찾을 수 없습니다.'); return; }
+      const record = await res.json();
+      _renderVocCrossValidationResult(record);
+      window.scrollTo({ top: document.getElementById('voc-xval-result').offsetTop - 20, behavior: 'smooth' });
     }
 
     function _vocBarRow(label, value, max, cls, valueText) {
@@ -2085,6 +2128,7 @@ let _vocActiveRunId = null;
       }
       if (name === 'voc-analysis') {
         loadVocHistory();
+        loadVocCrossValidationHistory();
         loadVocQualityDashboard();
         if (!_vocReportsLoaded) {
           _vocReportsLoaded = true;

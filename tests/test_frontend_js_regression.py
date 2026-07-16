@@ -67,6 +67,23 @@ def test_voc_cross_validation_button_wired_to_run_function():
     assert 'id="voc-xval-result"' in html
 
 
+def test_voc_cross_validation_history_list_wired():
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert 'id="voc-xval-history-list"' in html
+    assert "function loadVocCrossValidationHistory" in html
+    assert "function loadVocCrossValidationRecord" in html
+    assert "function deleteVocCrossValidation" in html
+    assert "onclick=\"loadVocCrossValidationRecord(" in html
+    assert "onclick=\"event.stopPropagation(); deleteVocCrossValidation(" in html
+
+
+def test_voc_cross_validation_history_loaded_on_tab_switch_and_after_run():
+    """이력 목록이 실제로 (1) VOC 탭 진입 시, (2) 매트릭스 실행 완료 직후 갱신되는지 확인 -
+    함수만 정의돼 있고 아무도 호출하지 않으면 목록이 절대 새로고침되지 않으므로 별도 확인."""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert html.count("loadVocCrossValidationHistory();") >= 2
+
+
 def test_voc_polling_functions_all_defined_in_index_html():
     """P0-3에서 새로 추가된 함수들이 실제로 정의돼 있는지(오탈자로 조용히 빠지는 것 방지)."""
     html = INDEX_HTML.read_text(encoding="utf-8")

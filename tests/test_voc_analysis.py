@@ -75,6 +75,13 @@ def test_mask_pii_masks_account_number_near_keyword():
     assert "110" not in masked or "***" in masked
 
 
+def test_mask_pii_masks_account_number_with_space_separator():
+    """구분자 변형: 계좌번호가 공백으로 구분된 경우도 하이픈과 동일하게 마스킹돼야 함."""
+    masked = mask_pii("계좌번호 110 123 456789 로 환불 부탁드립니다")
+    assert "456789" not in masked
+    assert "110 123" not in masked
+
+
 def test_mask_pii_does_not_mask_generic_numbers_without_account_keyword():
     """오탐 방지: '계좌' 같은 키워드 없이 등장하는 일반 숫자열(주문번호/문의번호 등)은
     계좌번호로 오인해 마스킹하지 않아야 함."""

@@ -537,6 +537,64 @@ def test_voc_analysis_history_and_detail_are_visible_to_all_users_but_uploads_st
     assert cross_user_run.status_code == 400
 
 
+def test_voc_analysis_detail_never_exposes_excel_path_to_anyone():
+    """P1-2: excel_path는 서버 파일시스템 경로라 관리자/실행자 본인을 포함해 그 누구도
+    상세 응답으로 돌려받아서는 안 된다."""
+    admin = TestClient(app)
+    assert admin.post("/signup", json={"username": "alice", "password": "secret123"}).status_code == 200
+    upload = admin.post("/api/voc-analysis/excel/upload", files={"file": ("voc.xlsx", _build_voc_xlsx_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    run = admin.post("/api/voc-analysis/run", json={"use_board": False, "use_excel": True, "excel_path": upload.json()["excel_path"]})
+    assert run.status_code == 200
+    analysis_id = run.json()["id"]
+
+    detail_as_admin = admin.get(f"/api/voc-analysis/{analysis_id}")
+    assert detail_as_admin.status_code == 200
+    assert "excel_path" not in detail_as_admin.json()["params"]
+
+
+def test_voc_analysis_detail_hides_jira_jql_and_focus_instruction_from_other_users():
+    """P1-2: jira_jql/focus_instruction은 실행자/관리자에게는 보이지만, 그 외 일반
+    사용자에게는 상세 응답에서 빠져야 한다(둘 다 실행자가 입력한 조회조건/지시문)."""
+    admin = TestClient(app)
+    assert admin.post("/signup", json={"username": "alice", "password": "secret123"}).status_code == 200
+    admin.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    bob = TestClient(app)
+    assert bob.post("/signup", json={"username": "bob", "password": "secret456"}).status_code == 200
+    assert admin.post("/api/users/bob/approve").status_code == 200
+    assert bob.post("/login", json={"username": "bob", "password": "secret456"}).status_code == 200
+
+    run = bob.post("/api/voc-analysis/run", json={"use_board": True, "focus_instruction": "속도 이슈만"})
+    assert run.status_code == 200
+    analysis_id = run.json()["id"]
+
+    detail_as_owner = bob.get(f"/api/voc-analysis/{analysis_id}").json()
+    assert detail_as_owner["params"]["focus_instruction"] == "속도 이슈만"
+
+    detail_as_admin = admin.get(f"/api/voc-analysis/{analysis_id}").json()
+    assert detail_as_admin["params"]["focus_instruction"] == "속도 이슈만"
+
+    carol = TestClient(app)
+    assert carol.post("/signup", json={"username": "carol", "password": "secret789"}).status_code == 200
+    assert admin.post("/api/users/carol/approve").status_code == 200
+    assert carol.post("/login", json={"username": "carol", "password": "secret789"}).status_code == 200
+    detail_as_third_party = carol.get(f"/api/voc-analysis/{analysis_id}")
+    assert detail_as_third_party.status_code == 200
+    assert "focus_instruction" not in detail_as_third_party.json()["params"]
+    assert "jira_jql" not in detail_as_third_party.json()["params"]
+
+
+def test_voc_analysis_history_list_format_unchanged_by_p1_2():
+    """P1-2 회귀: 상세 응답만 좁혔을 뿐, 이력 목록(GET /history) 응답 형식은 그대로여야
+    한다(이 요구사항의 명시적 조건)."""
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+    run = client.post("/api/voc-analysis/run", json={"use_board": True}).json()
+    history_item = client.get("/api/voc-analysis/history").json()[0]
+    assert set(history_item.keys()) == {"id", "created_at", "created_by", "summary", "judge_verdict", "quality_gate_status"}
+    assert history_item["id"] == run["id"]
+
+
 def test_voc_analysis_delete_allowed_for_admin_or_owner_only():
     """삭제는 여전히 좁게 제한됨 - 관리자이거나 그 분석을 실행한 본인만 가능. 관리자도
     작성자도 아닌 제3자는 남의 실행 결과를 지울 수 없어야 한다."""

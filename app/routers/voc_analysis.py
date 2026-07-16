@@ -822,6 +822,32 @@ def delete_analysis(analysis_id: str, request: Request) -> JSONResponse:
     return JSONResponse({"deleted": True})
 
 
+# P1-2: 상세 조회(GET /{analysis_id})는 이력 목록과 마찬가지로 전원 공개다(팀 공용
+# 산출물이므로). 하지만 저장 파일(record)에는 실행 당시 params가 그대로 들어있어
+# excel_path(파일시스템 경로), jira_jql/focus_instruction(실행자가 입력한 조회/지시
+# 내용)까지 전원에게 그대로 노출되는 문제가 있었다. 내부 저장 모델과 API로 내보내는
+# DTO를 분리해 이 필드들을 좁힌다 - 저장 파일 자체(diskformat)는 감사 목적상 그대로
+# 두고, 여기서 응답을 만들 때만 걸러낸다.
+def _sanitize_analysis_detail_for_viewer(record: Dict[str, Any], request: Request) -> Dict[str, Any]:
+    sanitized = dict(record)
+    params = dict(record.get("params") or {})
+    # excel_path는 서버 파일시스템 경로라 그 값을 아는 것 자체가 정보 노출임 - 실행자/
+    # 관리자를 포함해 그 누구에게도 상세 응답으로는 절대 돌려주지 않는다(업로드 당시
+    # 응답에서만 잠깐 쓰이고 그걸로 끝).
+    params.pop("excel_path", None)
+
+    is_owner = record.get("created_by") == _username(request)
+    is_admin = bool(_state["is_admin"](request))
+    if not (is_owner or is_admin):
+        # jira_jql/focus_instruction은 실행자가 직접 입력한 조회 조건/지시문이라 다른
+        # 팀원에게는 실행자/관리자 전용 정보로 취급해 숨긴다(값 노출이 아니라 키 자체를
+        # 뺀다 - null도 "실제로 비어있었다"는 정보가 될 수 있어 아예 생략).
+        params.pop("jira_jql", None)
+        params.pop("focus_instruction", None)
+    sanitized["params"] = params
+    return sanitized
+
+
 @router.get("/{analysis_id}")
 def analysis_detail(analysis_id: str, request: Request) -> JSONResponse:
     if "/" in analysis_id or "\\" in analysis_id or ".." in analysis_id:
@@ -829,4 +855,5 @@ def analysis_detail(analysis_id: str, request: Request) -> JSONResponse:
     path = _find_analysis_file(analysis_id)
     if not path:
         return JSONResponse({"error": "not found"}, status_code=404)
-    return JSONResponse(json.loads(path.read_text(encoding="utf-8")))
+    record = json.loads(path.read_text(encoding="utf-8"))
+    return JSONResponse(_sanitize_analysis_detail_for_viewer(record, request))

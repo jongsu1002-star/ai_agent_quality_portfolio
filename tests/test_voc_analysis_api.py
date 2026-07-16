@@ -2,6 +2,7 @@ import io
 import json
 import pathlib
 import re
+import time
 
 import pandas as pd
 import pytest
@@ -589,3 +590,128 @@ def test_report_version_content_round_trip(monkeypatch):
     assert content_response.json()["content"] == "# 옛날 버전 내용"
 
     assert client.get("/api/voc-analysis/report-versions/voc_quality_report/does-not-exist").status_code == 404
+
+
+# ===================== 백그라운드 실행 + 폴링 (POST /run-async) =====================
+
+def _poll_until(client, url, done_statuses, timeout_s=5.0, interval_s=0.05):
+    deadline = time.time() + timeout_s
+    last = None
+    while time.time() < deadline:
+        last = client.get(url).json()
+        if last.get("status") in done_statuses:
+            return last
+        time.sleep(interval_s)
+    raise AssertionError(f"timed out waiting for {done_statuses}, last={last}")
+
+
+def test_run_async_returns_run_id_immediately_then_completes():
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    start = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False})
+    assert start.status_code == 200
+    body = start.json()
+    assert body["run_id"].startswith("voc_async_")
+    assert body["status"] == "queued"
+
+    final = _poll_until(client, f"/api/voc-analysis/run-async/{body['run_id']}/status", {"done", "error"})
+    assert final["status"] == "done"
+
+    result = client.get(f"/api/voc-analysis/run-async/{body['run_id']}/result")
+    assert result.status_code == 200
+    data = result.json()
+    assert data["result"]["summary"] == "요약입니다"
+    assert data["result"]["judge"]["verdict"] == "PASS"
+
+    # 동기 /run과 동일한 record 형식이라 이력 목록에도 그대로 잡혀야 함
+    history_ids = {item["id"] for item in client.get("/api/voc-analysis/history").json()}
+    assert data["id"] in history_ids
+
+
+def test_run_async_validation_error_returns_immediately_without_run_id():
+    """엑셀 경로 누락 등 _prepare_voc_run 단계에서 걸리는 검증 실패는 스레드를 띄우기도
+    전에 동기적으로 걸러져야 함 - 폴링할 run_id 자체가 생기지 않고 즉시 에러를 받아야 함.
+    (VOC 데이터가 아예 없는 경우처럼 실제 실행 중에만 알 수 있는 오류는 이 단계에서
+    잡히지 않고 async error 상태로 나타남 - 별개의 정상 동작이라 이 테스트 범위 밖)."""
+    client = TestClient(app)
+    response = client.post("/api/voc-analysis/run-async", json={"use_board": False, "use_excel": True})
+    assert response.status_code == 400
+    assert "run_id" not in response.json()
+
+
+def test_run_async_with_no_voc_data_becomes_error_status_not_500():
+    """소스가 하나도 없는 경우("분석할 VOC 데이터가 없습니다")는 prepare 단계에서는
+    잡히지 않고(어떤 소스든 켤 수는 있으니) 실제 실행 중 ValueError로 나타남 - 비동기
+    경로에서는 500으로 스레드가 죽는 대신 status="error"로 정직하게 남아야 함."""
+    client = TestClient(app)
+    start = client.post("/api/voc-analysis/run-async", json={"use_board": False, "use_jira": False, "use_excel": False})
+    assert start.status_code == 200
+    final = _poll_until(client, f"/api/voc-analysis/run-async/{start.json()['run_id']}/status", {"done", "error"})
+    assert final["status"] == "error"
+    assert "VOC 데이터가 없습니다" in final["error"]
+
+
+def test_run_async_status_for_unknown_run_id_returns_404():
+    client = TestClient(app)
+    assert client.get("/api/voc-analysis/run-async/voc_async_doesnotexist/status").status_code == 404
+    assert client.get("/api/voc-analysis/run-async/voc_async_doesnotexist/result").status_code == 404
+
+
+def test_run_async_result_before_completion_returns_404():
+    """아직 실행 중(done 아님)이면 result는 404 - 부분 결과를 노출하지 않음."""
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+    start = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False}).json()
+    # 완료 전에 바로 조회 - 매우 빠르게 끝날 수도 있으므로 status가 done이면 이 검증은 건너뜀
+    immediate = client.get(f"/api/voc-analysis/run-async/{start['run_id']}/result")
+    status_now = client.get(f"/api/voc-analysis/run-async/{start['run_id']}/status").json()["status"]
+    if status_now != "done":
+        assert immediate.status_code == 404
+    _poll_until(client, f"/api/voc-analysis/run-async/{start['run_id']}/status", {"done", "error"})
+
+
+class _SlowFakeClient:
+    """실행 단계마다 인위적으로 지연을 줘서, 테스트가 완료 전에 취소 요청을 보낼
+    시간을 확보한다(취소가 "다음 단계로 못 넘어가게 막는" 동작을 확인하려면 최소
+    1단계는 끝나고 다음 단계 시작 전에 취소가 걸려야 함)."""
+    enabled = True
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def judge(self, system_prompt, user_prompt):
+        time.sleep(0.3)
+        if "독립적인 QA 심사관" in system_prompt:
+            return {"verdict": "PASS", "criteria": {"relevance": True, "root_cause_addressing": True, "feasibility": True, "measurability": True}, "reasoning": "ok"}
+        if "classifications" in system_prompt:
+            return {"classifications": [{"id": "post-1", "intent": "complaint", "topic": "x"}]}
+        return {"summary": "요약", "top_issues": [{"theme": "t", "frequency": 1, "severity": "high", "suggestion": "담당자가 즉시 조치하고 효과를 측정", "example_ids": ["post-1"]}]}
+
+
+def test_run_async_cancel_stops_before_next_step(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _SlowFakeClient)
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    start = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False}).json()
+    run_id = start["run_id"]
+
+    cancel = client.post(f"/api/voc-analysis/run-async/{run_id}/cancel")
+    assert cancel.status_code == 200
+    assert cancel.json()["canceled"] is True
+
+    final = _poll_until(client, f"/api/voc-analysis/run-async/{run_id}/status", {"canceled", "done", "error"}, timeout_s=5.0)
+    assert final["status"] == "canceled"
+    assert client.get(f"/api/voc-analysis/run-async/{run_id}/result").status_code == 404
+
+
+def test_run_async_cancel_on_finished_run_is_a_noop():
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+    start = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False}).json()
+    _poll_until(client, f"/api/voc-analysis/run-async/{start['run_id']}/status", {"done", "error"})
+
+    late_cancel = client.post(f"/api/voc-analysis/run-async/{start['run_id']}/cancel")
+    assert late_cancel.status_code == 200
+    assert late_cancel.json()["canceled"] is False

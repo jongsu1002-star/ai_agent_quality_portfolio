@@ -3,12 +3,14 @@ import pytest
 from qa_agent.voc_analysis import (
     INTENT_LABELS,
     MAX_ITEMS_FOR_PROMPT,
+    VocAnalysisCanceled,
     build_interpreter_prompt,
     build_judge_prompts,
     build_prompts,
     build_refine_prompt,
     build_voc_items,
     classify_voc_items,
+    mask_pii,
     normalize_board_post,
     normalize_excel_row,
     normalize_jira_issue,
@@ -19,6 +21,51 @@ from qa_agent.voc_analysis import (
     validate_interpreter_schema,
     validate_judge_schema,
 )
+
+
+# ===================== PII 마스킹 (프롬프트 전 정규화 단계에서 적용) =====================
+
+def test_mask_pii_masks_mobile_phone_keeping_prefix_and_suffix():
+    assert mask_pii("연락처는 010-1234-5678 입니다") == "연락처는 010-****-5678 입니다"
+
+
+def test_mask_pii_masks_phone_without_hyphens():
+    assert mask_pii("01012345678로 연락주세요") == "010-****-5678로 연락주세요"
+
+
+def test_mask_pii_masks_email_keeping_first_char_and_domain():
+    assert mask_pii("이메일은 hong@example.com 입니다") == "이메일은 h***@example.com 입니다"
+
+
+def test_mask_pii_masks_resident_registration_number():
+    assert mask_pii("주민등록번호 901231-1234567 확인") == "주민등록번호 901231-******* 확인"
+
+
+def test_mask_pii_leaves_text_without_pii_untouched():
+    text = "아무 개인정보도 없는 평범한 불만 내용입니다"
+    assert mask_pii(text) == text
+
+
+def test_mask_pii_handles_multiple_pii_in_one_string():
+    masked = mask_pii("전화는 010-9999-8888, 메일은 test@example.com 으로 주세요")
+    assert "9999" not in masked
+    assert "8888" in masked  # 뒷자리는 형식 확인용으로 남김
+    assert "test@example.com" not in masked
+    assert "@example.com" in masked
+
+
+def test_mask_pii_handles_empty_and_none():
+    assert mask_pii("") == ""
+    assert mask_pii(None) is None
+
+
+def test_normalize_board_post_applies_pii_masking():
+    """P0에 준하는 회귀 방지: 정규화 단계를 거치면 LLM 프롬프트로 나가는 content에서
+    전화번호 등 PII가 이미 마스킹돼 있어야 함(생성/Interpreter 등 모든 프롬프트 빌더가
+    이 content를 그대로 재사용하므로 여기서 한 번만 확인하면 전체 경로가 보장됨)."""
+    item = normalize_board_post({"id": 1, "title": "연락 부탁", "content": "010-1234-5678로 연락주세요", "created_at": "2026-01-01"})
+    assert "1234-5678" not in item["content"]
+    assert "010-****-5678" in item["content"]
 
 
 def test_normalize_board_post():
@@ -698,3 +745,52 @@ def test_self_check_fail_then_refine_schema_violation_keeps_original_result():
     assert result["self_check"]["refine_applied"] is False
     assert result["self_check"]["after_verdict"] == "REFINE_FAILED"
     assert len(generation_client.calls) == 4  # 재작성 실패 후 재재점검(recheck)은 호출 안 함(상한 준수)
+
+
+# ===================== 백그라운드 실행 취소(should_cancel) =====================
+
+def test_should_cancel_none_behaves_exactly_like_before():
+    """디폴트(should_cancel 미지정)는 동기 경로와 완전히 동일해야 함 - 기존 호출부(테스트
+    포함) 전부가 이 인자 없이 호출하므로 회귀가 있으면 다른 테스트들이 이미 잡아내지만,
+    명시적으로도 한 번 더 확인."""
+    generation_client = _FakeJudgeClient([
+        {"classifications": [{"id": "post-1", "intent": "complaint", "topic": "대기시간"}]},
+        _VALID_ANALYSIS_RESULT,
+        _SELF_CHECK_PASS,
+    ])
+    judge_client = _FakeJudgeClient(_VALID_JUDGE_VERDICT_PASS)
+    board_posts = [{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}]
+    result = run_voc_analysis_with_judge(generation_client, judge_client, board_posts, [], [], should_cancel=None)
+    assert result["judge"]["verdict"] == "PASS"
+
+
+def test_should_cancel_true_before_start_raises_immediately_without_any_llm_call():
+    generation_client = _FakeJudgeClient(_VALID_ANALYSIS_RESULT)
+    judge_client = _FakeJudgeClient(_VALID_JUDGE_VERDICT_PASS)
+    board_posts = [{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}]
+    with pytest.raises(VocAnalysisCanceled):
+        run_voc_analysis_with_judge(generation_client, judge_client, board_posts, [], [], should_cancel=lambda: True)
+    assert generation_client.calls == []  # Interpreter조차 호출되지 않음
+    assert judge_client.calls == []
+
+
+def test_should_cancel_becomes_true_after_generation_stops_before_judge():
+    """생성까지는 끝났지만 그 다음(독립 Judge) 시작 전에 취소 요청이 들어온 경우 - 이미
+    끝난 단계의 결과는 버리지 않지만, 아직 시작 안 한 다음 단계(Judge 호출)는 막아야 함."""
+    call_count = {"n": 0}
+
+    def should_cancel():
+        # Interpreter(1) + 생성(1) + 내부재점검(1) = 3번째 체크 시점부터 취소로 전환
+        call_count["n"] += 1
+        return call_count["n"] > 3
+
+    generation_client = _FakeJudgeClient([
+        {"classifications": [{"id": "post-1", "intent": "complaint", "topic": "대기시간"}]},
+        _VALID_ANALYSIS_RESULT,
+        _SELF_CHECK_PASS,
+    ])
+    judge_client = _FakeJudgeClient(_VALID_JUDGE_VERDICT_PASS)
+    board_posts = [{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}]
+    with pytest.raises(VocAnalysisCanceled):
+        run_voc_analysis_with_judge(generation_client, judge_client, board_posts, [], [], should_cancel=should_cancel)
+    assert judge_client.calls == []  # 독립 Judge는 아예 호출 안 됨(취소가 그 전에 걸림)

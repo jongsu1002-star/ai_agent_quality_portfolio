@@ -15,7 +15,8 @@ import uuid
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from threading import Lock, Thread
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Request, UploadFile, File
 from fastapi.responses import JSONResponse, Response
@@ -29,10 +30,16 @@ from qa_agent.excel_io import (
 )
 from qa_agent.jira_client import fetch_backlog_issues
 from qa_agent.llm_client import OpenAIJudgeClient
-from qa_agent.voc_analysis import MAX_ITEMS_FOR_PROMPT, run_voc_analysis_with_judge
+from qa_agent.voc_analysis import MAX_ITEMS_FOR_PROMPT, VocAnalysisCanceled, run_voc_analysis_with_judge
 
 router = APIRouter(prefix="/api/voc-analysis")
 logger = logging.getLogger(__name__)
+
+# 백그라운드(비동기) 실행 registry - app/main.py::RUN_REGISTRY(QA 파이프라인)와 동일한
+# 패턴을 VOC 분석에도 적용. 동기 엔드포인트(POST /run)는 하위 호환을 위해 그대로 두고,
+# 이건 완전히 별도의 추가 경로(POST /run-async)라 기존 동작에는 영향이 없음.
+VOC_RUN_REGISTRY: Dict[str, Dict[str, Dict[str, Any]]] = {}  # username -> run_id -> {status, result, error, canceled}
+VOC_RUN_LOCK = Lock()
 
 VOC_ANALYSIS_DIR = Path("reports") / "voc_analysis"
 VOC_UPLOAD_DIR = VOC_ANALYSIS_DIR / "uploads"
@@ -182,13 +189,11 @@ def jira_preview(jql: Optional[str] = None, max_results: int = 50) -> JSONRespon
     return JSONResponse({"issues": issues, "count": len(issues)})
 
 
-@router.post("/run")
-def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
-    """게시판 VOC 글 + 선택적 Jira/엑셀 소스를 모아 LLM 분석을 동기 실행.
-
-    use_board 기본값은 True(아무것도 지정하지 않으면 게시판 VOC를 씀 - 기존 동작과 동일한
-    하위호환 기본값). Jira/엑셀을 추가로 켤 때는 게시판 VOC를 포함할지 여부를 명시적으로
-    선택할 수 있음(use_board=false로 게시판을 빼고 외부 소스만 분석하는 것도 가능)."""
+def _prepare_voc_run(payload: Dict[str, Any], request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse]]:
+    """검증 + 소스 수집(게시판/Jira/엑셀) + LLM 클라이언트 구성 - 동기(/run)와 비동기
+    (/run-async) 두 실행 경로가 완전히 동일한 준비 과정을 공유한다(로직 중복/드리프트
+    방지). 성공하면 (prepared, None), 검증 실패나 소스 조회 실패면 (None, 에러 응답)을
+    반환 - 호출부는 에러가 있으면 그대로 반환하면 된다."""
     board_posts: List[Dict[str, Any]] = []
     if payload.get("use_board", True):
         board_posts = _store().list_posts("voc", limit=300, include_hidden=False)
@@ -206,29 +211,29 @@ def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
             jira_issues = fetch_backlog_issues(jira_config, jql=payload.get("jira_jql"), max_results=payload.get("jira_max_results", 50))
         except Exception:
             logger.exception("VOC Jira retrieval failed")
-            return JSONResponse({"error": "Jira 조회에 실패했습니다. 연결 설정과 권한을 확인하세요."}, status_code=502)
+            return None, JSONResponse({"error": "Jira 조회에 실패했습니다. 연결 설정과 권한을 확인하세요."}, status_code=502)
 
     excel_rows: List[Dict[str, Any]] = []
     if payload.get("use_excel") and not payload.get("excel_path"):
-        return JSONResponse({"error": "엑셀 사용을 선택했지만 업로드된 파일이 없습니다"}, status_code=400)
+        return None, JSONResponse({"error": "엑셀 사용을 선택했지만 업로드된 파일이 없습니다"}, status_code=400)
     if payload.get("use_excel") and payload.get("excel_path"):
         resolved = _resolve_upload_path(payload["excel_path"], _username(request))
         if not resolved:
-            return JSONResponse({"error": "invalid excel_path"}, status_code=400)
+            return None, JSONResponse({"error": "invalid excel_path"}, status_code=400)
         loader = load_voc_json if resolved.suffix.lower() == ".json" else load_voc_excel
         try:
             excel_rows = loader(resolved)
         except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
+            return None, JSONResponse({"error": str(exc)}, status_code=400)
         except Exception:
             logger.exception("VOC external file loading failed")
-            return JSONResponse({"error": "업로드 데이터를 불러오지 못했습니다. 파일을 다시 업로드하세요."}, status_code=400)
+            return None, JSONResponse({"error": "업로드 데이터를 불러오지 못했습니다. 파일을 다시 업로드하세요."}, status_code=400)
 
     settings = _state["load_settings"]()
     llm_kwargs = _state["llm_kwargs"](settings)
     generation_client = OpenAIJudgeClient(**llm_kwargs)
     if not generation_client.enabled:
-        return JSONResponse({"error": "LLM이 설정되지 않았습니다 (설정 탭에서 LLM 연동을 먼저 구성하세요)"}, status_code=400)
+        return None, JSONResponse({"error": "LLM이 설정되지 않았습니다 (설정 탭에서 LLM 연동을 먼저 구성하세요)"}, status_code=400)
 
     # 독립 Judge: 생성에 쓴 provider와 가능하면 다른 provider로 결과를 재검증(자기평가 편향
     # 방지). 교차검증용 키가 없으면 judge_client가 비활성 상태로 만들어지고, run_independent_judge가
@@ -247,33 +252,21 @@ def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
                 raise ValueError
             parsed_item_limit = int(raw_item_limit)
         except (TypeError, ValueError):
-            return JSONResponse({"error": "item_limit은 숫자여야 합니다"}, status_code=400)
+            return None, JSONResponse({"error": "item_limit은 숫자여야 합니다"}, status_code=400)
         if parsed_item_limit < 1:
-            return JSONResponse({"error": "item_limit은 1 이상이어야 합니다"}, status_code=400)
+            return None, JSONResponse({"error": "item_limit은 1 이상이어야 합니다"}, status_code=400)
         item_limit = min(parsed_item_limit, MAX_ITEMS_FOR_PROMPT)
 
-    try:
-        result = run_voc_analysis_with_judge(
-            generation_client, judge_client, board_posts, jira_issues, excel_rows,
-            focus_instruction=focus_instruction, item_limit=item_limit, cross_model=cross_model,
-        )
-    except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    except Exception:
-        logger.exception("VOC analysis generation failed")
-        return JSONResponse({"error": "VOC 분석 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요."}, status_code=502)
-
-    analysis_dir = _user_analysis_dir(_username(request))
-    analysis_dir.mkdir(parents=True, exist_ok=True)
-    # 초 단위 타임스탬프만 쓰면 같은 초에 완료된 두 요청의 결과 파일이 서로 덮어써서 감사
-    # 기록이 유실될 수 있었음(실제로 지적된 결함) - 마이크로초 + uuid 접미사로 사실상
-    # 충돌 불가능하게 하면서도, 파일명 앞부분은 여전히 타임스탬프라 정렬/식별이 쉬움
-    analysis_id = f"voc_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:8]}"
-    record = {
-        "id": analysis_id,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
-        "created_by": _username(request),
-        "app_version": _state["app_version"](),
+    prepared = {
+        "board_posts": board_posts,
+        "jira_issues": jira_issues,
+        "excel_rows": excel_rows,
+        "generation_client": generation_client,
+        "judge_client": judge_client,
+        "cross_model": cross_model,
+        "focus_instruction": focus_instruction,
+        "item_limit": item_limit,
+        "username": _username(request),
         "params": {
             "use_board": bool(payload.get("use_board", True)),
             "use_jira": bool(payload.get("use_jira")),
@@ -283,10 +276,164 @@ def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
             "focus_instruction": focus_instruction or None,
             "item_limit": item_limit,
         },
+    }
+    return prepared, None
+
+
+def _build_and_save_analysis_record(prepared: Dict[str, Any], result: Dict[str, Any]) -> Dict[str, Any]:
+    """분석 결과를 기록으로 감싸 원자적으로 저장 - 동기/비동기 두 경로가 공유하는
+    동일한 저장 형식(analysis_id/created_at/created_by 등)."""
+    username = prepared["username"]
+    analysis_dir = _user_analysis_dir(username)
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+    # 초 단위 타임스탬프만 쓰면 같은 초에 완료된 두 요청의 결과 파일이 서로 덮어써서 감사
+    # 기록이 유실될 수 있었음(실제로 지적된 결함) - 마이크로초 + uuid 접미사로 사실상
+    # 충돌 불가능하게 하면서도, 파일명 앞부분은 여전히 타임스탬프라 정렬/식별이 쉬움
+    analysis_id = f"voc_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:8]}"
+    record = {
+        "id": analysis_id,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "created_by": username,
+        "app_version": _state["app_version"](),
+        "params": prepared["params"],
         "result": result,
     }
     _write_analysis_record_atomically(analysis_id, record, analysis_dir)
+    return record
+
+
+@router.post("/run")
+def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
+    """게시판 VOC 글 + 선택적 Jira/엑셀 소스를 모아 LLM 분석을 동기 실행(요청을 끝까지
+    붙들고 있음 - 수십 초 소요될 수 있음). 응답을 기다리지 않고 폴링하려면 POST
+    /run-async를 쓸 것(같은 준비 로직을 공유하는 별도 경로, 하위 호환을 위해 이 동기
+    경로는 그대로 유지).
+
+    use_board 기본값은 True(아무것도 지정하지 않으면 게시판 VOC를 씀 - 기존 동작과 동일한
+    하위호환 기본값). Jira/엑셀을 추가로 켤 때는 게시판 VOC를 포함할지 여부를 명시적으로
+    선택할 수 있음(use_board=false로 게시판을 빼고 외부 소스만 분석하는 것도 가능)."""
+    prepared, error = _prepare_voc_run(payload, request)
+    if error is not None:
+        return error
+
+    try:
+        result = run_voc_analysis_with_judge(
+            prepared["generation_client"], prepared["judge_client"],
+            prepared["board_posts"], prepared["jira_issues"], prepared["excel_rows"],
+            focus_instruction=prepared["focus_instruction"], item_limit=prepared["item_limit"],
+            cross_model=prepared["cross_model"],
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception:
+        logger.exception("VOC analysis generation failed")
+        return JSONResponse({"error": "VOC 분석 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요."}, status_code=502)
+
+    record = _build_and_save_analysis_record(prepared, result)
     return JSONResponse(record)
+
+
+def _execute_voc_analysis_async(username: str, run_id: str, prepared: Dict[str, Any]) -> None:
+    """백그라운드 스레드에서 실제 VOC 분석을 실행(POST /run-async가 이 함수를 스레드로
+    띄움) - app/main.py::_execute_run(QA 파이프라인)과 동일한 패턴. 예외가 나도 여기서
+    잡아 registry에 status="error"로 기록하므로 스레드가 죽어도 폴링하는 클라이언트에게는
+    정상적으로 실패 상태가 보임."""
+    with VOC_RUN_LOCK:
+        VOC_RUN_REGISTRY[username][run_id]["status"] = "running"
+
+    def _should_cancel() -> bool:
+        with VOC_RUN_LOCK:
+            return VOC_RUN_REGISTRY[username][run_id].get("canceled", False)
+
+    try:
+        result = run_voc_analysis_with_judge(
+            prepared["generation_client"], prepared["judge_client"],
+            prepared["board_posts"], prepared["jira_issues"], prepared["excel_rows"],
+            focus_instruction=prepared["focus_instruction"], item_limit=prepared["item_limit"],
+            cross_model=prepared["cross_model"], should_cancel=_should_cancel,
+        )
+    except VocAnalysisCanceled:
+        with VOC_RUN_LOCK:
+            VOC_RUN_REGISTRY[username][run_id]["status"] = "canceled"
+        return
+    except ValueError as exc:
+        with VOC_RUN_LOCK:
+            VOC_RUN_REGISTRY[username][run_id]["status"] = "error"
+            VOC_RUN_REGISTRY[username][run_id]["error"] = str(exc)
+        return
+    except Exception:
+        logger.exception("VOC analysis generation failed (async)")
+        with VOC_RUN_LOCK:
+            VOC_RUN_REGISTRY[username][run_id]["status"] = "error"
+            VOC_RUN_REGISTRY[username][run_id]["error"] = "VOC 분석 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요."
+        return
+
+    record = _build_and_save_analysis_record(prepared, result)
+    with VOC_RUN_LOCK:
+        VOC_RUN_REGISTRY[username][run_id]["status"] = "done"
+        VOC_RUN_REGISTRY[username][run_id]["result"] = record
+
+
+@router.post("/run-async")
+def run_analysis_async(payload: Dict[str, Any], request: Request) -> JSONResponse:
+    """VOC 분석을 백그라운드 스레드로 실행하고 즉시 run_id를 반환(QA 파이프라인의
+    POST /api/run과 동일한 패턴). 진행 상태는 GET /run-async/{run_id}/status로,
+    완료된 결과는 GET /run-async/{run_id}/result로 폴링해서 조회. 요청 검증(LLM 미설정,
+    엑셀 경로 오류 등)은 스레드를 띄우기 전에 동기적으로 먼저 수행 - 어차피 실패할
+    요청을 위해 스레드를 만들 필요가 없고, 사용자도 400/502를 폴링 없이 즉시 받는다."""
+    prepared, error = _prepare_voc_run(payload, request)
+    if error is not None:
+        return error
+
+    username = prepared["username"]
+    with VOC_RUN_LOCK:
+        user_runs = VOC_RUN_REGISTRY.setdefault(username, {})
+        run_id = f"voc_async_{uuid.uuid4().hex[:12]}"
+        user_runs[run_id] = {"status": "queued", "result": None, "error": None, "canceled": False}
+
+    thread = Thread(target=_execute_voc_analysis_async, args=(username, run_id, prepared), daemon=True)
+    thread.start()
+    return JSONResponse({"run_id": run_id, "status": "queued"})
+
+
+@router.get("/run-async/{run_id}/status")
+def voc_run_async_status(run_id: str, request: Request) -> JSONResponse:
+    """실행 상태 폴링용(queued/running/done/error/canceled). 결과 본문은 담지 않아 응답을 가볍게 유지."""
+    username = _username(request)
+    with VOC_RUN_LOCK:
+        entry = VOC_RUN_REGISTRY.get(username, {}).get(run_id)
+        if entry is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse({"run_id": run_id, "status": entry["status"], "error": entry.get("error")})
+
+
+@router.get("/run-async/{run_id}/result")
+def voc_run_async_result(run_id: str, request: Request) -> JSONResponse:
+    """완료된 비동기 실행의 전체 결과 조회(아직 안 끝났거나 없으면 404) - 동기 /run과
+    완전히 동일한 record 형식을 반환하므로 프론트는 두 경로를 같은 렌더 함수로 처리 가능."""
+    username = _username(request)
+    with VOC_RUN_LOCK:
+        entry = VOC_RUN_REGISTRY.get(username, {}).get(run_id)
+        if not entry or entry.get("result") is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse(entry["result"])
+
+
+@router.post("/run-async/{run_id}/cancel")
+def voc_run_async_cancel(run_id: str, request: Request) -> JSONResponse:
+    """실행 중인 백그라운드 분석에 취소를 요청 - 이미 시작된 개별 LLM 호출 자체를 끊지는
+    못하지만(현재 스택으로는 불가능), 아직 시작하지 않은 다음 단계(생성 -> 내부재점검 ->
+    독립Judge)로 넘어가는 것은 막아서 클라이언트가 취소를 누르면 실질적으로 남은 LLM
+    호출·대기 시간이 최대 1단계분으로 줄어든다."""
+    username = _username(request)
+    with VOC_RUN_LOCK:
+        entry = VOC_RUN_REGISTRY.get(username, {}).get(run_id)
+        if entry is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        if entry["status"] in ("done", "error", "canceled"):
+            return JSONResponse({"canceled": False, "reason": f"already {entry['status']}"})
+        entry["canceled"] = True
+    return JSONResponse({"canceled": True})
 
 
 def _write_analysis_record_atomically(analysis_id: str, record: Dict[str, Any], analysis_dir: Optional[Path] = None) -> None:

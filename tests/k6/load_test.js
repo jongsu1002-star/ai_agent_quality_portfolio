@@ -9,9 +9,9 @@
 // 자기 기본 실행 방식으로 덮어씀), 우리 것은 LOAD_*로 구분함.
 import http from 'k6/http';
 import { check, sleep } from 'k6';
+import { Trend, Rate } from 'k6/metrics';
 
 const BASE_URL = __ENV.LOAD_TARGET_URL || 'http://127.0.0.1:8000';
-const SCENARIO_NAME = 'basic-load-test';
 const VUS = Number(__ENV.LOAD_VUS || 10);
 const DURATION = __ENV.LOAD_DURATION || '30s';
 // 기본값 /health는 이 QA 플랫폼 자신을 테스트할 때만 유효한 경로 - 다른 내부 서비스(예: 사내
@@ -22,23 +22,89 @@ const LOAD_PATH = __ENV.LOAD_PATH || '/';
 const LOAD_UTTERANCE = __ENV.LOAD_UTTERANCE || '';
 const LOAD_REQUEST_FIELD = __ENV.LOAD_REQUEST_FIELD || 'message';
 
+// VOC 분석 전용 모드 - 일반 모드는 단일 요청/응답이라 이 플랫폼에서 가장 무거운 엔드포인트
+// (실제 LLM을 여러 번 순차 호출하는 VOC 분석, 통상 10~40초)를 제대로 부하테스트할 수 없었음
+// (실행할 때마다 진짜 LLM 비용이 드는 엔드포인트라 VUS/반복 횟수를 일부러 작게 잡는 것을
+// 권장 - LOAD_VOC_ITERATIONS 기본값 1). POST /api/voc-analysis/run-async로 시작해 실제
+// 완료(done/error/canceled)까지 폴링하고, 완료까지 걸린 시간을 별도 트렌드로 남긴다.
+const LOAD_VOC_MODE = __ENV.LOAD_VOC_MODE === '1';
+const LOAD_VOC_ITERATIONS = Number(__ENV.LOAD_VOC_ITERATIONS || 1);
+const LOAD_VOC_FOCUS = __ENV.LOAD_VOC_FOCUS || '';
+const LOAD_VOC_POLL_INTERVAL_S = Number(__ENV.LOAD_VOC_POLL_INTERVAL_S || 2);
+const LOAD_VOC_MAX_POLLS = Number(__ENV.LOAD_VOC_MAX_POLLS || 60); // 2초 * 60 = 최대 120초 대기
+
+const vocCompletionTime = new Trend('voc_analysis_completion_seconds', true);
+const vocSuccessRate = new Rate('voc_analysis_success_rate');
+
+const SCENARIO_NAME = LOAD_VOC_MODE ? 'voc-analysis-load-test' : 'basic-load-test';
+
 export const options = {
-  scenarios: {
-    [SCENARIO_NAME]: {
-      executor: 'constant-vus',
-      vus: VUS,
-      duration: DURATION,
-    },
-  },
-  thresholds: {
-    http_req_failed: ['rate<0.05'],
-    http_req_duration: ['p(95)<1000'],
-  },
+  scenarios: LOAD_VOC_MODE
+    ? {
+        [SCENARIO_NAME]: {
+          executor: 'per-vu-iterations',
+          vus: VUS,
+          iterations: LOAD_VOC_ITERATIONS,
+          maxDuration: `${LOAD_VOC_MAX_POLLS * LOAD_VOC_POLL_INTERVAL_S + 30}s`,
+        },
+      }
+    : {
+        [SCENARIO_NAME]: {
+          executor: 'constant-vus',
+          vus: VUS,
+          duration: DURATION,
+        },
+      },
+  thresholds: LOAD_VOC_MODE
+    ? {
+        voc_analysis_success_rate: ['rate>0.95'],
+      }
+    : {
+        http_req_failed: ['rate<0.05'],
+        http_req_duration: ['p(95)<1000'],
+      },
   // k6 기본 summaryTrendStats는 avg/min/med/max/p(90)/p(95)까지만 포함 - p(99)는 명시해야 나옴
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
 };
 
+function runVocAnalysisOnce() {
+  const startedAt = Date.now();
+  const payload = { use_board: true, use_jira: false, use_excel: false };
+  if (LOAD_VOC_FOCUS) payload.focus_instruction = LOAD_VOC_FOCUS;
+  const start = http.post(`${BASE_URL}/api/voc-analysis/run-async`, JSON.stringify(payload), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const started = check(start, { 'run-async accepted (200)': (r) => r.status === 200 });
+  if (!started) {
+    vocSuccessRate.add(false);
+    return;
+  }
+  const runId = JSON.parse(start.body).run_id;
+
+  for (let attempt = 0; attempt < LOAD_VOC_MAX_POLLS; attempt++) {
+    sleep(LOAD_VOC_POLL_INTERVAL_S);
+    const statusRes = http.get(`${BASE_URL}/api/voc-analysis/run-async/${runId}/status`);
+    const status = JSON.parse(statusRes.body).status;
+    if (status === 'done') {
+      vocCompletionTime.add((Date.now() - startedAt) / 1000);
+      vocSuccessRate.add(true);
+      return;
+    }
+    if (status === 'error' || status === 'canceled') {
+      vocCompletionTime.add((Date.now() - startedAt) / 1000);
+      vocSuccessRate.add(false);
+      return;
+    }
+  }
+  // 최대 폴링 횟수 안에 끝나지 않음(타임아웃) - 실패로 집계
+  vocSuccessRate.add(false);
+}
+
 export default function () {
+  if (LOAD_VOC_MODE) {
+    runVocAnalysisOnce();
+    return;
+  }
   const url = `${BASE_URL}${LOAD_PATH}`;
   const res = LOAD_UTTERANCE
     ? http.post(url, JSON.stringify({ [LOAD_REQUEST_FIELD]: LOAD_UTTERANCE }), {
@@ -83,11 +149,11 @@ function buildSummary(data) {
   const thresholds = buildThresholds(data);
   const thresholdsPassed = thresholds.every((t) => t.passed);
 
-  return {
+  const summary = {
     run_id: formatRunId(new Date()),
     tool: 'k6',
     target_url: BASE_URL,
-    target_path: LOAD_PATH,
+    target_path: LOAD_VOC_MODE ? '/api/voc-analysis/run-async' : LOAD_PATH,
     utterance: LOAD_UTTERANCE || null,
     request_field: LOAD_UTTERANCE ? LOAD_REQUEST_FIELD : null,
     scenario: SCENARIO_NAME,
@@ -108,6 +174,28 @@ function buildSummary(data) {
     thresholds_passed: thresholdsPassed,
     result: thresholdsPassed ? 'Pass' : 'Fail',
   };
+
+  // VOC 모드에서는 개별 HTTP 요청 시간(폴링 GET 포함)보다 "분석 1건이 실제로 끝나는 데
+  // 걸린 시간"이 의미 있는 지표라 별도 섹션으로 분리해 담는다(voc_analysis_completion_seconds
+  // Trend/voc_analysis_success_rate Rate, 스크립트 상단 참고).
+  if (LOAD_VOC_MODE) {
+    const completion = data.metrics.voc_analysis_completion_seconds
+      ? data.metrics.voc_analysis_completion_seconds.values
+      : null;
+    summary.voc_analysis = {
+      iterations_per_vu: LOAD_VOC_ITERATIONS,
+      total_runs: data.metrics.iterations ? data.metrics.iterations.values.count : null,
+      success_rate: data.metrics.voc_analysis_success_rate ? data.metrics.voc_analysis_success_rate.values.rate : null,
+      completion_seconds: completion && {
+        avg: round1(completion.avg),
+        min: round1(completion.min),
+        max: round1(completion.max),
+        p95: round1(completion['p(95)']),
+      },
+    };
+  }
+
+  return summary;
 }
 
 export function handleSummary(data) {

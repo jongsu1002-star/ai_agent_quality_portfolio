@@ -9,11 +9,19 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from collections import Counter
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from .llm_client import OpenAIJudgeClient
+
+
+class VocAnalysisCanceled(Exception):
+    """백그라운드(비동기) 실행 중 사용자가 취소를 요청했을 때, 아직 시작하지 않은 남은
+    단계(생성/내부재점검/독립Judge)를 건너뛰기 위한 신호용 예외 - 이미 보낸 LLM HTTP
+    요청 자체를 중간에 끊지는 못하지만(그건 현재 스택으로 불가능), 아직 시작 안 한 다음
+    단계로 넘어가지 않게 해 낭비되는 LLM 호출 수를 최소화한다."""
 
 MAX_ITEMS_FOR_PROMPT = 150
 MAX_CONTENT_CHARS = 500
@@ -33,12 +41,53 @@ def _truncate(text: str, limit: int = MAX_CONTENT_CHARS) -> str:
     return text if len(text) <= limit else text[:limit] + "..."
 
 
+# PII 마스킹 - VOC 원문에 섞여 들어올 수 있는 전화번호/이메일/주민등록번호를 LLM에 보내기
+# 전(정규화 단계)에 정규식으로 가려낸다. 화면 표시가 아니라 "프롬프트에 실제로 무엇이
+# 들어가는가"가 핵심이라, 여기(normalize_*)에서 한 번 처리해두면 Interpreter/Summarizer/
+# 내부재점검/독립Judge 등 이 items를 소비하는 모든 프롬프트가 자동으로 마스킹된 내용만
+# 받는다(각 프롬프트 빌더마다 따로 마스킹을 호출할 필요 없음). 완전한 PII 탐지를
+# 보증하지는 않는 표준적인 패턴 기반 완화 조치(정규식 기반 완화이지 100% 탐지가 아님).
+_RRN_RE = re.compile(r"\b\d{6}[-\s]?[1-4]\d{6}\b")
+_PHONE_RE = re.compile(r"01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}|0(?:2|[3-6][1-5])[-.\s]?\d{3,4}[-.\s]?\d{4}")
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+
+
+def _mask_rrn(match: "re.Match[str]") -> str:
+    digits = re.sub(r"\D", "", match.group(0))
+    return f"{digits[:6]}-*******"
+
+
+def _mask_phone(match: "re.Match[str]") -> str:
+    digits = re.sub(r"\D", "", match.group(0))
+    if len(digits) < 7:
+        return "[전화번호]"
+    return f"{digits[:3]}-****-{digits[-4:]}"
+
+
+def _mask_email(match: "re.Match[str]") -> str:
+    local, _, domain = match.group(0).partition("@")
+    masked_local = local[0] + "*" * (len(local) - 1) if len(local) > 1 else "*"
+    return f"{masked_local}@{domain}"
+
+
+def mask_pii(text: str) -> str:
+    """전화번호/이메일/주민등록번호를 부분 마스킹. 순서가 중요함 - 주민등록번호를
+    먼저 가리지 않으면 그 안의 6자리 숫자열이 전화번호 패턴과 우연히 겹쳐 잘못
+    마스킹될 수 있음."""
+    if not text:
+        return text
+    text = _RRN_RE.sub(_mask_rrn, text)
+    text = _PHONE_RE.sub(_mask_phone, text)
+    text = _EMAIL_RE.sub(_mask_email, text)
+    return text
+
+
 def normalize_board_post(post: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "source": "board",
         "id": f"post-{post.get('id')}",
         "date": post.get("created_at", ""),
-        "content": _truncate(f"[{post.get('title', '')}] {post.get('content', '')}"),
+        "content": _truncate(mask_pii(f"[{post.get('title', '')}] {post.get('content', '')}")),
     }
 
 
@@ -47,7 +96,7 @@ def normalize_jira_issue(issue: Dict[str, Any]) -> Dict[str, Any]:
         "source": "jira",
         "id": issue.get("key", ""),
         "date": issue.get("updated", ""),
-        "content": _truncate(f"{issue.get('summary', '')} - {issue.get('description', '')}"),
+        "content": _truncate(mask_pii(f"{issue.get('summary', '')} - {issue.get('description', '')}")),
     }
 
 
@@ -56,7 +105,7 @@ def normalize_excel_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "source": "excel",
         "id": f"excel-{row.get('source', '')}",
         "date": row.get("date", ""),
-        "content": _truncate(row.get("content", "")),
+        "content": _truncate(mask_pii(row.get("content", ""))),
     }
 
 
@@ -608,6 +657,7 @@ def run_voc_analysis_with_judge(
     focus_instruction: str = "",
     item_limit: int = MAX_ITEMS_FOR_PROMPT,
     cross_model: bool = True,
+    should_cancel: Optional[Callable[[], bool]] = None,
 ) -> Dict[str, Any]:
     """Interpreter(의도 분류) -> 생성 -> 내부 재점검/자가 교정(같은 모델) -> 독립 Judge(다른
     모델)로 원본 VOC까지 함께 보며 재검증 -> 결과에 병합.
@@ -616,12 +666,22 @@ def run_voc_analysis_with_judge(
     서로 다른 provider로 구성되는 것이 정상 경로(app/main.py::_independent_judge_kwargs가
     가능하면 반대 provider를 고름). 생성이 실패하면(ValueError/LLM 오류) 그대로 전파되어
     이후 단계(내부 재점검/독립 Judge)가 아예 일어나지 않음 - 실패한 산출물을 심사할 필요가 없음.
-    """
+
+    should_cancel: 백그라운드(비동기) 실행 전용 - 각 단계 시작 전에 호출해 True면
+    VocAnalysisCanceled를 던지고 즉시 중단한다(디폴트 None이면 동기 경로와 완전히
+    동일하게 동작 - 기존 호출부에 영향 없음)."""
+    def _check_canceled() -> None:
+        if should_cancel is not None and should_cancel():
+            raise VocAnalysisCanceled()
+
     items, source_counts = build_voc_items(board_posts, jira_issues, excel_rows, item_limit=item_limit)
     if not items:
         raise ValueError("분석할 VOC 데이터가 없습니다 (게시판/Jira/엑셀 모두 비어 있음)")
+    _check_canceled()
     interpreter_result = classify_voc_items(generation_client, items)
+    _check_canceled()
     result = _generate_analysis(generation_client, items, source_counts, focus_instruction, interpretations=interpreter_result.get("items"))
+    _check_canceled()
     result, self_check_info = _self_check_and_refine(generation_client, result, items, source_counts, focus_instruction)
     result["interpreter"] = interpreter_result
     result["self_check"] = self_check_info
@@ -634,6 +694,7 @@ def run_voc_analysis_with_judge(
         "recentness_verified": source_counts.get("recentness_verified", False),
         "undated_items_considered": source_counts.get("undated_considered", 0),
     }
+    _check_canceled()
     result["judge"] = run_independent_judge(judge_client, result, items, focus_instruction=focus_instruction, cross_model=cross_model)
     judge_verdict = result["judge"]["verdict"]
     independently_verified = judge_verdict == "PASS" and result["judge"].get("cross_model") is True

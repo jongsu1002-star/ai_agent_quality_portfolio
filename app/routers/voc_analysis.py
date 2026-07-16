@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Request, UploadFile, File
 from fastapi.responses import JSONResponse, Response
+from pydantic import BaseModel, Field, field_validator
 
 from qa_agent.board import BoardStore
 from qa_agent.excel_io import (
@@ -37,6 +38,42 @@ from qa_agent.voc_analysis import MAX_ITEMS_FOR_PROMPT, VocAnalysisCanceled, run
 
 router = APIRouter(prefix="/api/voc-analysis")
 logger = logging.getLogger(__name__)
+
+# focus_instruction 길이 상한 - 프롬프트에 실어 보내는 자유 텍스트라 지나치게 길면
+# 다른 필드(VOC 원문 등)를 밀어내거나 토큰 비용을 불필요하게 늘림. 2000자는 실제
+# 사용 사례("~중심으로 분석해줘" 수준의 문장 몇 개)보다 넉넉한 상한.
+FOCUS_INSTRUCTION_MAX_LENGTH = 2000
+
+
+class VocRunRequest(BaseModel):
+    """POST /run, /run-async 공용 요청 모델 - 기존 Dict[str, Any] 방식을 대체.
+
+    item_limit만 예외적으로 엄격한 타입을 강제하지 않고 Any로 받는다 - 기존 정책("1
+    미만/불리언은 400 거부, 150 초과는 조용히 클램프")을 그대로 유지해야 하는 하위호환
+    요구사항이 있어서, 이 필드만 _prepare_voc_run 안의 기존 수동 검증 로직을 그대로 쓴다
+    (Pydantic이 자동으로 422를 내려버리면 기존 400 계약이 깨짐). 나머지 필드는 Pydantic이
+    표준적으로 타입/범위를 강제(위반 시 422)."""
+
+    use_board: bool = True
+    use_jira: bool = False
+    jira_jql: Optional[str] = None
+    jira_max_results: int = Field(default=50, ge=1, le=200)
+    use_excel: bool = False
+    excel_path: Optional[str] = None
+    focus_instruction: Optional[str] = Field(default=None, max_length=FOCUS_INSTRUCTION_MAX_LENGTH)
+    item_limit: Optional[Any] = None
+
+    @field_validator("focus_instruction")
+    @classmethod
+    def _strip_focus_instruction(cls, value: Optional[str]) -> Optional[str]:
+        # Pydantic이 str 타입 자체는 이미 강제해줌(객체/배열/불리언 등은 여기 도달하기
+        # 전에 422로 거부됨) - 여기서는 앞뒤 공백만 정리하고, 공백만 있던 값은 "지정 안
+        # 함"과 동일하게 취급해 이후 로직이 빈 문자열/None을 매번 따로 신경 쓰지 않게 함.
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
 
 # 백그라운드(비동기) 실행 registry - app/main.py::RUN_REGISTRY(QA 파이프라인)와 동일한
 # 패턴을 VOC 분석에도 적용. 동기 엔드포인트(POST /run)는 하위 호환을 위해 그대로 두고,
@@ -209,17 +246,22 @@ def jira_preview(jql: Optional[str] = None, max_results: int = 50) -> JSONRespon
     return JSONResponse({"issues": issues, "count": len(issues)})
 
 
-def _prepare_voc_run(payload: Dict[str, Any], request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse]]:
+def _prepare_voc_run(payload: VocRunRequest, request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse]]:
     """검증 + 소스 수집(게시판/Jira/엑셀) + LLM 클라이언트 구성 - 동기(/run)와 비동기
     (/run-async) 두 실행 경로가 완전히 동일한 준비 과정을 공유한다(로직 중복/드리프트
     방지). 성공하면 (prepared, None), 검증 실패나 소스 조회 실패면 (None, 에러 응답)을
-    반환 - 호출부는 에러가 있으면 그대로 반환하면 된다."""
+    반환 - 호출부는 에러가 있으면 그대로 반환하면 된다.
+
+    payload는 Dict[str, Any] 대신 VocRunRequest(Pydantic)로 받는다 - focus_instruction의
+    타입/길이/공백은 이미 Pydantic이 강제했고(비-문자열 값은 여기 도달하기 전에 422),
+    jira_max_results도 이미 1~200 범위로 강제됐다. item_limit만 기존 하위호환 정책
+    (1 미만/불리언 400 거부, 150 초과 클램프)을 유지하려고 여기서 수동 검증한다."""
     board_posts: List[Dict[str, Any]] = []
-    if payload.get("use_board", True):
+    if payload.use_board:
         board_posts = _store().list_posts("voc", limit=300, include_hidden=False)
 
     jira_issues: List[Dict[str, Any]] = []
-    if payload.get("use_jira"):
+    if payload.use_jira:
         settings = _state["load_settings"]()
         jira_config = {
             "base_url": settings.get("jira_base_url"),
@@ -228,16 +270,16 @@ def _prepare_voc_run(payload: Dict[str, Any], request: Request) -> Tuple[Optiona
             "project_key": settings.get("jira_project"),
         }
         try:
-            jira_issues = fetch_backlog_issues(jira_config, jql=payload.get("jira_jql"), max_results=payload.get("jira_max_results", 50))
+            jira_issues = fetch_backlog_issues(jira_config, jql=payload.jira_jql, max_results=payload.jira_max_results)
         except Exception:
             logger.exception("VOC Jira retrieval failed")
             return None, JSONResponse({"error": "Jira 조회에 실패했습니다. 연결 설정과 권한을 확인하세요."}, status_code=502)
 
     excel_rows: List[Dict[str, Any]] = []
-    if payload.get("use_excel") and not payload.get("excel_path"):
+    if payload.use_excel and not payload.excel_path:
         return None, JSONResponse({"error": "엑셀 사용을 선택했지만 업로드된 파일이 없습니다"}, status_code=400)
-    if payload.get("use_excel") and payload.get("excel_path"):
-        resolved = _resolve_upload_path(payload["excel_path"], _username(request))
+    if payload.use_excel and payload.excel_path:
+        resolved = _resolve_upload_path(payload.excel_path, _username(request))
         if not resolved:
             return None, JSONResponse({"error": "invalid excel_path"}, status_code=400)
         loader = load_voc_json if resolved.suffix.lower() == ".json" else load_voc_excel
@@ -261,10 +303,11 @@ def _prepare_voc_run(payload: Dict[str, Any], request: Request) -> Tuple[Optiona
     independent_kwargs, cross_model = _state["independent_judge_kwargs"](settings)
     judge_client = OpenAIJudgeClient(**independent_kwargs)
 
-    focus_instruction = str(payload.get("focus_instruction") or "")
+    focus_instruction = payload.focus_instruction or ""  # Pydantic 검증기가 이미 strip/공백-only는 None으로 정리해둠
     # 사용자가 지정한 건수 제한("최근 20건만") - 1~MAX_ITEMS_FOR_PROMPT 범위로 clamp,
-    # 미지정이면 기본 상한 그대로 사용
-    raw_item_limit = payload.get("item_limit")
+    # 미지정이면 기본 상한 그대로 사용. item_limit은 기존 하위호환 정책을 유지해야 해서
+    # Pydantic Field 제약 대신 여기서 수동으로 검증(위 docstring 참고).
+    raw_item_limit = payload.item_limit
     item_limit = MAX_ITEMS_FOR_PROMPT
     if raw_item_limit is not None:
         try:
@@ -288,11 +331,11 @@ def _prepare_voc_run(payload: Dict[str, Any], request: Request) -> Tuple[Optiona
         "item_limit": item_limit,
         "username": _username(request),
         "params": {
-            "use_board": bool(payload.get("use_board", True)),
-            "use_jira": bool(payload.get("use_jira")),
-            "jira_jql": payload.get("jira_jql"),
-            "use_excel": bool(payload.get("use_excel")),
-            "excel_path": payload.get("excel_path"),
+            "use_board": payload.use_board,
+            "use_jira": payload.use_jira,
+            "jira_jql": payload.jira_jql,
+            "use_excel": payload.use_excel,
+            "excel_path": payload.excel_path,
             "focus_instruction": focus_instruction or None,
             "item_limit": item_limit,
         },
@@ -323,7 +366,7 @@ def _build_and_save_analysis_record(prepared: Dict[str, Any], result: Dict[str, 
 
 
 @router.post("/run")
-def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
+def run_analysis(payload: VocRunRequest, request: Request) -> JSONResponse:
     """게시판 VOC 글 + 선택적 Jira/엑셀 소스를 모아 LLM 분석을 동기 실행(요청을 끝까지
     붙들고 있음 - 수십 초 소요될 수 있음). 응답을 기다리지 않고 폴링하려면 POST
     /run-async를 쓸 것(같은 준비 로직을 공유하는 별도 경로, 하위 호환을 위해 이 동기
@@ -455,7 +498,7 @@ def _cleanup_voc_registry(username: str) -> None:
 
 
 @router.post("/run-async")
-def run_analysis_async(payload: Dict[str, Any], request: Request) -> JSONResponse:
+def run_analysis_async(payload: VocRunRequest, request: Request) -> JSONResponse:
     """VOC 분석을 백그라운드 스레드 풀(VOC_RUN_EXECUTOR)에 제출하고 즉시 run_id를
     반환(QA 파이프라인의 POST /api/run과 동일한 패턴). 진행 상태는 GET
     /run-async/{run_id}/status로, 완료된 결과는 GET /run-async/{run_id}/result로

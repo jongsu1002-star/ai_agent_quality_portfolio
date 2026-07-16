@@ -7,15 +7,18 @@ app/main.py와의 결합은 monitoring_addon.py/board.py와 동일하게 `config
 
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import os
 import re
+import time
 import uuid
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from threading import Lock, Thread
+from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Request, UploadFile, File
@@ -38,8 +41,25 @@ logger = logging.getLogger(__name__)
 # 백그라운드(비동기) 실행 registry - app/main.py::RUN_REGISTRY(QA 파이프라인)와 동일한
 # 패턴을 VOC 분석에도 적용. 동기 엔드포인트(POST /run)는 하위 호환을 위해 그대로 두고,
 # 이건 완전히 별도의 추가 경로(POST /run-async)라 기존 동작에는 영향이 없음.
-VOC_RUN_REGISTRY: Dict[str, Dict[str, Dict[str, Any]]] = {}  # username -> run_id -> {status, result, error, canceled}
+# username -> run_id -> {status, result, error, canceled, created_at, finished_at}
+VOC_RUN_REGISTRY: Dict[str, Dict[str, Dict[str, Any]]] = {}
 VOC_RUN_LOCK = Lock()
+
+# 사용자별 동시 실행 상한(고정) - 한 사용자가 여러 개를 동시에 큐에 넣어 자원을 독점하는
+# 것을 막음. 완료된 작업까지 포함한 "보관" 상한과 정리 주기, 그리고 전역 워커 수는
+# 배포 환경에 따라 조정할 수 있게 환경변수로 노출하되 안전한 기본값을 둠.
+VOC_RUN_MAX_CONCURRENT_PER_USER = 1
+VOC_RUN_MAX_STORED_PER_USER = int(os.getenv("VOC_RUN_MAX_STORED_PER_USER", "20"))
+VOC_RUN_FINISHED_TTL_SECONDS = int(os.getenv("VOC_RUN_FINISHED_TTL_SECONDS", str(6 * 3600)))
+VOC_RUN_MAX_WORKERS = int(os.getenv("VOC_RUN_MAX_WORKERS", "4"))
+
+# 요청마다 Thread(daemon=True)를 무제한으로 만들던 것을 고정 크기 풀로 제한 - 동시에
+# 몰리는 요청이 많아도 실제로 병렬 실행되는 LLM 파이프라인은 최대 VOC_RUN_MAX_WORKERS개뿐이고,
+# 나머지는 풀 내부 큐에서 "대기"하며 VOC_RUN_REGISTRY 상 상태는 그대로 queued로 남는다
+# (다중 uvicorn worker 프로세스 구성에서는 이 registry/executor가 프로세스별로 따로
+# 생기므로, 이 기능은 단일 worker 프로세스 배포를 전제로 함 - 설계서/운영 문서 참고).
+VOC_RUN_EXECUTOR = ThreadPoolExecutor(max_workers=VOC_RUN_MAX_WORKERS, thread_name_prefix="voc-analysis-run")
+atexit.register(lambda: VOC_RUN_EXECUTOR.shutdown(wait=False, cancel_futures=True))
 
 VOC_ANALYSIS_DIR = Path("reports") / "voc_analysis"
 VOC_UPLOAD_DIR = VOC_ANALYSIS_DIR / "uploads"
@@ -329,15 +349,38 @@ def run_analysis(payload: Dict[str, Any], request: Request) -> JSONResponse:
         logger.exception("VOC analysis generation failed")
         return JSONResponse({"error": "VOC 분석 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요."}, status_code=502)
 
-    record = _build_and_save_analysis_record(prepared, result)
+    try:
+        record = _build_and_save_analysis_record(prepared, result)
+    except Exception:
+        # 생성 자체는 성공했는데 저장 단계(디스크 가득 참, 권한 오류 등)에서 실패한 경우 -
+        # 비동기 경로(_execute_voc_analysis_async)와 동일한 결함 클래스라 같은 방식으로
+        # 방어함(내부 경로/예외 원문은 노출하지 않고 상세는 로그에만).
+        logger.exception("VOC analysis result save failed")
+        return JSONResponse({"error": "분석 결과를 저장하지 못했습니다. 서버 로그를 확인하거나 관리자에게 문의하세요."}, status_code=502)
     return JSONResponse(record)
 
 
+def _finish_voc_run(username: str, run_id: str, status: str, result: Optional[Dict[str, Any]] = None, error: Optional[str] = None) -> None:
+    """비동기 실행의 종료 상태(done/error/canceled) 기록을 한 곳으로 모음 - 세 가지
+    종료 경로(취소/생성 실패/저장 실패/성공) 모두 반드시 이 함수를 거치게 해서
+    finished_at 기록 누락이나 status="running" 고착을 구조적으로 방지한다."""
+    with VOC_RUN_LOCK:
+        entry = VOC_RUN_REGISTRY.get(username, {}).get(run_id)
+        if entry is None:
+            return  # cleanup 등으로 이미 registry에서 지워진 뒤(정상적인 레이스, 무시)
+        entry["status"] = status
+        entry["result"] = result
+        entry["error"] = error
+        entry["finished_at"] = time.time()
+
+
 def _execute_voc_analysis_async(username: str, run_id: str, prepared: Dict[str, Any]) -> None:
-    """백그라운드 스레드에서 실제 VOC 분석을 실행(POST /run-async가 이 함수를 스레드로
-    띄움) - app/main.py::_execute_run(QA 파이프라인)과 동일한 패턴. 예외가 나도 여기서
-    잡아 registry에 status="error"로 기록하므로 스레드가 죽어도 폴링하는 클라이언트에게는
-    정상적으로 실패 상태가 보임."""
+    """백그라운드 스레드 풀(VOC_RUN_EXECUTOR)에서 실제 VOC 분석을 실행(POST /run-async가
+    이 함수를 제출) - app/main.py::_execute_run(QA 파이프라인)과 동일한 패턴. 생성/저장
+    각 단계의 예외를 전부 잡아 registry에 status="error"로 기록하므로, 어느 단계에서
+    실패하든 클라이언트에게는 정상적으로 실패 상태가 보이고 status가 "running"에
+    영원히 고착되는 일이 없다(과거 결함: 저장 단계 예외가 이 함수 밖으로 새 나가
+    스레드만 조용히 죽고 registry는 running에 멈춰 있었음)."""
     with VOC_RUN_LOCK:
         VOC_RUN_REGISTRY[username][run_id]["status"] = "running"
 
@@ -353,46 +396,98 @@ def _execute_voc_analysis_async(username: str, run_id: str, prepared: Dict[str, 
             cross_model=prepared["cross_model"], should_cancel=_should_cancel,
         )
     except VocAnalysisCanceled:
-        with VOC_RUN_LOCK:
-            VOC_RUN_REGISTRY[username][run_id]["status"] = "canceled"
+        _finish_voc_run(username, run_id, "canceled")
         return
     except ValueError as exc:
-        with VOC_RUN_LOCK:
-            VOC_RUN_REGISTRY[username][run_id]["status"] = "error"
-            VOC_RUN_REGISTRY[username][run_id]["error"] = str(exc)
+        _finish_voc_run(username, run_id, "error", error=str(exc))
         return
     except Exception:
-        logger.exception("VOC analysis generation failed (async)")
-        with VOC_RUN_LOCK:
-            VOC_RUN_REGISTRY[username][run_id]["status"] = "error"
-            VOC_RUN_REGISTRY[username][run_id]["error"] = "VOC 분석 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요."
+        logger.exception("VOC analysis generation failed (async run_id=%s)", run_id)
+        _finish_voc_run(username, run_id, "error", error="VOC 분석 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요.")
         return
 
-    record = _build_and_save_analysis_record(prepared, result)
+    # 저장 단계도 반드시 여기서 잡아야 함 - 생성은 성공했는데 디스크 가득 참/권한 오류 등으로
+    # 저장이 실패하면, 이 try/except 없이는 예외가 그대로 밖으로 새 나가 status가
+    # "running"에 영원히 고착됨(폴링하는 클라이언트가 영원히 끝나기를 기다리게 됨).
+    try:
+        record = _build_and_save_analysis_record(prepared, result)
+    except Exception:
+        logger.exception("VOC analysis result save failed (async run_id=%s)", run_id)
+        _finish_voc_run(username, run_id, "error", error="분석 결과를 저장하지 못했습니다. 서버 로그를 확인하거나 관리자에게 문의하세요.")
+        return
+
+    _finish_voc_run(username, run_id, "done", result=record)
+
+
+def _cleanup_voc_registry_locked(username: str) -> None:
+    """VOC_RUN_LOCK을 이미 보유한 상태에서만 호출 - 실행 중(queued/running) 작업은
+    절대 건드리지 않고, 종료된(done/error/canceled) 작업만 두 기준으로 정리한다:
+    ① finished_at이 TTL(VOC_RUN_FINISHED_TTL_SECONDS)을 넘긴 것 ② 그러고도 사용자당
+    보관 개수가 VOC_RUN_MAX_STORED_PER_USER를 넘으면 오래된 것부터 제거. registry가
+    무한정 커지며 메모리를 갉아먹는 것을 막는 용도(완료돼도 아무도 안 지우면 프로세스가
+    떠 있는 한 계속 쌓이는 구조였음)."""
+    user_runs = VOC_RUN_REGISTRY.get(username)
+    if not user_runs:
+        return
+    now = time.time()
+    finished_statuses = ("done", "error", "canceled")
+
+    for rid in [rid for rid, entry in user_runs.items() if entry["status"] in finished_statuses]:
+        finished_at = user_runs[rid].get("finished_at")
+        if finished_at is not None and (now - finished_at) > VOC_RUN_FINISHED_TTL_SECONDS:
+            del user_runs[rid]
+
+    finished_ids = sorted(
+        (rid for rid, entry in user_runs.items() if entry["status"] in finished_statuses),
+        key=lambda rid: user_runs[rid].get("finished_at") or 0,
+    )
+    excess = len(finished_ids) - VOC_RUN_MAX_STORED_PER_USER
+    for rid in finished_ids[:max(excess, 0)]:
+        del user_runs[rid]
+
+
+def _cleanup_voc_registry(username: str) -> None:
+    """_cleanup_voc_registry_locked의 락 획득 버전 - 테스트 등 VOC_RUN_LOCK을 아직
+    보유하지 않은 외부 호출부용(락을 이미 쥔 상태에서 이 함수를 부르면 데드락이므로,
+    run_analysis_async 내부에서는 반드시 _locked 버전을 직접 호출할 것)."""
     with VOC_RUN_LOCK:
-        VOC_RUN_REGISTRY[username][run_id]["status"] = "done"
-        VOC_RUN_REGISTRY[username][run_id]["result"] = record
+        _cleanup_voc_registry_locked(username)
 
 
 @router.post("/run-async")
 def run_analysis_async(payload: Dict[str, Any], request: Request) -> JSONResponse:
-    """VOC 분석을 백그라운드 스레드로 실행하고 즉시 run_id를 반환(QA 파이프라인의
-    POST /api/run과 동일한 패턴). 진행 상태는 GET /run-async/{run_id}/status로,
-    완료된 결과는 GET /run-async/{run_id}/result로 폴링해서 조회. 요청 검증(LLM 미설정,
-    엑셀 경로 오류 등)은 스레드를 띄우기 전에 동기적으로 먼저 수행 - 어차피 실패할
-    요청을 위해 스레드를 만들 필요가 없고, 사용자도 400/502를 폴링 없이 즉시 받는다."""
+    """VOC 분석을 백그라운드 스레드 풀(VOC_RUN_EXECUTOR)에 제출하고 즉시 run_id를
+    반환(QA 파이프라인의 POST /api/run과 동일한 패턴). 진행 상태는 GET
+    /run-async/{run_id}/status로, 완료된 결과는 GET /run-async/{run_id}/result로
+    폴링해서 조회. 요청 검증(LLM 미설정, 엑셀 경로 오류 등)은 스레드를 띄우기 전에
+    동기적으로 먼저 수행 - 어차피 실패할 요청을 위해 스레드를 만들 필요가 없고,
+    사용자도 400/502를 폴링 없이 즉시 받는다.
+
+    사용자당 동시 실행은 VOC_RUN_MAX_CONCURRENT_PER_USER(1)로 제한 - 이미 queued나
+    running인 작업이 있으면 409를 반환하고 새 작업은 만들지 않는다(무제한 스레드 생성/
+    메모리 증가 방지의 핵심 방어선). 등록 자체는 VOC_RUN_LOCK 아래 원자적으로 처리해
+    동시에 들어온 두 요청이 동시성 검사를 모두 통과해버리는 경쟁 조건을 막는다."""
     prepared, error = _prepare_voc_run(payload, request)
     if error is not None:
         return error
 
     username = prepared["username"]
     with VOC_RUN_LOCK:
+        _cleanup_voc_registry_locked(username)
         user_runs = VOC_RUN_REGISTRY.setdefault(username, {})
+        active_id = next((rid for rid, entry in user_runs.items() if entry["status"] in ("queued", "running")), None)
+        if active_id is not None:
+            return JSONResponse(
+                {"error": "이미 실행 중인 VOC 분석이 있습니다. 완료된 뒤 다시 시도하세요.", "active_run_id": active_id},
+                status_code=409,
+            )
         run_id = f"voc_async_{uuid.uuid4().hex[:12]}"
-        user_runs[run_id] = {"status": "queued", "result": None, "error": None, "canceled": False}
+        user_runs[run_id] = {
+            "status": "queued", "result": None, "error": None, "canceled": False,
+            "created_at": time.time(), "finished_at": None,
+        }
 
-    thread = Thread(target=_execute_voc_analysis_async, args=(username, run_id, prepared), daemon=True)
-    thread.start()
+    VOC_RUN_EXECUTOR.submit(_execute_voc_analysis_async, username, run_id, prepared)
     return JSONResponse({"run_id": run_id, "status": "queued"})
 
 
@@ -404,7 +499,10 @@ def voc_run_async_status(run_id: str, request: Request) -> JSONResponse:
         entry = VOC_RUN_REGISTRY.get(username, {}).get(run_id)
         if entry is None:
             return JSONResponse({"error": "not found"}, status_code=404)
-        return JSONResponse({"run_id": run_id, "status": entry["status"], "error": entry.get("error")})
+        return JSONResponse({
+            "run_id": run_id, "status": entry["status"], "error": entry.get("error"),
+            "finished_at": entry.get("finished_at"),
+        })
 
 
 @router.get("/run-async/{run_id}/result")
@@ -438,13 +536,22 @@ def voc_run_async_cancel(run_id: str, request: Request) -> JSONResponse:
 
 def _write_analysis_record_atomically(analysis_id: str, record: Dict[str, Any], analysis_dir: Optional[Path] = None) -> None:
     """같은 디렉터리에 임시 파일로 먼저 쓴 뒤 os.replace()로 원자적 교체 - 쓰는 도중에
-    프로세스가 죽거나 같은 파일을 읽는 다른 요청이 있어도 반쯤 쓰인 JSON을 보는 일이 없음."""
+    프로세스가 죽거나 같은 파일을 읽는 다른 요청이 있어도 반쯤 쓰인 JSON을 보는 일이 없음.
+
+    쓰기나 교체 도중 실패하면(디스크 가득 참, 권한 오류 등) 임시 파일을 정리한 뒤 예외를
+    다시 던진다 - 호출부(동기 /run, 비동기 백그라운드 실행 모두)가 이 예외를 잡아 사용자
+    에게는 일반화된 오류만 보여주고 상세는 로그에 남기지만, 그 전에 `.{id}.json.tmp`
+    잔여 파일이 디스크에 계속 남는 것은 여기서 막는다."""
     target_dir = analysis_dir or VOC_ANALYSIS_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
     final_path = target_dir / f"{analysis_id}.json"
     tmp_path = target_dir / f".{analysis_id}.json.tmp"
-    tmp_path.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp_path, final_path)
+    try:
+        tmp_path.write_text(json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp_path, final_path)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 DOCS_DIR = Path("docs")

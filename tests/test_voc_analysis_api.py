@@ -44,6 +44,12 @@ def _fake_llm(monkeypatch):
         "independent_judge_kwargs",
         lambda settings: ({"provider": "anthropic", "api_key": "test-key"}, True),
     )
+    # VOC_RUN_REGISTRY는 모듈 전역이라 테스트 간에 그대로 남는다 - 로그인 없는 익명
+    # 클라이언트는 전부 "shared" 버킷을 공유하므로, 어느 테스트가 queued/running 상태를
+    # 남기고 끝나면(예: 동시성 409 테스트) 이후 테스트가 엉뚱하게 409를 받는 오염이
+    # 생김. 매 테스트 시작 전에 비워서 격리를 보장(기존 test_isolation_regression.py와
+    # 동일한 문제의식).
+    voc_analysis_module.VOC_RUN_REGISTRY.clear()
 
 
 def test_run_without_any_source_returns_400():
@@ -715,3 +721,197 @@ def test_run_async_cancel_on_finished_run_is_a_noop():
     late_cancel = client.post(f"/api/voc-analysis/run-async/{start['run_id']}/cancel")
     assert late_cancel.status_code == 200
     assert late_cancel.json()["canceled"] is False
+
+
+# ===================== P0-1: 저장 실패 시 running 고착 방지 =====================
+
+def test_run_async_save_failure_ends_in_error_not_stuck_running(monkeypatch):
+    """_build_and_save_analysis_record()가 저장 단계에서 실패해도(디스크 가득 참,
+    권한 오류 등을 흉내) status가 running에 영원히 남지 않고 error로 종료돼야 함 -
+    과거엔 이 호출이 try/except 밖에 있어 스레드가 조용히 죽고 registry는 running에
+    고착됐었음."""
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    def _boom(prepared, result):
+        raise OSError("disk full (시뮬레이션)")
+
+    monkeypatch.setattr(voc_analysis_module, "_build_and_save_analysis_record", _boom)
+
+    start = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False})
+    assert start.status_code == 200
+    run_id = start.json()["run_id"]
+
+    final = _poll_until(client, f"/api/voc-analysis/run-async/{run_id}/status", {"done", "error", "canceled"})
+    assert final["status"] == "error"
+    assert final["finished_at"] is not None
+    # 내부 경로/예외 원문(디스크 가득 참, disk full 등)이 사용자에게 노출되면 안 됨
+    assert "disk full" not in final["error"]
+    assert "OSError" not in final["error"]
+
+    # 실패한 작업은 부분 결과를 절대 반환하지 않음
+    result_response = client.get(f"/api/voc-analysis/run-async/{run_id}/result")
+    assert result_response.status_code == 404
+
+
+def test_run_async_save_failure_is_logged_with_full_detail(monkeypatch, caplog):
+    """사용자에게는 일반화된 메시지만 보이지만, 서버 로그에는 실제 예외가 남아야 함
+    (운영 중 원인 진단이 가능해야 하므로)."""
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    def _boom(prepared, result):
+        raise OSError("disk full (시뮬레이션)")
+
+    monkeypatch.setattr(voc_analysis_module, "_build_and_save_analysis_record", _boom)
+
+    with caplog.at_level("ERROR"):
+        start = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False}).json()
+        _poll_until(client, f"/api/voc-analysis/run-async/{start['run_id']}/status", {"done", "error", "canceled"})
+
+    assert "disk full" in caplog.text
+
+
+def test_sync_run_save_failure_returns_502_not_500(monkeypatch):
+    """동기 /run도 동일한 저장 함수를 공유하므로 같은 결함이 있었음 - 예외가 그대로
+    새 나가 처리되지 않은 500이 되는 대신, 기존 LLM 실패 경로와 동일하게 502로
+    우아하게 응답해야 함(기존 성공 응답 형식은 이 테스트 범위 밖 - 다른 테스트가 커버)."""
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    def _boom(prepared, result):
+        raise OSError("disk full (시뮬레이션)")
+
+    monkeypatch.setattr(voc_analysis_module, "_build_and_save_analysis_record", _boom)
+
+    response = client.post("/api/voc-analysis/run", json={"use_jira": False, "use_excel": False})
+    assert response.status_code == 502
+    assert "disk full" not in response.json()["error"]
+
+
+# ===================== P0-2: 동시 실행 제한 + registry 정리 =====================
+
+def test_run_async_second_concurrent_request_from_same_user_gets_409(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _SlowFakeClient)
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    first = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False})
+    assert first.status_code == 200
+    first_run_id = first.json()["run_id"]
+
+    second = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False})
+    assert second.status_code == 409
+    assert second.json()["active_run_id"] == first_run_id
+
+    # 정리: 첫 실행이 끝날 때까지 기다려 다음 테스트를 오염시키지 않음
+    _poll_until(client, f"/api/voc-analysis/run-async/{first_run_id}/status", {"done", "error", "canceled"}, timeout_s=5.0)
+
+
+def test_run_async_different_users_run_independently_without_409():
+    """사용자별 상한(1건)이지 전역 상한이 아니므로, 서로 다른 사용자는 동시에 각자
+    실행할 수 있어야 함."""
+    admin = TestClient(app)
+    assert admin.post("/signup", json={"username": "alice_p02", "password": "secret123"}).status_code == 200
+    admin.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    bob = TestClient(app)
+    assert bob.post("/signup", json={"username": "bob_p02", "password": "secret456"}).status_code == 200
+    assert admin.post("/api/users/bob_p02/approve").status_code == 200
+    assert bob.post("/login", json={"username": "bob_p02", "password": "secret456"}).status_code == 200
+
+    admin_start = admin.post("/api/voc-analysis/run-async", json={"use_board": True})
+    bob_start = bob.post("/api/voc-analysis/run-async", json={"use_board": True})
+    assert admin_start.status_code == 200
+    assert bob_start.status_code == 200
+    assert admin_start.json()["run_id"] != bob_start.json()["run_id"]
+
+    _poll_until(admin, f"/api/voc-analysis/run-async/{admin_start.json()['run_id']}/status", {"done", "error", "canceled"})
+    _poll_until(bob, f"/api/voc-analysis/run-async/{bob_start.json()['run_id']}/status", {"done", "error", "canceled"})
+
+
+def test_run_async_allows_new_run_after_previous_one_finished():
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    first = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False}).json()
+    _poll_until(client, f"/api/voc-analysis/run-async/{first['run_id']}/status", {"done", "error", "canceled"})
+
+    second = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False})
+    assert second.status_code == 200
+
+
+def test_cleanup_removes_finished_runs_past_ttl(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "VOC_RUN_FINISHED_TTL_SECONDS", 1)
+    username = "shared"
+    now = time.time()
+    voc_analysis_module.VOC_RUN_REGISTRY[username] = {
+        "old_done": {"status": "done", "result": {}, "error": None, "canceled": False, "finished_at": now - 10},
+        "fresh_done": {"status": "done", "result": {}, "error": None, "canceled": False, "finished_at": now},
+    }
+    voc_analysis_module._cleanup_voc_registry(username)
+    remaining = voc_analysis_module.VOC_RUN_REGISTRY[username]
+    assert "old_done" not in remaining
+    assert "fresh_done" in remaining
+
+
+def test_cleanup_never_removes_active_runs_regardless_of_age(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "VOC_RUN_FINISHED_TTL_SECONDS", 1)
+    username = "shared"
+    voc_analysis_module.VOC_RUN_REGISTRY[username] = {
+        "still_running": {"status": "running", "result": None, "error": None, "canceled": False, "finished_at": None},
+    }
+    voc_analysis_module._cleanup_voc_registry(username)
+    assert "still_running" in voc_analysis_module.VOC_RUN_REGISTRY[username]
+
+
+def test_cleanup_enforces_per_user_stored_cap_keeping_most_recent(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "VOC_RUN_MAX_STORED_PER_USER", 3)
+    monkeypatch.setattr(voc_analysis_module, "VOC_RUN_FINISHED_TTL_SECONDS", 10_000)  # TTL이 아니라 개수 상한만 검증
+    username = "shared"
+    now = time.time()
+    voc_analysis_module.VOC_RUN_REGISTRY[username] = {
+        f"run_{i}": {"status": "done", "result": {}, "error": None, "canceled": False, "finished_at": now - (10 - i)}
+        for i in range(5)  # run_0(가장 오래됨) ~ run_4(가장 최근)
+    }
+    voc_analysis_module._cleanup_voc_registry(username)
+    remaining = set(voc_analysis_module.VOC_RUN_REGISTRY[username])
+    assert remaining == {"run_2", "run_3", "run_4"}  # 최신 3개만 유지, 오래된 것부터 제거
+
+
+def test_voc_run_executor_wired_to_configured_max_workers():
+    """VOC_RUN_MAX_WORKERS 환경변수(기본값)가 실제로 실행 풀 크기에 반영돼 있는지 확인 -
+    이 값이 무제한이면 요청이 몰릴 때 스레드가 무한정 생성될 수 있음."""
+    assert voc_analysis_module.VOC_RUN_EXECUTOR._max_workers == voc_analysis_module.VOC_RUN_MAX_WORKERS
+    assert voc_analysis_module.VOC_RUN_MAX_WORKERS > 0
+
+
+def test_thread_pool_executor_never_exceeds_max_workers_under_load():
+    """ThreadPoolExecutor 자체가 max_workers를 실제로 지키는지 - 별도의 소규모 테스트
+    전용 풀로 확인(실제 VOC_RUN_EXECUTOR를 건드리면 다른 테스트에 영향을 줄 수 있어
+    분리)."""
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+
+    test_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="test-voc-run-cap")
+    concurrent_count = {"current": 0, "max_seen": 0}
+    lock = threading.Lock()
+    release_event = threading.Event()
+
+    def blocking_task():
+        with lock:
+            concurrent_count["current"] += 1
+            concurrent_count["max_seen"] = max(concurrent_count["max_seen"], concurrent_count["current"])
+        release_event.wait(timeout=5)
+        with lock:
+            concurrent_count["current"] -= 1
+
+    try:
+        futures = [test_executor.submit(blocking_task) for _ in range(6)]
+        time.sleep(0.3)  # 워커들이 작업을 집어들 시간을 줌
+        assert concurrent_count["max_seen"] <= 2
+        release_event.set()
+        for f in futures:
+            f.result(timeout=5)
+    finally:
+        test_executor.shutdown(wait=True)

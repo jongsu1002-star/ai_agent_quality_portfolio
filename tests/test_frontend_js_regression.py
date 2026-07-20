@@ -16,6 +16,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INDEX_HTML = REPO_ROOT / "app" / "templates" / "index.html"
+MONITORING_ADDON_HTML = REPO_ROOT / "app" / "templates" / "monitoring_addon.html"
 JS_REGRESSION_SCRIPT = REPO_ROOT / "tests" / "js" / "voc_polling_regression.js"
 JS_XVAL_REGRESSION_SCRIPT = REPO_ROOT / "tests" / "js" / "voc_cross_validation_regression.js"
 JS_STEP_CHECKLIST_SCRIPT = REPO_ROOT / "tests" / "js" / "step_checklist_regression.js"
@@ -74,6 +75,21 @@ def test_step_checklist_js_regression_suite_passes():
         f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
     )
     assert "0 failed" in result.stdout
+
+
+def test_k6_trigger_button_wired_to_progress_and_step_checklist():
+    """k6 성능테스트 실행도 다른 실행 버튼들과 동일하게 진행률 바 + 단계 체크리스트를
+    보여줘야 함(monitoring_addon.html은 index.html과 별도 문서라 컴포넌트를 자체
+    보유 - _renderStepChecklist 등)."""
+    html = MONITORING_ADDON_HTML.read_text(encoding="utf-8")
+    assert 'onclick="triggerK6Run()"' in html
+    assert 'id="k6-progress-track"' in html
+    assert 'id="k6-progress-fill"' in html
+    assert 'id="k6-trigger-status"' in html
+    assert "function _renderStepChecklist" in html
+    assert "function _parseK6DurationSeconds" in html
+    assert "function _setK6Progress" in html
+    assert "_renderStepChecklist(K6_STEP_LIST" in html
 
 
 def test_voc_run_button_wired_to_run_function():

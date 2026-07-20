@@ -5,7 +5,13 @@ __pycache__
 *.pyc
 .pytest_cache
 .pytest_runtime
+# 다른 도구(QA/모니터링 에이전트 등)가 이 저장소에서 테스트를 돌리며 만드는 임시
+# 런타임 디렉터리 - 권한이 제한돼 있어(Permission denied) 그대로 두면 docker build의
+# 컨텍스트 전송 단계 자체가 실패한다. 매번 새로운 타임스탬프 접미사로 새로 생기므로
+# (.qa_runtime_codex_20260720, .qa_monitor_full_20260720 등) 정확한 이름 대신 접두사
+# 패턴으로 넓게 잡아 앞으로 생길 변형에도 계속 대응하게 함.
 .qa_runtime_*
+.qa_monitor_*
 data
 reports
 *.env

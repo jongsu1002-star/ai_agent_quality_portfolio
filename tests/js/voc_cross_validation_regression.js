@@ -72,7 +72,7 @@ function buildSandbox({ checkboxStates, elementOverrides = {}, fetchImpl } = {})
   ids.forEach((id) => { elements[id] = makeElement(elementOverrides[id] || {}); });
 
   const boxes = checkboxStates || ['A', 'B', 'C', 'D'].map((value) => ({ value, checked: true }));
-  const calls = { alerts: [], showToast: [], loadVocCrossValidationHistory: 0, fetchBodies: [] };
+  const calls = { alerts: [], showToast: [], loadVocCrossValidationHistory: 0, fetchBodies: [], renderJudgeBadgeCalls: [] };
 
   const sandbox = {
     console,
@@ -95,6 +95,13 @@ function buildSandbox({ checkboxStates, elementOverrides = {}, fetchImpl } = {})
     escapeHtml: (s) => String(s),
     showToast: (msg, type) => { calls.showToast.push({ msg, type }); },
     loadVocCrossValidationHistory: () => { calls.loadVocCrossValidationHistory += 1; },
+    // _renderJudgeBadge는 _renderVocCrossValidationResult가 호출하지만, 정의 자체는 이
+    // 슬라이스(START_MARK~END_MARK) 밖(_renderVocResult 뒤)에 있어 여기 없음 - 실제
+    // 브라우저에서는 같은 <script> 안이라 함수 선언 호이스팅으로 정상 동작하지만, 이
+    // 슬라이스 테스트에서는 voc_polling_regression.js가 _renderVocResult를 스텁 처리하는
+    // 것과 동일한 이유로 스텁이 필요하다. 반환값(HTML)까지 검증하는 게 아니라 "올바른
+    // judge 객체로 호출됐는가"(= 근거 데이터가 실제로 전달되는가)만 기록한다.
+    _renderJudgeBadge: (judge) => { calls.renderJudgeBadgeCalls.push(judge); return '<div class="judge-badge-stub"></div>'; },
     _vocExcelPath: null,
     Date, JSON, Math, Object, Array, Number, String, Boolean, Promise, Error,
   };
@@ -194,6 +201,30 @@ check('실행 실패(에러 응답) 시 결과 영역에 에러 메시지를 표
   });
   await context.runVocCrossValidation();
   assert.ok(elements['voc-xval-result'].innerHTML.includes('이런 이유로 실패'));
+});
+
+// ── 5-1. 조합별 판정 근거(reasoning)가 실제로 화면 렌더링까지 전달됨 ────────────
+// "왜 FAIL인지 화면에서 알 수 없다"는 피드백에 따라 _renderVocCrossValidationResult가
+// 조합별 요약(summary)을 직접 표시하고, judge 객체(reasoning 포함)를 그대로
+// _renderJudgeBadge에 넘기는지 확인한다 - 실제 화면에 보이는 그 판정 배지/근거 문구를
+// 만드는 함수가 맞는 데이터를 받는지가 핵심이라, 배지의 HTML 형태 자체보다 이쪽을 검증.
+check('조합별 요약과 judge(근거 포함)가 결과 화면에 실제로 전달됨', async () => {
+  const matrix = [
+    {
+      group: 'A', purpose: '기본 품질검증',
+      summary: '상담 대기시간과 불친절에 대한 직접적인 언급이 없습니다.',
+      judge: { verdict: 'FAIL', criteria: {}, reasoning: '관련 근거가 없어 top_issues(개선안)가 비어 있습니다', cross_model: false, cross_model_configured: true, invalid_example_ids: [] },
+      quality_gate: { status: 'REJECTED', usable_for_policy_decision: false },
+    },
+  ];
+  const { context, elements, calls } = buildSandbox({
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ id: 'x', created_at: '2026-07-20T11:00:17', created_by: 'jongsu1002', result: { matrix } }) }),
+  });
+  await context.runVocCrossValidation();
+  assert.strictEqual(calls.renderJudgeBadgeCalls.length, 1, '매트릭스 항목 수만큼 _renderJudgeBadge가 호출돼야 함');
+  assert.strictEqual(calls.renderJudgeBadgeCalls[0].reasoning, matrix[0].judge.reasoning, '판정 근거(reasoning)가 그대로 전달돼야 함');
+  assert.ok(elements['voc-xval-result'].innerHTML.includes(matrix[0].summary), '조합별 요약이 화면에 표시돼야 함');
+  assert.ok(elements['voc-xval-result'].innerHTML.includes('REJECTED'), '품질 게이트 상태가 화면에 표시돼야 함');
 });
 
 // ── 6. 엑셀 사용을 켰는데 업로드가 안 됐으면 fetch 없이 안내만 ───────────────────

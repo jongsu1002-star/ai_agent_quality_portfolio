@@ -1099,24 +1099,34 @@ let _vocActiveRunId = null;
       }
     }
 
+    // 조합별 카드는 일반 VOC 분석 결과(_renderVocResult)와 동일한 컴포넌트(_renderJudgeBadge의
+    // 판정 배지·근거 문구, 품질 게이트 색상 박스)를 그대로 재사용한다 - 예전엔 조합/목적/판정만
+    // 보여주는 표라 "왜 FAIL인지"(judge.reasoning, 예: 근거 부족으로 top_issues가 비어
+    // 결정적으로 REJECTED된 경우)가 화면에 전혀 없어, 실제로 결함이 아닌 정상적인 게이트 동작도
+    // 원인을 확인하려면 저장된 JSON을 직접 열어봐야 했다.
     function _renderVocCrossValidationResult(record) {
       const matrix = (record.result && record.result.matrix) || [];
-      const rowsHtml = matrix.map(entry => {
+      const entriesHtml = matrix.map(entry => {
         const gate = entry.quality_gate || {};
         const gateApproved = gate.status === 'APPROVED';
-        return `<tr>
-          <td>${escapeHtml(_VOC_XVAL_GROUP_LABELS[entry.group] || entry.group)}</td>
-          <td>${escapeHtml(entry.purpose || '')}</td>
-          <td>${escapeHtml((entry.judge || {}).verdict || '')}</td>
-          <td style="color:${gateApproved ? '#166534' : '#991b1b'};">${escapeHtml(gate.status || '')}</td>
-        </tr>`;
+        const gateHtml = gate.status
+          ? `<p style="padding:0.65rem 0.8rem; border-radius:6px; background:${gateApproved ? '#dcfce7' : '#fee2e2'}; color:${gateApproved ? '#166534' : '#991b1b'}; margin-top:0.6rem;">
+              <strong>품질 게이트: ${escapeHtml(gate.status)}</strong>${gateApproved ? ' — 검증을 통과했습니다.' : ' — 정책 확정·승인 보고의 근거로 사용하지 마세요.'}
+            </p>`
+          : '';
+        return `
+          <div style="padding:0.9rem; border:1px solid var(--gridline); border-radius:10px; margin-top:0.7rem;">
+            <p style="margin:0 0 0.3rem;"><strong>${escapeHtml(_VOC_XVAL_GROUP_LABELS[entry.group] || entry.group)}</strong> <span class="chart-hint">- ${escapeHtml(entry.purpose || '')}</span></p>
+            ${entry.summary ? `<p class="chart-hint" style="margin:0 0 0.3rem;">${escapeHtml(entry.summary)}</p>` : ''}
+            ${_renderJudgeBadge(entry.judge)}
+            ${gateHtml}
+          </div>`;
       }).join('');
       document.getElementById('voc-xval-result').innerHTML = `
         <div class="card">
           <p class="chart-hint">${escapeHtml(record.created_at || '')} · ${escapeHtml(record.created_by || '')} · 교차검증 매트릭스 결과</p>
-          <table><thead><tr><th>조합</th><th>목적</th><th>판정</th><th>품질 게이트</th></tr></thead>
-            <tbody>${rowsHtml || '<tr><td colspan="4">결과 없음</td></tr>'}</tbody></table>
-          <p class="chart-hint">C/D(동일 모델 평가)가 A/B(교차 평가)보다 관대하게(PASS/APPROVED 쪽으로) 나온다면, 해당 모델이 자기 산출물을 스스로 채점할 때 편향될 수 있다는 신호입니다.</p>
+          ${entriesHtml || '<p class="chart-hint">결과 없음</p>'}
+          <p class="chart-hint" style="margin-top:0.8rem;">C/D(동일 모델 평가)가 A/B(교차 평가)보다 관대하게(PASS/APPROVED 쪽으로) 나온다면, 해당 모델이 자기 산출물을 스스로 채점할 때 편향될 수 있다는 신호입니다.</p>
         </div>`;
     }
 

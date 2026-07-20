@@ -49,6 +49,10 @@ logger = logging.getLogger(__name__)
 # 사용 사례("~중심으로 분석해줘" 수준의 문장 몇 개)보다 넉넉한 상한.
 FOCUS_INSTRUCTION_MAX_LENGTH = 2000
 
+# 실제 OpenAI/Anthropic API 키는 대략 50~160자 수준이라, 300자면 어떤 실제 키 형식도
+# 넉넉히 수용하면서 비정상적으로 큰 페이로드(악의적이든 실수든)는 요청 단계에서 거부한다.
+API_KEY_OVERRIDE_MAX_LENGTH = 300
+
 
 class VocRunRequest(BaseModel):
     """POST /run, /run-async 공용 요청 모델 - 기존 Dict[str, Any] 방식을 대체.
@@ -71,8 +75,8 @@ class VocRunRequest(BaseModel):
     # 모델에 얹은 이유는 이미 매트릭스 엔드포인트가 이 모델을 그대로 쓰고 있어서, 별도
     # 모델을 새로 만드는 것보다 필드 몇 개 추가하는 쪽이 더 단순함.
     groups: Optional[List[str]] = None  # 실행할 조합(A~D) 부분집합, 미지정 시 4개 전부
-    openai_api_key: Optional[str] = None  # 이번 실행에서만 쓸 키(비우면 설정 화면 저장값 사용)
-    anthropic_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = Field(default=None, max_length=API_KEY_OVERRIDE_MAX_LENGTH)  # 이번 실행에서만 쓸 키(비우면 설정 화면 저장값 사용)
+    anthropic_api_key: Optional[str] = Field(default=None, max_length=API_KEY_OVERRIDE_MAX_LENGTH)
 
     @field_validator("focus_instruction", "openai_api_key", "anthropic_api_key")
     @classmethod

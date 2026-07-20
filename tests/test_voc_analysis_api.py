@@ -1189,6 +1189,22 @@ def test_cross_validation_matrix_api_key_override_is_used_instead_of_settings(mo
     assert ("anthropic", "sk-override-anthropic") in _XValFakeClient.created_api_keys
 
 
+def test_cross_validation_matrix_api_key_override_rejects_oversized_value(monkeypatch):
+    """비정상적으로 긴 값(예: 실수로 파일 내용을 통째로 붙여넣거나 악의적인 큰 페이로드)이
+    실제 API 호출까지 가지 않고 요청 단계(422)에서 거부돼야 한다."""
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    oversized_key = "sk-" + ("a" * 400)
+    run = client.post("/api/voc-analysis/cross-validation-matrix", json={
+        "use_board": True,
+        "openai_api_key": oversized_key,
+    })
+    assert run.status_code == 422
+    assert _XValFakeClient.created_api_keys == []  # 클라이언트 생성 자체를 시도하지 않음
+
+
 def test_cross_validation_matrix_api_key_override_never_saved_to_history(monkeypatch):
     """이 매트릭스 이력은 전원 공개(모든 사용자가 조회 가능)이므로, 요청에 실어보낸 override
     키가 저장된 레코드(params)나 이력 목록·상세 응답 어디에도 절대 그대로 남으면 안 된다."""

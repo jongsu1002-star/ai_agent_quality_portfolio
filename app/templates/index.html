@@ -1091,6 +1091,11 @@ let _vocActiveRunId = null;
       } finally {
         btn.disabled = false;
         btn.textContent = '교차검증 매트릭스 실행';
+        // 요청에 실은 override 키는 서버에 저장되지 않지만, 성공/실패와 무관하게 입력란
+        // 자체는 여기서 비운다 - 같은 브라우저를 다음 사람이 쓰거나 화면을 오래 열어두면
+        // DOM에 평문으로 남아있는 것 자체가 위험이라, 요청 1회를 넘어서 남길 이유가 없음.
+        document.getElementById('voc-xval-openai-key').value = '';
+        document.getElementById('voc-xval-anthropic-key').value = '';
       }
     }
 

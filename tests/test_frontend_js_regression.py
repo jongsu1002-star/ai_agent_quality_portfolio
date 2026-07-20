@@ -17,6 +17,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 INDEX_HTML = REPO_ROOT / "app" / "templates" / "index.html"
 JS_REGRESSION_SCRIPT = REPO_ROOT / "tests" / "js" / "voc_polling_regression.js"
+JS_XVAL_REGRESSION_SCRIPT = REPO_ROOT / "tests" / "js" / "voc_cross_validation_regression.js"
 
 
 def _node_available() -> bool:
@@ -34,6 +35,23 @@ def test_voc_polling_js_regression_suite_passes():
     )
     assert result.returncode == 0, (
         f"voc_polling_regression.js 실패(exit={result.returncode})\n"
+        f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+    )
+    assert "0 failed" in result.stdout
+
+
+@pytest.mark.skipif(not _node_available(), reason="node 실행 파일을 찾을 수 없어 JS 회귀 테스트를 건너뜁니다")
+def test_voc_cross_validation_js_regression_suite_passes():
+    """tests/js/voc_cross_validation_regression.js의 9개 체크(그룹 미선택 시 차단, 선택한
+    그룹만 요청에 실림, API 키 trim/null 처리, 성공·실패·네트워크예외 모두에서 키 입력란
+    정리, 이력 갱신/토스트, 엑셀 미업로드 차단)가 전부 통과하는지 확인 - HTML 문자열
+    존재 여부만 보는 아래 wired 테스트와 달리 실제 함수 로직을 Node vm으로 실행해 검증한다."""
+    result = subprocess.run(
+        ["node", str(JS_XVAL_REGRESSION_SCRIPT)],
+        cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    assert result.returncode == 0, (
+        f"voc_cross_validation_regression.js 실패(exit={result.returncode})\n"
         f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
     )
     assert "0 failed" in result.stdout

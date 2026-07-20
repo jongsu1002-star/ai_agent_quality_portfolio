@@ -1063,6 +1063,65 @@ def test_run_cross_validation_matrix_groups_filters_output_and_skips_unneeded_ge
     assert "anthropic" not in result["generations"]  # anthropic 생성은 아예 안 함
 
 
+def test_run_cross_validation_matrix_groups_b_alone_skips_openai_generation():
+    """B는 Anthropic 생성/OpenAI 평가라, A와 정반대 방향으로 호출이 줄어야 한다 - OpenAI는
+    평가 1회만(생성 없음), Anthropic은 생성 1회만(평가 없음)."""
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    result = run_cross_validation_matrix(openai_client, anthropic_client, _matrix_board_posts(), [], [], groups=["B"])
+
+    assert [entry["group"] for entry in result["matrix"]] == ["B"]
+    assert len(openai_client.calls) == 1  # 평가만
+    assert len(anthropic_client.calls) == 1  # 생성만
+    assert "anthropic" in result["generations"]
+    assert "openai" not in result["generations"]
+
+
+def test_run_cross_validation_matrix_groups_c_alone_never_touches_anthropic():
+    """C는 OpenAI 생성/OpenAI 평가(동일 모델 대조군)라, 선택된 조합이 C 하나뿐이면
+    Anthropic 클라이언트는 (활성화 검증 이후) 단 한 번도 호출되지 않아야 한다 - OpenAI만
+    생성 1회+평가 1회=2회."""
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    result = run_cross_validation_matrix(openai_client, anthropic_client, _matrix_board_posts(), [], [], groups=["C"])
+
+    assert [entry["group"] for entry in result["matrix"]] == ["C"]
+    assert len(openai_client.calls) == 2  # 생성 1 + 평가 1
+    assert len(anthropic_client.calls) == 0  # 전혀 호출 안 됨
+    assert "openai" in result["generations"]
+    assert "anthropic" not in result["generations"]
+
+
+def test_run_cross_validation_matrix_groups_d_alone_never_touches_openai():
+    """C의 대칭 케이스 - D만 고르면 OpenAI는 전혀 호출되지 않아야 한다."""
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    result = run_cross_validation_matrix(openai_client, anthropic_client, _matrix_board_posts(), [], [], groups=["D"])
+
+    assert [entry["group"] for entry in result["matrix"]] == ["D"]
+    assert len(anthropic_client.calls) == 2  # 생성 1 + 평가 1
+    assert len(openai_client.calls) == 0  # 전혀 호출 안 됨
+    assert "anthropic" in result["generations"]
+    assert "openai" not in result["generations"]
+
+
+def test_run_cross_validation_matrix_groups_combo_a_and_d_uses_both_providers_asymmetrically():
+    """A+D 조합처럼 서로 다른 대조/교차 조합을 함께 고르면, 두 provider 모두 생성이
+    필요해지고 호출 수도 비대칭으로 늘어난다 - A는 OpenAI 생성만 쓰고, D는 Anthropic
+    생성+Anthropic 평가를 쓰며, A의 평가도 Anthropic이 맡으므로 Anthropic 쪽 호출이
+    OpenAI보다 많아야 한다."""
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    result = run_cross_validation_matrix(
+        openai_client, anthropic_client, _matrix_board_posts(), [], [], groups=["A", "D"],
+    )
+
+    assert [entry["group"] for entry in result["matrix"]] == ["A", "D"]
+    assert len(openai_client.calls) == 1  # A의 생성만
+    assert len(anthropic_client.calls) == 3  # D의 생성 1 + A의 평가 1 + D의 평가 1
+    assert set(result["generations"]) == {"openai", "anthropic"}
+
+
 def test_run_cross_validation_matrix_groups_dedupes_and_preserves_display_order():
     """groups에 중복/역순으로 넣어도 결과는 항상 A→D 표시 순서를 유지해야 함(UI 일관성)."""
     openai_client = _FakeProviderClient("openai")

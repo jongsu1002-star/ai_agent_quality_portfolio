@@ -614,6 +614,39 @@ def test_run_voc_analysis_with_judge_attaches_verdict():
     assert result["interpreter"]["items"]["post-1"]["intent"] == "complaint"
 
 
+def test_run_voc_analysis_with_judge_reports_stages_in_order():
+    """실행 버튼에 단계별 진행사항을 보여주는 기능(on_stage)의 핵심 계약 - 각 단계 시작
+    직전에 정확히 그 순서로 콜백이 호출돼야 화면의 단계 체크리스트가 실제 진행과 어긋나지
+    않는다."""
+    generation_client = _FakeJudgeClient([
+        {"classifications": [{"id": "post-1", "intent": "complaint", "topic": "대기시간"}]},
+        _VALID_ANALYSIS_RESULT,
+        _VALID_JUDGE_VERDICT_PASS,
+    ])
+    judge_client = _FakeJudgeClient(_VALID_JUDGE_VERDICT_PASS)
+    board_posts = [{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}]
+    stages = []
+
+    run_voc_analysis_with_judge(generation_client, judge_client, board_posts, [], [], on_stage=stages.append)
+
+    assert stages == ["의도 분류 중", "분석 생성 중", "자가 재점검 중", "독립 검증 중"]
+
+
+def test_run_voc_analysis_with_judge_on_stage_none_by_default():
+    """on_stage를 넘기지 않으면(디폴트 None) 기존 호출부에 전혀 영향이 없어야 함 - should_cancel과
+    동일한 하위호환 계약."""
+    generation_client = _FakeJudgeClient([
+        {"classifications": [{"id": "post-1", "intent": "complaint", "topic": "대기시간"}]},
+        _VALID_ANALYSIS_RESULT,
+        _VALID_JUDGE_VERDICT_PASS,
+    ])
+    judge_client = _FakeJudgeClient(_VALID_JUDGE_VERDICT_PASS)
+    board_posts = [{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}]
+
+    result = run_voc_analysis_with_judge(generation_client, judge_client, board_posts, [], [])
+    assert result["judge"]["verdict"] == "PASS"
+
+
 def test_run_voc_analysis_with_judge_reports_fail_verdict():
     """test_pipeline_result_with_llm_judge에 해당: 독립 Judge가 FAIL을 매기면 그대로 노출됨(숨기지 않음)."""
     generation_client = _FakeJudgeClient(_VALID_ANALYSIS_RESULT)
@@ -1151,3 +1184,37 @@ def test_run_cross_validation_matrix_empty_groups_list_raises():
     anthropic_client = _FakeProviderClient("anthropic")
     with pytest.raises(ValueError, match="선택"):
         run_cross_validation_matrix(openai_client, anthropic_client, _matrix_board_posts(), [], [], groups=[])
+
+
+def test_run_cross_validation_matrix_reports_stages_in_deterministic_order_all_groups():
+    """실행 버튼 단계 표시 기능의 핵심 계약 - 4개 전부 선택 시 provider 생성(선택된 조합
+    순서상 처음 등장하는 순서, OpenAI가 A에서 먼저 나오므로 OpenAI→Anthropic) 다음 조합
+    평가(A→D)가 그 순서 그대로 보고돼야 한다. 예전엔 needed_generation_providers가 set이라
+    이 순서가 해시 기반으로 사실상 비결정적이었던 것을 리스트로 바꿔 고정했다(회귀 테스트)."""
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    stages = []
+    run_cross_validation_matrix(openai_client, anthropic_client, _matrix_board_posts(), [], [], on_stage=stages.append)
+    assert stages == [
+        "OpenAI 생성 중", "Anthropic 생성 중",
+        "A 조합 평가 중", "B 조합 평가 중", "C 조합 평가 중", "D 조합 평가 중",
+    ]
+
+
+def test_run_cross_validation_matrix_reports_stages_for_partial_selection():
+    """C만 선택하면(생성=OpenAI, 평가=OpenAI) Anthropic 생성 단계 자체가 아예 보고되지
+    않아야 한다 - 실제로 호출되지 않는 단계를 화면에 예고하면 체크리스트가 영원히
+    "진행 중"에 머무는 것처럼 보이는 결함이 됨."""
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    stages = []
+    run_cross_validation_matrix(openai_client, anthropic_client, _matrix_board_posts(), [], [], groups=["C"], on_stage=stages.append)
+    assert stages == ["OpenAI 생성 중", "C 조합 평가 중"]
+
+
+def test_run_cross_validation_matrix_on_stage_none_by_default():
+    """on_stage를 넘기지 않으면(디폴트 None) 기존 호출부에 전혀 영향이 없어야 함."""
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    result = run_cross_validation_matrix(openai_client, anthropic_client, _matrix_board_posts(), [], [])
+    assert {entry["group"] for entry in result["matrix"]} == {"A", "B", "C", "D"}

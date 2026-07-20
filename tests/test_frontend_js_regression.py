@@ -18,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 INDEX_HTML = REPO_ROOT / "app" / "templates" / "index.html"
 JS_REGRESSION_SCRIPT = REPO_ROOT / "tests" / "js" / "voc_polling_regression.js"
 JS_XVAL_REGRESSION_SCRIPT = REPO_ROOT / "tests" / "js" / "voc_cross_validation_regression.js"
+JS_STEP_CHECKLIST_SCRIPT = REPO_ROOT / "tests" / "js" / "step_checklist_regression.js"
 
 
 def _node_available() -> bool:
@@ -52,6 +53,24 @@ def test_voc_cross_validation_js_regression_suite_passes():
     )
     assert result.returncode == 0, (
         f"voc_cross_validation_regression.js 실패(exit={result.returncode})\n"
+        f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+    )
+    assert "0 failed" in result.stdout
+
+
+@pytest.mark.skipif(not _node_available(), reason="node 실행 파일을 찾을 수 없어 JS 회귀 테스트를 건너뜁니다")
+def test_step_checklist_js_regression_suite_passes():
+    """tests/js/step_checklist_regression.js의 6개 체크(진행/완료/대기 상태 표시, 전체
+    완료, 실패 단계 표시, HTML 이스케이프, 순서 유지)가 전부 통과하는지 확인 -
+    renderStepChecklist는 QA 파이프라인/VOC 분석/교차검증 매트릭스/업로드 3종이 전부
+    공유하는 컴포넌트라 다른 슬라이스 테스트들은 이를 스텁으로 대체하고, 이 파일에서
+    실제 구현을 직접 검증한다."""
+    result = subprocess.run(
+        ["node", str(JS_STEP_CHECKLIST_SCRIPT)],
+        cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    assert result.returncode == 0, (
+        f"step_checklist_regression.js 실패(exit={result.returncode})\n"
         f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
     )
     assert "0 failed" in result.stdout

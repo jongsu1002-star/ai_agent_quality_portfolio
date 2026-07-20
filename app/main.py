@@ -1251,6 +1251,11 @@ def _execute_run(username: str, run_id: str, techniques: List[str], category_fil
     with RUN_LOCK:
         RUN_REGISTRY[username][run_id]["status"] = "running"
 
+    def _set_stage(stage: str) -> None:
+        with RUN_LOCK:
+            RUN_REGISTRY[username][run_id]["stage"] = stage
+
+    _set_stage("데이터 준비 중")
     try:
         # 클라이언트가 dataset_path/testcase_path 키를 명시적으로 보냈다면(화면에 보이는 활성
         # 값을 그대로 실어 보낸 것) 그 값을 그대로 신뢰 - 서버의 ACTIVE_* 값은 다른 탭에서
@@ -1298,18 +1303,23 @@ def _execute_run(username: str, run_id: str, techniques: List[str], category_fil
             with RUN_LOCK:
                 RUN_REGISTRY[username][run_id]["progress"] = {"completed": done, "total": total}
 
+        _set_stage("평가 실행 중")
         report = PipelineOrchestrator(config).run(cases, category_filter=category_filter, techniques=techniques, run_id=run_id, on_progress=on_progress, dataset_path=dataset_path, testcase_path=testcase_path)
         report.executed_by = username
+        _set_stage("리포트 저장 중")
         write_reports(report, reports_dir=str(_user_reports_dir(username)))
         write_defect_report_doc(report.to_dict(), docs_dir=_defect_report_docs_dir(username))
 
         jira_tickets: List[Dict[str, Any]] = []
         if not payload.get("no_jira"):
+            _set_stage("Jira 티켓 생성 중")
             jira_config = payload.get("jira_config") or {}
             jira_tickets = JiraNotifier({"enabled": bool(jira_config.get("base_url") or jira_config.get("email") or jira_config.get("api_token")), **jira_config}).notify(report.to_dict())
             if jira_tickets:
                 (_user_reports_dir(username) / f"jira_{run_id}.json").write_text(json.dumps(jira_tickets, indent=2), encoding="utf-8")
 
+        if payload.get("slack_webhook_url") or payload.get("discord_webhook_url") or payload.get("teams_webhook_url"):
+            _set_stage("알림 발송 중")
         if payload.get("slack_webhook_url"):
             SlackNotifier(payload["slack_webhook_url"]).notify(report.to_dict())
         if payload.get("discord_webhook_url"):
@@ -1319,9 +1329,12 @@ def _execute_run(username: str, run_id: str, techniques: List[str], category_fil
 
         with RUN_LOCK:
             RUN_REGISTRY[username][run_id]["status"] = "done"
+            RUN_REGISTRY[username][run_id]["stage"] = "완료"
             RUN_REGISTRY[username][run_id]["result"] = report.to_dict()
             RUN_REGISTRY[username][run_id]["jira_tickets"] = jira_tickets
     except Exception as exc:
+        # stage는 일부러 덮어쓰지 않음 - 실패 시점에 마지막으로 기록됐던 단계 이름을 그대로
+        # 남겨둬야, 폴링하는 화면이 "어느 단계에서 실패했는지"를 정확히 표시할 수 있다.
         with RUN_LOCK:
             RUN_REGISTRY[username][run_id]["status"] = "error"
             RUN_REGISTRY[username][run_id]["error"] = str(exc)
@@ -1359,7 +1372,7 @@ def run_pipeline(request: Request, payload: Optional[Dict[str, Any]] = None) -> 
     with RUN_LOCK:
         user_runs = RUN_REGISTRY.setdefault(username, {})
         run_id = f"run_{len(user_runs) + 1}"
-        user_runs[run_id] = {"status": "queued", "progress": {"completed": 0, "total": 1}, "result": None, "error": None, "jira_tickets": []}
+        user_runs[run_id] = {"status": "queued", "stage": "대기 중", "progress": {"completed": 0, "total": 1}, "result": None, "error": None, "jira_tickets": []}
 
     thread = Thread(target=_execute_run, args=(username, run_id, techniques, category_filter, payload), daemon=True)
     thread.start()

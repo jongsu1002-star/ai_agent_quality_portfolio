@@ -503,32 +503,23 @@ def _build_matrix_clients(
 _CROSS_VALIDATION_GROUP_LETTERS = ("A", "B", "C", "D")
 
 
-@router.post("/cross-validation-matrix")
-def run_cross_validation(payload: VocRunRequest, request: Request) -> JSONResponse:
-    """같은 VOC 데이터로 OpenAI/Anthropic을 각각 생성·평가에 돌려 A(OpenAI 생성/Anthropic
-    평가)·B(Anthropic 생성/OpenAI 평가)·C(OpenAI 생성/OpenAI 평가, 대조군)·D(Anthropic
-    생성/Anthropic 평가, 대조군) 4가지 조합을 비교하는 실험 모드. 운영용 POST /run과
-    달리 OpenAI/Anthropic 키가 **모두** 설정되어 있어야 하고, LLM 호출이 늘어나(생성
-    2회 + 평가 4회) 더 오래 걸릴 수 있다. 요청 본문 형식은 POST /run과 동일(item_limit
-    정책도 동일하게 수동 검증).
-
-    payload.groups: A~D 중 이번 실행에 포함할 조합(선택, 미지정 시 4개 전부). 일부만
-    고르면 실제로 필요한 provider만 생성 호출을 수행해 비용/시간을 아낀다(예: A만 고르면
-    OpenAI 생성 1회 + Anthropic 평가 1회로 끝남).
-    payload.openai_api_key / anthropic_api_key: 이번 실행에서만 쓸 키(선택, 비우면
-    설정 화면에 저장된 키 사용) - 저장 이력(params)에는 절대 포함하지 않는다."""
+def _prepare_xval_run(payload: VocRunRequest, request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[JSONResponse]]:
+    """검증 + 소스 수집 + 클라이언트 구성 - 동기(POST /cross-validation-matrix)와 비동기
+    (POST .../run-async) 두 실행 경로가 완전히 동일한 준비 과정을 공유한다(_prepare_voc_run과
+    동일한 이유: 로직 중복/드리프트 방지). 성공하면 (prepared, None), 검증 실패면
+    (None, 에러 응답)을 반환."""
     sources, error = _gather_voc_sources(payload, request)
     if error is not None:
-        return error
+        return None, error
 
     groups: Optional[List[str]] = None
     if payload.groups is not None:
         normalized_groups = [str(g).strip().upper() for g in payload.groups]
         invalid = [g for g in normalized_groups if g not in _CROSS_VALIDATION_GROUP_LETTERS]
         if invalid:
-            return JSONResponse({"error": f"groups에 알 수 없는 조합이 포함되어 있습니다: {invalid} (A/B/C/D만 가능)"}, status_code=400)
+            return None, JSONResponse({"error": f"groups에 알 수 없는 조합이 포함되어 있습니다: {invalid} (A/B/C/D만 가능)"}, status_code=400)
         if not normalized_groups:
-            return JSONResponse({"error": "groups를 지정하는 경우 최소 1개 이상 선택해야 합니다"}, status_code=400)
+            return None, JSONResponse({"error": "groups를 지정하는 경우 최소 1개 이상 선택해야 합니다"}, status_code=400)
         # 원래 표시 순서(A→D)로 정렬하고 중복은 제거
         groups = [g for g in _CROSS_VALIDATION_GROUP_LETTERS if g in normalized_groups]
 
@@ -548,16 +539,61 @@ def run_cross_validation(payload: VocRunRequest, request: Request) -> JSONRespon
                 raise ValueError
             parsed_item_limit = int(raw_item_limit)
         except (TypeError, ValueError):
-            return JSONResponse({"error": "item_limit은 숫자여야 합니다"}, status_code=400)
+            return None, JSONResponse({"error": "item_limit은 숫자여야 합니다"}, status_code=400)
         if parsed_item_limit < 1:
-            return JSONResponse({"error": "item_limit은 1 이상이어야 합니다"}, status_code=400)
+            return None, JSONResponse({"error": "item_limit은 1 이상이어야 합니다"}, status_code=400)
         item_limit = min(parsed_item_limit, MAX_ITEMS_FOR_PROMPT)
+
+    prepared = {
+        "openai_client": openai_client,
+        "anthropic_client": anthropic_client,
+        "board_posts": sources["board_posts"],
+        "jira_issues": sources["jira_issues"],
+        "excel_rows": sources["excel_rows"],
+        "focus_instruction": focus_instruction,
+        "item_limit": item_limit,
+        "groups": groups,
+        "username": _username(request),
+        "params": {
+            "use_board": payload.use_board,
+            "use_jira": payload.use_jira,
+            "jira_jql": payload.jira_jql,
+            "use_excel": payload.use_excel,
+            "excel_path": payload.excel_path,
+            "focus_instruction": focus_instruction or None,
+            "item_limit": item_limit,
+            "groups": groups or list(_CROSS_VALIDATION_GROUP_LETTERS),
+            # openai_api_key/anthropic_api_key는 의도적으로 여기 포함하지 않음(전원 공개 이력에 새는 것 방지)
+        },
+    }
+    return prepared, None
+
+
+@router.post("/cross-validation-matrix")
+def run_cross_validation(payload: VocRunRequest, request: Request) -> JSONResponse:
+    """같은 VOC 데이터로 OpenAI/Anthropic을 각각 생성·평가에 돌려 A(OpenAI 생성/Anthropic
+    평가)·B(Anthropic 생성/OpenAI 평가)·C(OpenAI 생성/OpenAI 평가, 대조군)·D(Anthropic
+    생성/Anthropic 평가, 대조군) 4가지 조합을 비교하는 실험 모드. 운영용 POST /run과
+    달리 OpenAI/Anthropic 키가 **모두** 설정되어 있어야 하고, LLM 호출이 늘어나(생성
+    2회 + 평가 4회) 더 오래 걸릴 수 있다. 요청 본문 형식은 POST /run과 동일(item_limit
+    정책도 동일하게 수동 검증). 응답을 기다리지 않고 폴링하려면 POST .../run-async를
+    쓸 것(같은 준비 로직을 공유하는 별도 경로 - VOC 분석의 /run vs /run-async와 동일한
+    관계, 하위 호환을 위해 이 동기 경로는 그대로 유지).
+
+    payload.groups: A~D 중 이번 실행에 포함할 조합(선택, 미지정 시 4개 전부). 일부만
+    고르면 실제로 필요한 provider만 생성 호출을 수행해 비용/시간을 아낀다(예: A만 고르면
+    OpenAI 생성 1회 + Anthropic 평가 1회로 끝남).
+    payload.openai_api_key / anthropic_api_key: 이번 실행에서만 쓸 키(선택, 비우면
+    설정 화면에 저장된 키 사용) - 저장 이력(params)에는 절대 포함하지 않는다."""
+    prepared, error = _prepare_xval_run(payload, request)
+    if error is not None:
+        return error
 
     try:
         result = run_cross_validation_matrix(
-            openai_client, anthropic_client,
-            sources["board_posts"], sources["jira_issues"], sources["excel_rows"],
-            focus_instruction=focus_instruction, item_limit=item_limit, groups=groups,
+            prepared["openai_client"], prepared["anthropic_client"],
+            prepared["board_posts"], prepared["jira_issues"], prepared["excel_rows"],
+            focus_instruction=prepared["focus_instruction"], item_limit=prepared["item_limit"], groups=prepared["groups"],
         )
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -565,23 +601,110 @@ def run_cross_validation(payload: VocRunRequest, request: Request) -> JSONRespon
         logger.exception("VOC cross-validation matrix failed")
         return JSONResponse({"error": "교차검증 매트릭스 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요."}, status_code=502)
 
-    params = {
-        "use_board": payload.use_board,
-        "use_jira": payload.use_jira,
-        "jira_jql": payload.jira_jql,
-        "use_excel": payload.use_excel,
-        "excel_path": payload.excel_path,
-        "focus_instruction": focus_instruction or None,
-        "item_limit": item_limit,
-        "groups": groups or list(_CROSS_VALIDATION_GROUP_LETTERS),
-        # openai_api_key/anthropic_api_key는 의도적으로 여기 포함하지 않음(전원 공개 이력에 새는 것 방지)
-    }
     try:
-        record = _build_and_save_xval_record(_username(request), params, result)
+        record = _build_and_save_xval_record(prepared["username"], prepared["params"], result)
     except Exception:
         logger.exception("VOC cross-validation matrix result save failed")
         return JSONResponse({"error": "매트릭스 결과를 저장하지 못했습니다. 서버 로그를 확인하거나 관리자에게 문의하세요."}, status_code=502)
     return JSONResponse(record)
+
+
+def _execute_xval_async(username: str, run_id: str, prepared: Dict[str, Any]) -> None:
+    """백그라운드 스레드 풀(VOC_RUN_EXECUTOR)에서 실제 교차검증 매트릭스를 실행(POST
+    .../run-async가 이 함수를 제출) - _execute_voc_analysis_async와 완전히 동일한 패턴
+    (생성/저장 각 단계의 예외를 전부 잡아 registry에 status="error"로 기록해 status가
+    "running"에 영원히 고착되는 일이 없게 함). VOC_RUN_REGISTRY를 그대로 공유하므로
+    사용자당 동시 실행 제한도 일반 VOC 분석과 함께 적용된다(동시에 둘 다 돌리지 않음 -
+    둘 다 LLM 호출이 많아 자원을 아끼는 방향이 안전함)."""
+    with VOC_RUN_LOCK:
+        VOC_RUN_REGISTRY[username][run_id]["status"] = "running"
+
+    def _on_stage(stage: str) -> None:
+        with VOC_RUN_LOCK:
+            VOC_RUN_REGISTRY[username][run_id]["stage"] = stage
+
+    try:
+        result = run_cross_validation_matrix(
+            prepared["openai_client"], prepared["anthropic_client"],
+            prepared["board_posts"], prepared["jira_issues"], prepared["excel_rows"],
+            focus_instruction=prepared["focus_instruction"], item_limit=prepared["item_limit"],
+            groups=prepared["groups"], on_stage=_on_stage,
+        )
+    except ValueError as exc:
+        _finish_voc_run(username, run_id, "error", error=str(exc))
+        return
+    except Exception:
+        logger.exception("VOC cross-validation matrix failed (async run_id=%s)", run_id)
+        _finish_voc_run(username, run_id, "error", error="교차검증 매트릭스 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요.")
+        return
+
+    _on_stage("저장 중")
+    try:
+        record = _build_and_save_xval_record(username, prepared["params"], result)
+    except Exception:
+        logger.exception("VOC cross-validation matrix result save failed (async run_id=%s)", run_id)
+        _finish_voc_run(username, run_id, "error", error="매트릭스 결과를 저장하지 못했습니다. 서버 로그를 확인하거나 관리자에게 문의하세요.")
+        return
+
+    _finish_voc_run(username, run_id, "done", result=record)
+
+
+@router.post("/cross-validation-matrix/run-async")
+def run_cross_validation_async(payload: VocRunRequest, request: Request) -> JSONResponse:
+    """교차검증 매트릭스를 백그라운드로 제출하고 즉시 run_id를 반환 - POST /run-async(일반
+    VOC 분석)와 완전히 동일한 패턴. 같은 VOC_RUN_REGISTRY/VOC_RUN_EXECUTOR를 공유하므로
+    사용자당 동시 실행 1건 제한도 함께 적용된다(이미 VOC 분석이나 다른 매트릭스가
+    queued/running이면 409 + active_run_id)."""
+    prepared, error = _prepare_xval_run(payload, request)
+    if error is not None:
+        return error
+
+    username = prepared["username"]
+    with VOC_RUN_LOCK:
+        _cleanup_voc_registry_locked(username)
+        user_runs = VOC_RUN_REGISTRY.setdefault(username, {})
+        active_id = next((rid for rid, entry in user_runs.items() if entry["status"] in ("queued", "running")), None)
+        if active_id is not None:
+            return JSONResponse(
+                {"error": "이미 실행 중인 VOC 분석/교차검증 매트릭스가 있습니다. 완료된 뒤 다시 시도하세요.", "active_run_id": active_id},
+                status_code=409,
+            )
+        run_id = f"vocxval_async_{uuid.uuid4().hex[:12]}"
+        user_runs[run_id] = {
+            "status": "queued", "result": None, "error": None, "canceled": False,
+            "created_at": time.time(), "finished_at": None,
+        }
+
+    VOC_RUN_EXECUTOR.submit(_execute_xval_async, username, run_id, prepared)
+    return JSONResponse({"run_id": run_id, "status": "queued"})
+
+
+@router.get("/cross-validation-matrix/run-async/{run_id}/status")
+def cross_validation_async_status(run_id: str, request: Request) -> JSONResponse:
+    """실행 상태 폴링용(queued/running/done/error) - GET /run-async/{id}/status(일반 VOC
+    분석)와 동일한 응답 형태."""
+    username = _username(request)
+    with VOC_RUN_LOCK:
+        entry = VOC_RUN_REGISTRY.get(username, {}).get(run_id)
+        if entry is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse({
+            "run_id": run_id, "status": entry["status"], "error": entry.get("error"),
+            "finished_at": entry.get("finished_at"), "stage": entry.get("stage"),
+        })
+
+
+@router.get("/cross-validation-matrix/run-async/{run_id}/result")
+def cross_validation_async_result(run_id: str, request: Request) -> JSONResponse:
+    """완료된 비동기 매트릭스 실행의 전체 결과 조회(아직 안 끝났거나 없으면 404) - 동기
+    POST /cross-validation-matrix와 완전히 동일한 record 형식을 반환하므로 프론트는 두
+    경로를 같은 렌더 함수로 처리 가능."""
+    username = _username(request)
+    with VOC_RUN_LOCK:
+        entry = VOC_RUN_REGISTRY.get(username, {}).get(run_id)
+        if not entry or entry.get("result") is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse(entry["result"])
 
 
 @router.get("/cross-validation-matrix/history")
@@ -669,12 +792,16 @@ def _execute_voc_analysis_async(username: str, run_id: str, prepared: Dict[str, 
         with VOC_RUN_LOCK:
             return VOC_RUN_REGISTRY[username][run_id].get("canceled", False)
 
+    def _on_stage(stage: str) -> None:
+        with VOC_RUN_LOCK:
+            VOC_RUN_REGISTRY[username][run_id]["stage"] = stage
+
     try:
         result = run_voc_analysis_with_judge(
             prepared["generation_client"], prepared["judge_client"],
             prepared["board_posts"], prepared["jira_issues"], prepared["excel_rows"],
             focus_instruction=prepared["focus_instruction"], item_limit=prepared["item_limit"],
-            cross_model=prepared["cross_model"], should_cancel=_should_cancel,
+            cross_model=prepared["cross_model"], should_cancel=_should_cancel, on_stage=_on_stage,
         )
     except VocAnalysisCanceled:
         _finish_voc_run(username, run_id, "canceled")
@@ -690,6 +817,7 @@ def _execute_voc_analysis_async(username: str, run_id: str, prepared: Dict[str, 
     # 저장 단계도 반드시 여기서 잡아야 함 - 생성은 성공했는데 디스크 가득 참/권한 오류 등으로
     # 저장이 실패하면, 이 try/except 없이는 예외가 그대로 밖으로 새 나가 status가
     # "running"에 영원히 고착됨(폴링하는 클라이언트가 영원히 끝나기를 기다리게 됨).
+    _on_stage("저장 중")
     try:
         record = _build_and_save_analysis_record(prepared, result)
     except Exception:
@@ -782,7 +910,7 @@ def voc_run_async_status(run_id: str, request: Request) -> JSONResponse:
             return JSONResponse({"error": "not found"}, status_code=404)
         return JSONResponse({
             "run_id": run_id, "status": entry["status"], "error": entry.get("error"),
-            "finished_at": entry.get("finished_at"),
+            "finished_at": entry.get("finished_at"), "stage": entry.get("stage"),
         })
 
 

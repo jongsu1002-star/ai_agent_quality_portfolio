@@ -763,6 +763,7 @@ def run_voc_analysis_with_judge(
     item_limit: int = MAX_ITEMS_FOR_PROMPT,
     cross_model: bool = True,
     should_cancel: Optional[Callable[[], bool]] = None,
+    on_stage: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """Interpreter(의도 분류) -> 생성 -> 내부 재점검/자가 교정(같은 모델) -> 독립 Judge(다른
     모델)로 원본 VOC까지 함께 보며 재검증 -> 결과에 병합.
@@ -774,19 +775,29 @@ def run_voc_analysis_with_judge(
 
     should_cancel: 백그라운드(비동기) 실행 전용 - 각 단계 시작 전에 호출해 True면
     VocAnalysisCanceled를 던지고 즉시 중단한다(디폴트 None이면 동기 경로와 완전히
-    동일하게 동작 - 기존 호출부에 영향 없음)."""
+    동일하게 동작 - 기존 호출부에 영향 없음).
+
+    on_stage: should_cancel과 동일한 목적(백그라운드 실행 화면에 진행 단계 표시)의 선택적
+    콜백 - 각 단계 시작 직전에 그 단계 이름을 실어 호출한다. 디폴트 None이면 아무 영향 없음."""
     def _check_canceled() -> None:
         if should_cancel is not None and should_cancel():
             raise VocAnalysisCanceled()
+
+    def _report_stage(stage: str) -> None:
+        if on_stage is not None:
+            on_stage(stage)
 
     items, source_counts = build_voc_items(board_posts, jira_issues, excel_rows, item_limit=item_limit)
     if not items:
         raise ValueError("분석할 VOC 데이터가 없습니다 (게시판/Jira/엑셀 모두 비어 있음)")
     _check_canceled()
+    _report_stage("의도 분류 중")
     interpreter_result = classify_voc_items(generation_client, items)
     _check_canceled()
+    _report_stage("분석 생성 중")
     result = _generate_analysis(generation_client, items, source_counts, focus_instruction, interpretations=interpreter_result.get("items"))
     _check_canceled()
+    _report_stage("자가 재점검 중")
     result, self_check_info = _self_check_and_refine(generation_client, result, items, source_counts, focus_instruction)
     result["interpreter"] = interpreter_result
     result["self_check"] = self_check_info
@@ -800,6 +811,7 @@ def run_voc_analysis_with_judge(
         "undated_items_considered": source_counts.get("undated_considered", 0),
     }
     _check_canceled()
+    _report_stage("독립 검증 중")
     result["judge"] = run_independent_judge(judge_client, result, items, focus_instruction=focus_instruction, cross_model=cross_model)
     judge_verdict = result["judge"]["verdict"]
     independently_verified = judge_verdict == "PASS" and result["judge"].get("cross_model") is True
@@ -831,6 +843,8 @@ CROSS_VALIDATION_GROUPS: Tuple[Dict[str, str], ...] = (
     {"group": "D", "generation_provider": "anthropic", "judge_provider": "anthropic", "purpose": "동일 모델 평가와 비교"},
 )
 
+_PROVIDER_DISPLAY_NAMES = {"openai": "OpenAI", "anthropic": "Anthropic"}
+
 
 def _matrix_gate_status(verdict: Dict[str, Any]) -> Dict[str, Any]:
     """run_voc_analysis_with_judge와 동일한 판정 규칙을 매트릭스의 각 조합에도 그대로 적용."""
@@ -856,6 +870,7 @@ def run_cross_validation_matrix(
     focus_instruction: str = "",
     item_limit: int = MAX_ITEMS_FOR_PROMPT,
     groups: Optional[Sequence[str]] = None,
+    on_stage: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """같은 VOC 데이터로 OpenAI/Anthropic 각각 생성한 뒤, A(OpenAI 생성/Anthropic 평가) ·
     B(Anthropic 생성/OpenAI 평가) · C(OpenAI 생성/OpenAI 평가) · D(Anthropic 생성/Anthropic
@@ -868,12 +883,23 @@ def run_cross_validation_matrix(
     A만 고르면 OpenAI 생성 1회 + Anthropic 평가 1회로 끝나고, Anthropic 생성은 하지 않는다
     (불필요한 비용 낭비 방지 원칙을 부분 선택 실행에도 동일하게 적용).
 
+    on_stage: run_voc_analysis_with_judge와 동일한 목적의 선택적 콜백(백그라운드 실행 화면에
+    진행 단계 표시) - "{provider} 생성 중"(필요한 provider 순서대로) 다음 "{조합} 조합 평가
+    중"(A~D 순서대로) 순으로 호출된다. 호출부(비동기 라우트)가 이 순서를 그대로 미리
+    계산해 화면에 전체 단계 목록을 보여줄 수 있도록, provider 순서는 아래에서 set이 아니라
+    selected_groups 순서를 따라가는 결정적 리스트로 만든다(set 반복 순서는 해시 기반이라
+    프런트가 예측할 수 없음).
+
     Interpreter/내부 재점검·자가교정은 이 비교 모드에서는 수행하지 않는다(모델 간 원시 생성
     품질 비교가 목적이라 범위를 의도적으로 좁힘 - 필요하면 운영 경로인
     run_voc_analysis_with_judge를 사용).
 
     두 provider 모두 실제로 활성화(enabled)돼 있어야 함 - 하나라도 키가 없으면 매트릭스
     자체가 성립하지 않으므로 ValueError로 즉시 실패(호출부가 400으로 우아하게 응답)."""
+    def _report_stage(stage: str) -> None:
+        if on_stage is not None:
+            on_stage(stage)
+
     if not openai_client.enabled or not anthropic_client.enabled:
         raise ValueError("교차검증 매트릭스를 실행하려면 OpenAI/Anthropic 키가 모두 설정되어 있어야 합니다")
 
@@ -890,13 +916,19 @@ def run_cross_validation_matrix(
     # 바로 호출되므로, 여기서 미리 만들어둬야 하는 건 generation_provider뿐이다 - judge_provider도
     # 포함시키면(예: A만 선택해도 Anthropic이 judge_provider라는 이유로) 쓰지도 않을 생성 호출이
     # 새는 결함이 됨(회귀 테스트로 고정).
-    needed_generation_providers = {g["generation_provider"] for g in selected_groups}
+    needed_generation_providers: List[str] = []
+    for g in selected_groups:
+        if g["generation_provider"] not in needed_generation_providers:
+            needed_generation_providers.append(g["generation_provider"])
+
     generations: Dict[str, Dict[str, Any]] = {}
     for provider_name in needed_generation_providers:
+        _report_stage(f"{_PROVIDER_DISPLAY_NAMES.get(provider_name, provider_name)} 생성 중")
         generations[provider_name] = _generate_analysis(clients[provider_name], items, source_counts, focus_instruction)
 
     matrix = []
     for group in selected_groups:
+        _report_stage(f"{group['group']} 조합 평가 중")
         gen_result = generations[group["generation_provider"]]
         judge_client = clients[group["judge_provider"]]
         cross_model = group["generation_provider"] != group["judge_provider"]

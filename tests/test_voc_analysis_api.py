@@ -1234,6 +1234,99 @@ def test_cross_validation_matrix_api_key_override_never_saved_to_history(monkeyp
     assert secret_anthropic not in history_body
 
 
+# ===================== 교차검증 매트릭스 백그라운드 실행 + 폴링(단계 표시용) =====================
+# POST /cross-validation-matrix/run-async - 실행 버튼에 단계별 진행사항을 보여주기 위해
+# 완전 동기였던 매트릭스를 VOC 분석(POST /run-async)과 동일한 패턴으로 비동기화한 것.
+# VOC_RUN_REGISTRY를 그대로 공유하므로 _poll_until(위 절에서 정의)도 그대로 재사용한다.
+
+def test_cross_validation_matrix_run_async_returns_run_id_immediately_then_completes(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "느려요", "content": "응답이 느립니다"})
+
+    start = client.post("/api/voc-analysis/cross-validation-matrix/run-async", json={"use_board": True})
+    assert start.status_code == 200
+    body = start.json()
+    assert body["run_id"].startswith("vocxval_async_")
+    assert body["status"] == "queued"
+
+    final = _poll_until(client, f"/api/voc-analysis/cross-validation-matrix/run-async/{body['run_id']}/status", {"done", "error"})
+    assert final["status"] == "done"
+    assert final["stage"]  # 완료 시점에는 어떤 값이든 비어있지 않아야 함(마지막으로 기록된 단계)
+
+    result = client.get(f"/api/voc-analysis/cross-validation-matrix/run-async/{body['run_id']}/result")
+    assert result.status_code == 200
+    data = result.json()
+    groups = {entry["group"] for entry in data["result"]["matrix"]}
+    assert groups == {"A", "B", "C", "D"}
+
+    # 동기 POST와 동일한 record 형식이라 매트릭스 이력 목록에도 그대로 잡혀야 함
+    history_ids = {item["id"] for item in client.get("/api/voc-analysis/cross-validation-matrix/history").json()}
+    assert data["id"] in history_ids
+    # 일반 VOC 분석 이력에는 섞이지 않아야 함(저장 형식이 달라 화면이 깨질 수 있음)
+    regular_history_ids = {item["id"] for item in client.get("/api/voc-analysis/history").json()}
+    assert data["id"] not in regular_history_ids
+
+
+def test_cross_validation_matrix_run_async_exposes_stage_field(monkeypatch):
+    """상태 폴링 응답에 stage 필드가 실려 있어야 프런트가 단계 체크리스트를 그릴 수 있다."""
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    start = client.post("/api/voc-analysis/cross-validation-matrix/run-async", json={"use_board": True, "groups": ["C"]})
+    run_id = start.json()["run_id"]
+    status_response = client.get(f"/api/voc-analysis/cross-validation-matrix/run-async/{run_id}/status")
+    assert status_response.status_code == 200
+    assert "stage" in status_response.json()
+    _poll_until(client, f"/api/voc-analysis/cross-validation-matrix/run-async/{run_id}/status", {"done", "error"})
+
+
+def test_cross_validation_matrix_run_async_requires_both_providers_enabled(monkeypatch):
+    """동기 엔드포인트(POST /cross-validation-matrix)는 키 미설정을 요청 처리 중 바로 400으로
+    응답하지만, 비동기 경로는 그 검증(run_cross_validation_matrix 내부의 ValueError)이
+    백그라운드 스레드 안에서 일어나므로 시작 요청 자체는 200(queued)으로 성공하고, 폴링
+    결과가 status="error"로 나타나야 한다 - VOC 분석 비동기 경로가 "분석할 VOC 데이터가
+    없습니다" 같은 실행 중 오류를 동일하게 처리하는 것과 같은 패턴
+    (test_run_async_with_no_voc_data_becomes_error_status_not_500 참고)."""
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    _XValFakeClient.enabled_providers = {"openai"}  # anthropic 키 미설정 상황을 흉내
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    start = client.post("/api/voc-analysis/cross-validation-matrix/run-async", json={"use_board": True})
+    assert start.status_code == 200
+    final = _poll_until(client, f"/api/voc-analysis/cross-validation-matrix/run-async/{start.json()['run_id']}/status", {"done", "error"})
+    assert final["status"] == "error"
+    assert "OpenAI/Anthropic 키가 모두 설정" in final["error"]
+
+
+def test_cross_validation_matrix_run_async_status_and_result_for_unknown_run_id_returns_404(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    client = TestClient(app)
+    assert client.get("/api/voc-analysis/cross-validation-matrix/run-async/vocxval_async_doesnotexist/status").status_code == 404
+    assert client.get("/api/voc-analysis/cross-validation-matrix/run-async/vocxval_async_doesnotexist/result").status_code == 404
+
+
+def test_cross_validation_matrix_run_async_conflicts_with_concurrent_voc_analysis_run(monkeypatch):
+    """VOC_RUN_REGISTRY를 VOC 분석과 공유하므로, 한쪽이 실행 중이면 다른 쪽도 409로
+    막혀야 한다(동시에 LLM 호출이 많은 두 작업을 함께 돌리지 않는다는 설계 의도).
+    _SlowFakeClient로 인위적 지연을 줘서 두 번째 요청이 도착할 때까지 첫 실행이 아직
+    running 상태로 남아있게 한다(P0-2 동시실행 테스트와 동일한 기법)."""
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _SlowFakeClient)
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    voc_start = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False})
+    assert voc_start.status_code == 200
+
+    xval_start = client.post("/api/voc-analysis/cross-validation-matrix/run-async", json={"use_board": True})
+    assert xval_start.status_code == 409
+    assert "active_run_id" in xval_start.json()
+
+    _poll_until(client, f"/api/voc-analysis/run-async/{voc_start.json()['run_id']}/status", {"done", "error", "canceled"}, timeout_s=5.0)
+
+
 def test_thread_pool_executor_never_exceeds_max_workers_under_load():
     """ThreadPoolExecutor 자체가 max_workers를 실제로 지키는지 - 별도의 소규모 테스트
     전용 풀로 확인(실제 VOC_RUN_EXECUTOR를 건드리면 다른 테스트에 영향을 줄 수 있어

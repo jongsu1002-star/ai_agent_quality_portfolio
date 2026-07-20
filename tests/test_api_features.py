@@ -113,6 +113,23 @@ def _wait_for_run(client, run_id, timeout=10):
     raise AssertionError("run did not finish in time")
 
 
+def test_run_status_exposes_stage_field_and_reaches_done_on_completion():
+    """실행 버튼에 단계별 진행사항을 보여주는 기능의 핵심 계약 - 상태 폴링 응답에 stage
+    필드가 실려 있어야 하고, 완료 시점에는 "완료"로 남아야 한다(app/main.py::_execute_run
+    참고). 스레드가 매우 빠르게 끝나는 테스트 환경에서는 중간 단계(데이터 준비/평가 실행 등)
+    를 안정적으로 포착하기 어려우므로(경합), 필드 존재 여부와 최종 상태만 검증한다."""
+    client = TestClient(app)
+    run_response = client.post("/api/run", json={"techniques": ["rag"]})
+    run_id = run_response.json()["run_id"]
+
+    status_immediately = client.get(f"/api/run/{run_id}/status").json()
+    assert "stage" in status_immediately
+
+    final_status = _wait_for_run(client, run_id)
+    assert final_status["status"] == "done"
+    assert final_status["stage"] == "완료"
+
+
 def test_excel_template_round_trip_runs_against_uploaded_cases():
     client = TestClient(app)
 

@@ -93,6 +93,10 @@ function buildSandbox({ elementOverrides = {}, fetchImpl } = {}) {
     clearTimeout: (id) => { const i = pendingTimers.findIndex((t) => t.id === id); if (i !== -1) pendingTimers.splice(i, 1); },
     alert: () => {}, confirm: () => true,
     escapeHtml: (s) => { calls.escapeHtmlCalls += 1; return String(s); },
+    // renderStepChecklist는 START_MARK 이전(escapeHtml 근처)에 정의돼 있어 이 슬라이스
+    // 밖이다 - 이 파일의 체크들은 단계 이름 자체가 아니라 폴링/재시도/버튼 상태를
+    // 검증하므로, 스타일 없이 아무 문자열이나 반환하는 최소 스텁으로 충분하다.
+    renderStepChecklist: () => '',
     showToast: (msg, type) => { calls.showToast.push({ msg, type }); },
     _renderVocResult: (record) => { calls.renderVocResult.push(record); },
     loadVocHistory: () => { calls.loadVocHistory += 1; },

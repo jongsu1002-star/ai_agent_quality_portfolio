@@ -1,3 +1,4 @@
+import json
 import re
 
 import pytest
@@ -748,6 +749,44 @@ def test_generate_analysis_raises_after_repeated_schema_violations():
         run_voc_analysis(_AlwaysBrokenSchemaClient(), board_posts, [], [])
 
 
+def test_generate_analysis_retries_on_truncated_json_response_then_succeeds():
+    """max_tokens 등으로 LLM 응답이 문자열 중간에서 잘려 client.judge() 내부의
+    json.loads()가 json.JSONDecodeError(ValueError의 하위 클래스)를 던지는 경우도,
+    스키마 위반과 동일하게 재시도 대상이어야 한다. 회귀 대상: 이 예외가 재시도 루프
+    바깥에서 새어나가면 HTTP 라우트의 `except ValueError`에 걸려 400 + 파이썬 예외
+    원문("Unterminated string starting at: ...")이 그대로 사용자 화면에 노출됨."""
+    class _TruncatedThenOkClient:
+        enabled = True
+        call_count = 0
+
+        def judge(self, system_prompt, user_prompt):
+            _TruncatedThenOkClient.call_count += 1
+            if _TruncatedThenOkClient.call_count == 1:
+                raise json.JSONDecodeError("Unterminated string starting at", '{"summary": "잘', 15)
+            return {"summary": "재시도 성공", "top_issues": [{"theme": "t", "frequency": 1, "severity": "low", "suggestion": "s", "example_ids": ["post-1"]}]}
+
+    client = _TruncatedThenOkClient()
+    board_posts = [{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}]
+    result = run_voc_analysis(client, board_posts, [], [])
+    assert result["summary"] == "재시도 성공"
+    assert client.call_count == 2
+
+
+def test_generate_analysis_raises_runtime_error_after_repeated_truncated_json():
+    """재시도해도 계속 JSON 파싱이 실패하면, 원본 json.JSONDecodeError(ValueError
+    하위 클래스)가 아니라 RuntimeError로 변환돼야 한다 - 그래야 HTTP 라우트가 이를
+    400(잘못된 요청)이 아니라 502(LLM 응답 이상)로 올바르게 분류해 응답한다."""
+    class _AlwaysTruncatedClient:
+        enabled = True
+
+        def judge(self, *a, **k):
+            raise json.JSONDecodeError("Unterminated string starting at", '{"summary": "잘', 15)
+
+    board_posts = [{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}]
+    with pytest.raises(RuntimeError):
+        run_voc_analysis(_AlwaysTruncatedClient(), board_posts, [], [])
+
+
 def test_generate_analysis_retries_when_example_id_is_not_in_input():
     class _FabricatingThenCorrectClient:
         enabled = True
@@ -1007,3 +1046,49 @@ def test_run_cross_validation_matrix_quality_gate_reflects_cross_model_vs_same_m
     assert matrix_by_group["C"]["quality_gate"]["status"] == "REVIEW_REQUIRED"
     assert matrix_by_group["D"]["judge"]["cross_model"] is False
     assert matrix_by_group["D"]["quality_gate"]["status"] == "REVIEW_REQUIRED"
+
+
+def test_run_cross_validation_matrix_groups_filters_output_and_skips_unneeded_generation():
+    """groups=["A"]면 결과 매트릭스에는 A만 담기고, A가 쓰지 않는 provider의 생성 호출은
+    아예 건너뛰어야 한다 - A는 OpenAI 생성 + Anthropic 평가만 쓰므로, OpenAI는 생성 1회만
+    (심사 호출 없음), Anthropic은 평가 1회만(생성 호출 없음) 발생해야 한다."""
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    result = run_cross_validation_matrix(openai_client, anthropic_client, _matrix_board_posts(), [], [], groups=["A"])
+
+    assert [entry["group"] for entry in result["matrix"]] == ["A"]
+    assert len(openai_client.calls) == 1  # 생성만, 심사 없음(A의 judge_provider는 anthropic)
+    assert len(anthropic_client.calls) == 1  # 심사만, 생성 없음(A의 generation_provider는 openai)
+    assert "openai" in result["generations"]
+    assert "anthropic" not in result["generations"]  # anthropic 생성은 아예 안 함
+
+
+def test_run_cross_validation_matrix_groups_dedupes_and_preserves_display_order():
+    """groups에 중복/역순으로 넣어도 결과는 항상 A→D 표시 순서를 유지해야 함(UI 일관성)."""
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    result = run_cross_validation_matrix(
+        openai_client, anthropic_client, _matrix_board_posts(), [], [], groups=["D", "A", "A", "C"],
+    )
+    assert [entry["group"] for entry in result["matrix"]] == ["A", "C", "D"]
+
+
+def test_run_cross_validation_matrix_groups_unknown_letter_is_simply_ignored():
+    """호출부(HTTP 라우트)가 이미 A~D만 통과시킨다고 가정하는 함수라, 여기 도달한 미지의
+    문자는 그냥 무시되고(어차피 CROSS_VALIDATION_GROUPS에 없으므로 필터링됨) 유효한
+    나머지만 실행된다 - 방어적 이중 검증이 아니라, 위임된 책임을 문서화하는 회귀 테스트."""
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    result = run_cross_validation_matrix(
+        openai_client, anthropic_client, _matrix_board_posts(), [], [], groups=["A", "Z"],
+    )
+    assert [entry["group"] for entry in result["matrix"]] == ["A"]
+
+
+def test_run_cross_validation_matrix_empty_groups_list_raises():
+    """groups가 빈 리스트로 넘어오면(A~D 중 아무것도 유효하게 안 걸리는 경우 포함) 매트릭스가
+    성립하지 않으므로 ValueError."""
+    openai_client = _FakeProviderClient("openai")
+    anthropic_client = _FakeProviderClient("anthropic")
+    with pytest.raises(ValueError, match="선택"):
+        run_cross_validation_matrix(openai_client, anthropic_client, _matrix_board_posts(), [], [], groups=[])

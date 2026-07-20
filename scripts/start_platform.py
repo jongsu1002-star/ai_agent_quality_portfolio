@@ -12,10 +12,23 @@ FastAPI 앱은 정상적으로 띄웁니다(Prometheus/Grafana만 조용히 건�
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# Windows 콘솔의 기본 코드페이지는 한글을 표현하지 못해 아래 print()들이 깨져(�) 보이는
+# 문제가 있었음 - 이 프로세스 자신의 출력도 고치고, PYTHONUTF8=1을 자식 uvicorn
+# 프로세스에도 물려줘서(subprocess.run은 기본적으로 현재 환경변수를 상속함) 그쪽 로그도
+# 같은 문제를 겪지 않게 한다.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+os.environ.setdefault("PYTHONUTF8", "1")
 
 ROOT = Path(__file__).resolve().parents[1]
 

@@ -3,6 +3,29 @@
 from __future__ import annotations
 
 import os
+import sys
+
+# Windows 콘솔의 기본 코드페이지(cp949/cp1252 등)는 한글을 표현하지 못해, 터미널
+# 리포터가 한글 메시지를 출력할 때 문자가 통째로 깨져(�) 보이는 문제가 있었음. 실제
+# 소스/문서 파일은 항상 UTF-8이라 파일 자체는 멀쩡하지만, 이 콘솔 인코딩 때문에
+# 로그에서만 깨져 보였음.
+#
+# pytest의 기본 캡처(--capture=fd)는 세션 도중 sys.stdout/stderr를 자체 캡처용
+# 객체로 바꿔치기했다가, 종료 시점(pytest_terminal_summary가 불리는 시점)에 다시
+# "새" TextIOWrapper로 복원한다 - 그 새 객체는 우리가 여기(모듈 최상단, import 시점)
+# 에서 reconfigure한 객체와 다른 객체라 이 시점의 reconfigure는 적용되지 않는다.
+# 그래서 이 함수를 만들어 모듈 로드 시점과 pytest_terminal_summary 훅 시작 시점
+# 양쪽에서 다시 호출한다.
+def _force_utf8_stdio() -> None:
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            try:
+                _stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_force_utf8_stdio()
 
 import pytest
 
@@ -134,6 +157,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
     특정 파일/테스트만 실행하거나 0건이 수집된 실행이 마지막 종합 결과를 덮어쓰면, 좁은 검증을
     전체 통과로 오해할 수 있다. 선택 실행 결과는 터미널에만 남기고 문서는 보존한다.
     """
+    _force_utf8_stdio()  # pytest 캡처가 이 시점에 stdout/stderr를 새 객체로 복원해두므로 재적용
     stats = terminalreporter.stats
     total = sum(len(stats.get(key, [])) for key in ("passed", "failed", "skipped", "error"))
     if total == 0:

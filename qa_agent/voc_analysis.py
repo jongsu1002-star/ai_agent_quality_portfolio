@@ -12,7 +12,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from collections import Counter
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from .llm_client import OpenAIJudgeClient
 
@@ -497,15 +497,22 @@ def _generate_analysis(
     focus_instruction: str,
     interpretations: Optional[Dict[str, Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
-    """LLM 호출 -> 스키마 검증. 스키마를 어기면 한 번 더 재시도(모델이 순간적으로 형식을
-    어겼을 뿐일 수 있으므로) 하고, 재시도에도 실패하면 RuntimeError로 안전하게 실패 처리
-    (호출부가 502로 우아하게 응답 - "클라이언트 요청이 잘못됨"이 아니라 "LLM 응답이
-    이상함"이라 400이 아니라 502가 맞는 분류)."""
+    """LLM 호출 -> 스키마 검증. 스키마를 어기면(응답이 JSON으로 파싱조차 안 되는 경우
+    포함 - 예: max_tokens에 걸려 응답이 문자열 중간에서 잘린 경우) 한 번 더 재시도(모델이
+    순간적으로 형식을 어겼을 뿐일 수 있으므로) 하고, 재시도에도 실패하면 RuntimeError로
+    안전하게 실패 처리(호출부가 502로 우아하게 응답 - "클라이언트 요청이 잘못됨"이 아니라
+    "LLM 응답이 이상함"이라 400이 아니라 502가 맞는 분류).
+
+    client.judge()의 json.loads() 실패(json.JSONDecodeError)는 ValueError의 하위
+    클래스라 여기서 안 잡으면 그대로 상위(HTTP 라우트)의 `except ValueError`에 걸려
+    "잘못된 요청"(400)으로 오분류되고, 사용자 화면에도 파이썬 예외 원문("Unterminated
+    string starting at: line 1 column ...")이 그대로 노출된다 - 그래서 반드시 이 함수의
+    재시도 루프 안(try 블록 내부)에서 client.judge() 호출까지 함께 감싸야 한다."""
     system_prompt, user_prompt = build_prompts(items, source_counts, focus_instruction=focus_instruction, interpretations=interpretations)
     last_error: Optional[Exception] = None
     for _attempt in range(2):
-        result = generation_client.judge(system_prompt, user_prompt)
         try:
+            result = generation_client.judge(system_prompt, user_prompt)
             validate_analysis_schema(result)
         except ValueError as exc:
             last_error = exc
@@ -538,8 +545,10 @@ def run_voc_analysis(
     item_limit: "최근 20건만 분석해줘" 같은 건수 제한(선택, 기본 MAX_ITEMS_FOR_PROMPT).
 
     입력이 하나도 없으면 ValueError. judge_client.judge()가 던지는 예외(키 미설정, 네트워크
-    오류, JSON 파싱 실패 등)는 잡지 않고 그대로 전파 - 호출부(HTTP 라우트)가 잡아서 사용자
-    에게 우아하게(500이 아니라 안내 메시지로) 보여줘야 함.
+    오류 등)는 잡지 않고 그대로 전파 - 호출부(HTTP 라우트)가 잡아서 사용자에게 우아하게
+    (500이 아니라 안내 메시지로) 보여줘야 함. 단, JSON 파싱 실패(응답이 잘리는 등)는
+    _generate_analysis가 자체적으로 한 번 재시도한 뒤 RuntimeError로 변환해 전파함(위
+    docstring 참고 - 400이 아니라 502로 분류되도록).
     """
     items, source_counts = build_voc_items(board_posts, jira_issues, excel_rows, item_limit=item_limit)
     if not items:
@@ -846,33 +855,48 @@ def run_cross_validation_matrix(
     excel_rows: List[Dict[str, Any]],
     focus_instruction: str = "",
     item_limit: int = MAX_ITEMS_FOR_PROMPT,
+    groups: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
     """같은 VOC 데이터로 OpenAI/Anthropic 각각 생성한 뒤, A(OpenAI 생성/Anthropic 평가) ·
     B(Anthropic 생성/OpenAI 평가) · C(OpenAI 생성/OpenAI 평가) · D(Anthropic 생성/Anthropic
-    평가) 4가지 조합을 전부 심사해 비교표를 만든다. C/D는 "같은 모델이 자기 산출물을 스스로
+    평가) 4가지 조합을 심사해 비교표를 만든다. C/D는 "같은 모델이 자기 산출물을 스스로
     채점하면 더 관대해지는가"를 A/B(교차검증)와 나란히 대조하기 위한 대조군이다.
 
-    생성은 provider당 딱 1회만(OpenAI 1회 + Anthropic 1회) 수행하고, 그 두 결과를 4가지
-    조합의 심사에 재사용한다(생성을 4번 반복하지 않음 - 불필요한 비용 낭비 방지). Interpreter/
-    내부 재점검·자가교정은 이 비교 모드에서는 수행하지 않는다(모델 간 원시 생성 품질 비교가
-    목적이라 범위를 의도적으로 좁힘 - 필요하면 운영 경로인 run_voc_analysis_with_judge를 사용).
+    groups: 실행할 조합의 부분집합(선택, 예: ["A", "C"]) - 미지정(None)이면 4개 전부.
+    호출부(HTTP 라우트)가 이미 A~D로 검증한 값을 그대로 넘긴다고 가정함(여기서는 재검증하지
+    않음). 선택되지 않은 조합에만 쓰이는 provider는 생성 호출 자체를 건너뛴다 - 예를 들어
+    A만 고르면 OpenAI 생성 1회 + Anthropic 평가 1회로 끝나고, Anthropic 생성은 하지 않는다
+    (불필요한 비용 낭비 방지 원칙을 부분 선택 실행에도 동일하게 적용).
+
+    Interpreter/내부 재점검·자가교정은 이 비교 모드에서는 수행하지 않는다(모델 간 원시 생성
+    품질 비교가 목적이라 범위를 의도적으로 좁힘 - 필요하면 운영 경로인
+    run_voc_analysis_with_judge를 사용).
 
     두 provider 모두 실제로 활성화(enabled)돼 있어야 함 - 하나라도 키가 없으면 매트릭스
     자체가 성립하지 않으므로 ValueError로 즉시 실패(호출부가 400으로 우아하게 응답)."""
     if not openai_client.enabled or not anthropic_client.enabled:
         raise ValueError("교차검증 매트릭스를 실행하려면 OpenAI/Anthropic 키가 모두 설정되어 있어야 합니다")
 
+    selected_groups = [g for g in CROSS_VALIDATION_GROUPS if groups is None or g["group"] in groups]
+    if not selected_groups:
+        raise ValueError("실행할 조합을 최소 1개 이상 선택해야 합니다")
+
     items, source_counts = build_voc_items(board_posts, jira_issues, excel_rows, item_limit=item_limit)
     if not items:
         raise ValueError("분석할 VOC 데이터가 없습니다 (게시판/Jira/엑셀 모두 비어 있음)")
 
     clients = {"openai": openai_client, "anthropic": anthropic_client}
+    # 심사(judge_provider)는 generations를 만들지 않고 run_independent_judge로 그 자리에서
+    # 바로 호출되므로, 여기서 미리 만들어둬야 하는 건 generation_provider뿐이다 - judge_provider도
+    # 포함시키면(예: A만 선택해도 Anthropic이 judge_provider라는 이유로) 쓰지도 않을 생성 호출이
+    # 새는 결함이 됨(회귀 테스트로 고정).
+    needed_generation_providers = {g["generation_provider"] for g in selected_groups}
     generations: Dict[str, Dict[str, Any]] = {}
-    for provider_name, client in clients.items():
-        generations[provider_name] = _generate_analysis(client, items, source_counts, focus_instruction)
+    for provider_name in needed_generation_providers:
+        generations[provider_name] = _generate_analysis(clients[provider_name], items, source_counts, focus_instruction)
 
     matrix = []
-    for group in CROSS_VALIDATION_GROUPS:
+    for group in selected_groups:
         gen_result = generations[group["generation_provider"]]
         judge_client = clients[group["judge_provider"]]
         cross_model = group["generation_provider"] != group["judge_provider"]

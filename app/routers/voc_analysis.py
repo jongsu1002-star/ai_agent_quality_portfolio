@@ -67,10 +67,16 @@ class VocRunRequest(BaseModel):
     excel_path: Optional[str] = None
     focus_instruction: Optional[str] = Field(default=None, max_length=FOCUS_INSTRUCTION_MAX_LENGTH)
     item_limit: Optional[Any] = None
+    # 아래 3개는 POST /cross-validation-matrix 전용(다른 엔드포인트는 무시함) - 공용
+    # 모델에 얹은 이유는 이미 매트릭스 엔드포인트가 이 모델을 그대로 쓰고 있어서, 별도
+    # 모델을 새로 만드는 것보다 필드 몇 개 추가하는 쪽이 더 단순함.
+    groups: Optional[List[str]] = None  # 실행할 조합(A~D) 부분집합, 미지정 시 4개 전부
+    openai_api_key: Optional[str] = None  # 이번 실행에서만 쓸 키(비우면 설정 화면 저장값 사용)
+    anthropic_api_key: Optional[str] = None
 
-    @field_validator("focus_instruction")
+    @field_validator("focus_instruction", "openai_api_key", "anthropic_api_key")
     @classmethod
-    def _strip_focus_instruction(cls, value: Optional[str]) -> Optional[str]:
+    def _strip_optional_text_fields(cls, value: Optional[str]) -> Optional[str]:
         # Pydantic이 str 타입 자체는 이미 강제해줌(객체/배열/불리언 등은 여기 도달하기
         # 전에 422로 거부됨) - 여기서는 앞뒤 공백만 정리하고, 공백만 있던 값은 "지정 안
         # 함"과 동일하게 취급해 이후 로직이 빈 문자열/None을 매번 따로 신경 쓰지 않게 함.
@@ -469,15 +475,28 @@ def _build_and_save_xval_record(username: str, params: Dict[str, Any], result: D
     return record
 
 
-def _build_matrix_clients(settings: Dict[str, Any]) -> Tuple[OpenAIJudgeClient, OpenAIJudgeClient]:
+def _build_matrix_clients(
+    settings: Dict[str, Any],
+    openai_api_key_override: Optional[str] = None,
+    anthropic_api_key_override: Optional[str] = None,
+) -> Tuple[OpenAIJudgeClient, OpenAIJudgeClient]:
     """설정에서 OpenAI/Anthropic 클라이언트를 각각 명시적으로 구성 - "현재 선택된
     provider" 개념과 무관하게 둘 다 만들어야 하므로 _independent_judge_kwargs(반대쪽
     하나만 고르는 함수)는 재사용하지 않는다. provider가 이미 고정돼 있어 llm_model 등
     다른 provider의 설정이 새어 들어갈 여지도 없음(1차 리뷰 결함 2번과 동일 클래스의
-    오염을 애초에 피하는 설계)."""
-    openai_client = OpenAIJudgeClient(provider="openai", api_key=settings.get("openai_api_key"))
-    anthropic_client = OpenAIJudgeClient(provider="anthropic", api_key=settings.get("anthropic_api_key"))
+    오염을 애초에 피하는 설계).
+
+    *_api_key_override: 매트릭스 화면에서 이번 실행에 한해 직접 입력한 키(선택) - 설정
+    화면에 키를 저장하지 않고도, 또는 저장된 키와 다른 키로 즉석에서 비교 실행하고 싶을
+    때 쓴다. 비어 있으면 기존과 동일하게 설정에 저장된 키를 그대로 쓴다. 호출부(라우트)가
+    이 값을 저장 이력(params)에 절대 포함하지 않도록 책임진다 - 매트릭스 이력은 전원
+    공개라, 여기 흘러들어가면 다른 사용자에게 키가 그대로 노출된다."""
+    openai_client = OpenAIJudgeClient(provider="openai", api_key=openai_api_key_override or settings.get("openai_api_key"))
+    anthropic_client = OpenAIJudgeClient(provider="anthropic", api_key=anthropic_api_key_override or settings.get("anthropic_api_key"))
     return openai_client, anthropic_client
+
+
+_CROSS_VALIDATION_GROUP_LETTERS = ("A", "B", "C", "D")
 
 
 @router.post("/cross-validation-matrix")
@@ -487,13 +506,34 @@ def run_cross_validation(payload: VocRunRequest, request: Request) -> JSONRespon
     생성/Anthropic 평가, 대조군) 4가지 조합을 비교하는 실험 모드. 운영용 POST /run과
     달리 OpenAI/Anthropic 키가 **모두** 설정되어 있어야 하고, LLM 호출이 늘어나(생성
     2회 + 평가 4회) 더 오래 걸릴 수 있다. 요청 본문 형식은 POST /run과 동일(item_limit
-    정책도 동일하게 수동 검증)."""
+    정책도 동일하게 수동 검증).
+
+    payload.groups: A~D 중 이번 실행에 포함할 조합(선택, 미지정 시 4개 전부). 일부만
+    고르면 실제로 필요한 provider만 생성 호출을 수행해 비용/시간을 아낀다(예: A만 고르면
+    OpenAI 생성 1회 + Anthropic 평가 1회로 끝남).
+    payload.openai_api_key / anthropic_api_key: 이번 실행에서만 쓸 키(선택, 비우면
+    설정 화면에 저장된 키 사용) - 저장 이력(params)에는 절대 포함하지 않는다."""
     sources, error = _gather_voc_sources(payload, request)
     if error is not None:
         return error
 
+    groups: Optional[List[str]] = None
+    if payload.groups is not None:
+        normalized_groups = [str(g).strip().upper() for g in payload.groups]
+        invalid = [g for g in normalized_groups if g not in _CROSS_VALIDATION_GROUP_LETTERS]
+        if invalid:
+            return JSONResponse({"error": f"groups에 알 수 없는 조합이 포함되어 있습니다: {invalid} (A/B/C/D만 가능)"}, status_code=400)
+        if not normalized_groups:
+            return JSONResponse({"error": "groups를 지정하는 경우 최소 1개 이상 선택해야 합니다"}, status_code=400)
+        # 원래 표시 순서(A→D)로 정렬하고 중복은 제거
+        groups = [g for g in _CROSS_VALIDATION_GROUP_LETTERS if g in normalized_groups]
+
     settings = _state["load_settings"]()
-    openai_client, anthropic_client = _build_matrix_clients(settings)
+    openai_client, anthropic_client = _build_matrix_clients(
+        settings,
+        openai_api_key_override=payload.openai_api_key,
+        anthropic_api_key_override=payload.anthropic_api_key,
+    )
 
     focus_instruction = payload.focus_instruction or ""
     raw_item_limit = payload.item_limit
@@ -513,7 +553,7 @@ def run_cross_validation(payload: VocRunRequest, request: Request) -> JSONRespon
         result = run_cross_validation_matrix(
             openai_client, anthropic_client,
             sources["board_posts"], sources["jira_issues"], sources["excel_rows"],
-            focus_instruction=focus_instruction, item_limit=item_limit,
+            focus_instruction=focus_instruction, item_limit=item_limit, groups=groups,
         )
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -529,6 +569,8 @@ def run_cross_validation(payload: VocRunRequest, request: Request) -> JSONRespon
         "excel_path": payload.excel_path,
         "focus_instruction": focus_instruction or None,
         "item_limit": item_limit,
+        "groups": groups or list(_CROSS_VALIDATION_GROUP_LETTERS),
+        # openai_api_key/anthropic_api_key는 의도적으로 여기 포함하지 않음(전원 공개 이력에 새는 것 방지)
     }
     try:
         record = _build_and_save_xval_record(_username(request), params, result)

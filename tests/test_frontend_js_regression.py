@@ -67,6 +67,20 @@ def test_voc_cross_validation_button_wired_to_run_function():
     assert 'id="voc-xval-result"' in html
 
 
+def test_voc_cross_validation_group_selection_and_api_key_override_wired():
+    """A~D 조합 선택 체크박스와 이번 실행 전용 API 키 입력란이 실제로 요청 본문에
+    실려 나가는지 - 마크업만 있고 JS가 안 읽으면 아무 의미가 없으므로 함께 확인."""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    for letter in ("A", "B", "C", "D"):
+        assert f'class="voc-xval-group-checkbox" value="{letter}"' in html
+    assert 'id="voc-xval-openai-key"' in html
+    assert 'id="voc-xval-anthropic-key"' in html
+    assert "querySelectorAll('.voc-xval-group-checkbox:checked')" in html
+    assert "groups: selectedGroups" in html
+    assert "openai_api_key: document.getElementById('voc-xval-openai-key')" in html
+    assert "anthropic_api_key: document.getElementById('voc-xval-anthropic-key')" in html
+
+
 def test_voc_cross_validation_history_list_wired():
     html = INDEX_HTML.read_text(encoding="utf-8")
     assert 'id="voc-xval-history-list"' in html

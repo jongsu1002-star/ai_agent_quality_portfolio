@@ -11,12 +11,25 @@ import re
 import secrets
 import socket
 import subprocess
+import sys
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Any, Dict, List, Optional, Tuple
+
+# Windows 콘솔의 기본 코드페이지는 한글을 표현하지 못해, uvicorn/앱 로그의 한글
+# 메시지가 문자 단위로 깨져(�) 출력되는 문제가 있었음(파일 자체는 항상 UTF-8이라
+# 소스/문서는 멀쩡함 - 콘솔에 "쓸 때"만 깨짐). uvicorn 기본 로그 핸들러도 이
+# sys.stdout/stderr 객체를 그대로 재사용하므로, 앱이 로드되는 시점에 한 번만 맞춰두면
+# 이후 모든 로그에 적용된다.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Request, UploadFile

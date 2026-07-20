@@ -1016,11 +1016,13 @@ class _XValFakeClient:
     provider를 호출하는지, 하나라도 비활성이면 실행 자체를 막는지 검증하기 위함."""
 
     enabled_providers = {"openai", "anthropic"}
+    created_api_keys = []  # (provider, api_key) 튜플 목록 - 실제로 어떤 키로 구성됐는지 검증용
 
     def __init__(self, provider=None, api_key=None, **kwargs):
         self.provider = provider or "openai"
         self.api_key = api_key
         self.calls = []
+        _XValFakeClient.created_api_keys.append((self.provider, api_key))
 
     @property
     def enabled(self):
@@ -1045,8 +1047,10 @@ class _XValFakeClient:
 @pytest.fixture(autouse=True)
 def _xval_fake_client_reset():
     _XValFakeClient.enabled_providers = {"openai", "anthropic"}
+    _XValFakeClient.created_api_keys = []
     yield
     _XValFakeClient.enabled_providers = {"openai", "anthropic"}
+    _XValFakeClient.created_api_keys = []
 
 
 def test_cross_validation_matrix_runs_all_four_groups_and_saves_separately(monkeypatch):
@@ -1126,6 +1130,92 @@ def test_cross_validation_matrix_delete_allowed_for_admin_or_owner_only(monkeypa
 
     assert admin.delete(f"/api/voc-analysis/cross-validation-matrix/{analysis_id}").status_code == 200
     assert admin.get(f"/api/voc-analysis/cross-validation-matrix/{analysis_id}").status_code == 404
+
+
+def test_cross_validation_matrix_groups_param_runs_only_selected_combination(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "느려요", "content": "응답이 느립니다"})
+
+    run = client.post("/api/voc-analysis/cross-validation-matrix", json={"use_board": True, "groups": ["A"]})
+    assert run.status_code == 200
+    data = run.json()
+    assert {entry["group"] for entry in data["result"]["matrix"]} == {"A"}
+    assert data["params"]["groups"] == ["A"]
+
+
+def test_cross_validation_matrix_groups_omitted_defaults_to_all_four(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    run = client.post("/api/voc-analysis/cross-validation-matrix", json={"use_board": True})
+    assert run.json()["params"]["groups"] == ["A", "B", "C", "D"]
+
+
+def test_cross_validation_matrix_groups_with_unknown_letter_returns_400(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    run = client.post("/api/voc-analysis/cross-validation-matrix", json={"use_board": True, "groups": ["A", "E"]})
+    assert run.status_code == 400
+    assert "E" in run.json()["error"]
+
+
+def test_cross_validation_matrix_empty_groups_list_returns_400(monkeypatch):
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    run = client.post("/api/voc-analysis/cross-validation-matrix", json={"use_board": True, "groups": []})
+    assert run.status_code == 400
+
+
+def test_cross_validation_matrix_api_key_override_is_used_instead_of_settings(monkeypatch):
+    """요청에 openai_api_key/anthropic_api_key를 실으면, 설정 화면에 저장된 값 대신
+    그 값으로 클라이언트가 구성돼야 한다."""
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    run = client.post("/api/voc-analysis/cross-validation-matrix", json={
+        "use_board": True,
+        "openai_api_key": "sk-override-openai",
+        "anthropic_api_key": "sk-override-anthropic",
+    })
+    assert run.status_code == 200
+    assert ("openai", "sk-override-openai") in _XValFakeClient.created_api_keys
+    assert ("anthropic", "sk-override-anthropic") in _XValFakeClient.created_api_keys
+
+
+def test_cross_validation_matrix_api_key_override_never_saved_to_history(monkeypatch):
+    """이 매트릭스 이력은 전원 공개(모든 사용자가 조회 가능)이므로, 요청에 실어보낸 override
+    키가 저장된 레코드(params)나 이력 목록·상세 응답 어디에도 절대 그대로 남으면 안 된다."""
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+
+    secret_openai = "sk-super-secret-openai-key"
+    secret_anthropic = "sk-super-secret-anthropic-key"
+    run = client.post("/api/voc-analysis/cross-validation-matrix", json={
+        "use_board": True,
+        "openai_api_key": secret_openai,
+        "anthropic_api_key": secret_anthropic,
+    })
+    assert run.status_code == 200
+    run_body = run.text
+    assert secret_openai not in run_body
+    assert secret_anthropic not in run_body
+
+    analysis_id = run.json()["id"]
+    detail_body = client.get(f"/api/voc-analysis/cross-validation-matrix/{analysis_id}").text
+    assert secret_openai not in detail_body
+    assert secret_anthropic not in detail_body
+
+    history_body = client.get("/api/voc-analysis/cross-validation-matrix/history").text
+    assert secret_openai not in history_body
+    assert secret_anthropic not in history_body
 
 
 def test_thread_pool_executor_never_exceeds_max_workers_under_load():

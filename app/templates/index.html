@@ -93,16 +93,16 @@
     .pill { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; background: #eef2f7; color: #1f2937; font-size: 0.78rem; margin-right: 0.3rem; }
     /* 실행 버튼 클릭 시 단계별 진행사항 체크리스트 - judge-badge와 동일한 색상 팔레트를
        재사용해(pass=초록/fail=빨강/skipped=주황) 화면 전체 디자인 일관성을 유지한다. */
-    .step-list { list-style: none; margin: 0.6rem 0 0; padding: 0; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.4rem; }
-    .step-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--text-secondary); white-space: nowrap; }
-    .step-item:not(:last-child)::after { content: '→'; margin-left: 0.4rem; color: #cbd5e1; font-weight: 400; }
-    .step-item .step-icon { display: inline-flex; align-items: center; justify-content: center; width: 1.3rem; height: 1.3rem; border-radius: 50%; font-size: 0.75rem; flex-shrink: 0; background: #eef2f7; color: #94a3b8; }
+    .step-list { list-style: none; margin: 0.75rem 0 0; padding: 0.9rem 1.1rem; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.7rem 0.6rem; background: #f8fafc; border: 1px solid var(--gridline); border-radius: 12px; }
+    .step-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.98rem; color: var(--text-secondary); white-space: nowrap; padding: 0.2rem 0; }
+    .step-item:not(:last-child)::after { content: '→'; margin-left: 0.5rem; color: #cbd5e1; font-weight: 400; font-size: 1.15rem; }
+    .step-item .step-icon { display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border-radius: 50%; font-size: 1rem; flex-shrink: 0; background: #eef2f7; color: #94a3b8; }
     .step-item.step-done { color: #166534; }
     .step-item.step-done .step-icon { background: #dcfce7; color: #166534; }
-    .step-item.step-active { color: #1f2937; font-weight: 600; }
-    .step-item.step-active .step-icon { background: #dbeafe; color: #1d4ed8; animation: step-spin 1s linear infinite; }
-    .step-item.step-error { color: #991b1b; font-weight: 600; }
-    .step-item.step-error .step-icon { background: #fee2e2; color: #991b1b; animation: none; }
+    .step-item.step-active { color: #1d4ed8; font-weight: 700; font-size: 1.05rem; background: #dbeafe; padding: 0.35rem 0.7rem; border-radius: 999px; }
+    .step-item.step-active .step-icon { background: white; color: #1d4ed8; animation: step-spin 1s linear infinite; }
+    .step-item.step-error { color: #991b1b; font-weight: 700; font-size: 1.05rem; background: #fee2e2; padding: 0.35rem 0.7rem; border-radius: 999px; }
+    .step-item.step-error .step-icon { background: white; color: #991b1b; animation: none; }
     @keyframes step-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .step-item.step-active .step-icon { animation: none; } }
 

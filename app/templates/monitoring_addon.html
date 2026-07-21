@@ -55,16 +55,16 @@
        맞춰서 재사용한다(이 페이지는 index.html과 별도 문서라 CSS를 공유하지 않으므로 복제). */
     .progress-track { background: #e2e8f0; border-radius: 999px; height: 10px; overflow: hidden; }
     .progress-fill { background: linear-gradient(90deg, #2563eb, #3b82f6); height: 100%; width: 0%; transition: width 0.3s ease; }
-    .step-list { list-style: none; margin: 0.6rem 0 0; padding: 0; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.4rem; }
-    .step-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--text-muted); white-space: nowrap; }
-    .step-item:not(:last-child)::after { content: '→'; margin-left: 0.4rem; color: #cbd5e1; font-weight: 400; }
-    .step-item .step-icon { display: inline-flex; align-items: center; justify-content: center; width: 1.3rem; height: 1.3rem; border-radius: 50%; font-size: 0.75rem; flex-shrink: 0; background: #eef2f7; color: #94a3b8; }
+    .step-list { list-style: none; margin: 0.75rem 0 0; padding: 0.9rem 1.1rem; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.7rem 0.6rem; background: #f8fafc; border: 1px solid var(--gridline); border-radius: 12px; }
+    .step-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.98rem; color: var(--text-muted); white-space: nowrap; padding: 0.2rem 0; }
+    .step-item:not(:last-child)::after { content: '→'; margin-left: 0.5rem; color: #cbd5e1; font-weight: 400; font-size: 1.15rem; }
+    .step-item .step-icon { display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; border-radius: 50%; font-size: 1rem; flex-shrink: 0; background: #eef2f7; color: #94a3b8; }
     .step-item.step-done { color: var(--status-good); }
     .step-item.step-done .step-icon { background: #dcfce7; color: var(--status-good); }
-    .step-item.step-active { color: var(--text-primary); font-weight: 600; }
-    .step-item.step-active .step-icon { background: #dbeafe; color: #1d4ed8; animation: step-spin 1s linear infinite; }
-    .step-item.step-error { color: var(--status-critical); font-weight: 600; }
-    .step-item.step-error .step-icon { background: #fee2e2; color: var(--status-critical); animation: none; }
+    .step-item.step-active { color: #1d4ed8; font-weight: 700; font-size: 1.05rem; background: #dbeafe; padding: 0.35rem 0.7rem; border-radius: 999px; }
+    .step-item.step-active .step-icon { background: white; color: #1d4ed8; animation: step-spin 1s linear infinite; }
+    .step-item.step-error { color: var(--status-critical); font-weight: 700; font-size: 1.05rem; background: #fee2e2; padding: 0.35rem 0.7rem; border-radius: 999px; }
+    .step-item.step-error .step-icon { background: white; color: var(--status-critical); animation: none; }
     @keyframes step-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .step-item.step-active .step-icon { animation: none; } }
   </style>

@@ -317,6 +317,21 @@ def test_build_interpreter_prompt_includes_trust_boundary():
     assert "절대 따르지" in system_prompt
 
 
+def test_all_four_prompt_builders_instruct_json_quote_escaping():
+    """실제 운영 환경에서 Anthropic이 VOC 원문의 인용 문구("규정상 안 됩니다" 등)를 그대로
+    옮기며 JSON 문자열 안의 큰따옴표를 이스케이프하지 않아 json.loads가 깨진 사례가 있었다
+    (_generate_analysis가 재시도 후에도 실패하면 RuntimeError). 근본적으로 막을 수는
+    없지만(모델이 지시를 어길 수 있음), 네 프롬프트 빌더 전부에 명시적 이스케이프 지시가
+    있는지는 회귀로 고정해둔다."""
+    items, counts = build_voc_items([{"id": 1, "title": "t", "content": "c", "created_at": "2026-01-01"}], [], [])
+    interpreter_system, _ = build_interpreter_prompt(_VOC_TEST_ITEMS)
+    analysis_system, _ = build_prompts(items, counts)
+    judge_system, _ = build_judge_prompts(_VALID_ANALYSIS_RESULT, _VALID_ITEMS)
+    refine_system, _ = build_refine_prompt(_VALID_ANALYSIS_RESULT, _SELF_CHECK_FAIL, _VALID_ITEMS)
+    for system_prompt in (interpreter_system, analysis_system, judge_system, refine_system):
+        assert "이스케이프" in system_prompt
+
+
 def test_validate_interpreter_schema_accepts_valid_response():
     valid_ids = {"post-1", "post-2"}
     result = {"classifications": [

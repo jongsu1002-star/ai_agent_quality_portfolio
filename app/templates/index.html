@@ -93,8 +93,9 @@
     .pill { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; background: #eef2f7; color: #1f2937; font-size: 0.78rem; margin-right: 0.3rem; }
     /* 실행 버튼 클릭 시 단계별 진행사항 체크리스트 - judge-badge와 동일한 색상 팔레트를
        재사용해(pass=초록/fail=빨강/skipped=주황) 화면 전체 디자인 일관성을 유지한다. */
-    .step-list { list-style: none; margin: 0.6rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
-    .step-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.88rem; color: var(--text-secondary); }
+    .step-list { list-style: none; margin: 0.6rem 0 0; padding: 0; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.4rem; }
+    .step-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--text-secondary); white-space: nowrap; }
+    .step-item:not(:last-child)::after { content: '→'; margin-left: 0.4rem; color: #cbd5e1; font-weight: 400; }
     .step-item .step-icon { display: inline-flex; align-items: center; justify-content: center; width: 1.3rem; height: 1.3rem; border-radius: 50%; font-size: 0.75rem; flex-shrink: 0; background: #eef2f7; color: #94a3b8; }
     .step-item.step-done { color: #166534; }
     .step-item.step-done .step-icon { background: #dcfce7; color: #166534; }

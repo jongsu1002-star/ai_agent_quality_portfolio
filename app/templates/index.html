@@ -34,6 +34,10 @@
     .table-view table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
     .table-view th, .table-view td { text-align: left; padding: 0.55rem 1.25rem; border-bottom: 1px solid var(--gridline); white-space: nowrap; }
     .table-view th { color: var(--text-secondary); }
+    /* 개선안처럼 문장 단위 긴 텍스트가 들어가는 셀은 표 전체 기본값(nowrap)을 따르면
+       가로 스크롤이 과도해져 가독성이 떨어지므로, 그 셀에만 개별적으로 줄바꿈 허용
+       (.table-view-wrap-cell) - 빈도/심각도처럼 원래 짧은 값은 그대로 nowrap 유지. */
+    .table-view .table-view-wrap-cell { white-space: normal; }
     #viz-tooltip { position: fixed; pointer-events: none; background: var(--text-primary); color: #fff; padding: 0.35rem 0.6rem; border-radius: 6px; font-size: 0.78rem; opacity: 0; transition: opacity 0.1s ease; z-index: 50; white-space: nowrap; }
     .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; }
     .doc-tabs { display: flex; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
@@ -1402,7 +1406,7 @@ let _vocActiveRunId = null;
           <td>${escapeHtml(issue.theme || '')}</td>
           <td>${freq}</td>
           <td>${escapeHtml(issue.severity || '')}</td>
-          <td>${escapeHtml(issue.suggestion || '')}</td>
+          <td class="table-view-wrap-cell">${escapeHtml(issue.suggestion || '')}</td>
         </tr>`;
       }).join('');
       const focusHtml = params.focus_instruction ? `<p class="chart-hint">지시사항: "${escapeHtml(params.focus_instruction)}"</p>` : '';
@@ -1426,8 +1430,8 @@ let _vocActiveRunId = null;
           ${dateWarningHtml}
           ${_renderInterpreterBadge(result.interpreter)}
           <p>${escapeHtml(result.summary || '')}</p>
-          <table><thead><tr><th>이슈 주제</th><th>빈도</th><th>심각도</th><th>개선안</th></tr></thead>
-            <tbody>${issuesHtml || '<tr><td colspan="4">⚠ 분석 대상 안에서 지시사항과 관련된 근거를 찾지 못했습니다 - "이슈 없음"이 아니라 정책 근거 부족/검토 필요 상태입니다. 지시사항을 비우거나 넓혀서 다시 시도해 보세요.</td></tr>'}</tbody></table>
+          <div class="table-view"><table><thead><tr><th>이슈 주제</th><th>빈도</th><th>심각도</th><th>개선안</th></tr></thead>
+            <tbody>${issuesHtml || '<tr><td colspan="4">⚠ 분석 대상 안에서 지시사항과 관련된 근거를 찾지 못했습니다 - "이슈 없음"이 아니라 정책 근거 부족/검토 필요 상태입니다. 지시사항을 비우거나 넓혀서 다시 시도해 보세요.</td></tr>'}</tbody></table></div>
           ${_renderSelfCheckBadge(result.self_check)}
           ${_renderJudgeBadge(result.judge)}
           ${gateHtml}
@@ -2523,7 +2527,7 @@ let _vocActiveRunId = null;
         }
         const headers = ['id', 'category', 'question', 'golden_answer'];
         const rows = data.rows.map(r => headers.map(h => r[h] ?? ''));
-        el.innerHTML = `<p class="muted">${escapeHtml(data.filename)} - 총 ${data.total}건 중 ${data.shown}건 표시</p><div id="dataset-preview-table"></div>`;
+        el.innerHTML = `<p class="muted">${escapeHtml(data.filename)} - 총 ${data.total}건 중 ${data.shown}건 표시</p><div id="dataset-preview-table" class="table-view"></div>`;
         renderTable('dataset-preview-table', headers, rows);
       } catch (err) {
         el.innerHTML = `<p class="error-note">미리보기 요청이 실패했습니다: ${escapeHtml(err.message)}</p>`;
@@ -2540,7 +2544,7 @@ let _vocActiveRunId = null;
           el.innerHTML = `<p class="error-note">${escapeHtml(data.error || '미리보기를 불러올 수 없습니다.')}</p>`;
           return;
         }
-        el.innerHTML = `<p class="muted">${escapeHtml(data.filename)} - 총 ${data.total}건 중 ${data.shown}건 표시</p><div id="testcase-preview-table"></div>`;
+        el.innerHTML = `<p class="muted">${escapeHtml(data.filename)} - 총 ${data.total}건 중 ${data.shown}건 표시</p><div id="testcase-preview-table" class="table-view"></div>`;
         renderTable('testcase-preview-table', ['id', 'question'], data.rows.map(r => [r.id, r.question]));
       } catch (err) {
         el.innerHTML = `<p class="error-note">미리보기 요청이 실패했습니다: ${escapeHtml(err.message)}</p>`;

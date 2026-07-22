@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.routers import voc_analysis as voc_analysis_module
+from qa_agent import error_log
 
 
 class _FakeJudgeClient:
@@ -207,6 +208,24 @@ def test_run_gracefully_degrades_on_llm_failure():
     assert response.status_code == 502
     assert "error" in response.json()
     assert "llm down" not in response.json()["error"]
+
+
+def test_run_failure_records_real_cause_in_error_log():
+    """화면에는 안내 문구만 노출되지만, 실제 원인(예외 메시지)은 오류 로그에 남아 관리자
+    화면(GET /api/error-log)에서 확인할 수 있어야 한다."""
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
+    _FakeJudgeClient.fail = True
+    try:
+        response = client.post("/api/voc-analysis/run", json={"use_jira": False, "use_excel": False})
+        assert response.status_code == 502
+        entries = error_log.list_errors()
+        assert entries
+        assert entries[0]["feature"] == "voc_analysis"
+        assert entries[0]["message"] == "llm down"
+        assert entries[0]["error_type"] == "RuntimeError"
+    finally:
+        _FakeJudgeClient.fail = False
 
 
 def test_voc_excel_template_and_upload_round_trip():
@@ -911,6 +930,11 @@ def test_sync_run_save_failure_returns_502_not_500(monkeypatch):
     assert response.status_code == 502
     assert "disk full" not in response.json()["error"]
 
+    entries = error_log.list_errors()
+    assert entries
+    assert entries[0]["feature"] == "voc_analysis_save"
+    assert "disk full" in entries[0]["message"]
+
 
 # ===================== P0-2: 동시 실행 제한 + registry 정리 =====================
 
@@ -1017,6 +1041,7 @@ class _XValFakeClient:
 
     enabled_providers = {"openai", "anthropic"}
     created_api_keys = []  # (provider, api_key) 튜플 목록 - 실제로 어떤 키로 구성됐는지 검증용
+    fail_provider = None  # 특정 provider 호출에서만 강제로 실패시켜 오류 로그 기록을 검증하기 위함
 
     def __init__(self, provider=None, api_key=None, **kwargs):
         self.provider = provider or "openai"
@@ -1030,6 +1055,8 @@ class _XValFakeClient:
 
     def judge(self, system_prompt, user_prompt):
         self.calls.append((system_prompt, user_prompt))
+        if _XValFakeClient.fail_provider == self.provider:
+            raise RuntimeError(f"{self.provider} 생성 실패(시뮬레이션)")
         if "독립적인 QA 심사관" in system_prompt:
             return {
                 "verdict": "PASS",
@@ -1048,9 +1075,11 @@ class _XValFakeClient:
 def _xval_fake_client_reset():
     _XValFakeClient.enabled_providers = {"openai", "anthropic"}
     _XValFakeClient.created_api_keys = []
+    _XValFakeClient.fail_provider = None
     yield
     _XValFakeClient.enabled_providers = {"openai", "anthropic"}
     _XValFakeClient.created_api_keys = []
+    _XValFakeClient.fail_provider = None
 
 
 def test_cross_validation_matrix_runs_all_four_groups_and_saves_separately(monkeypatch):
@@ -1238,6 +1267,29 @@ def test_cross_validation_matrix_api_key_override_never_saved_to_history(monkeyp
 # POST /cross-validation-matrix/run-async - 실행 버튼에 단계별 진행사항을 보여주기 위해
 # 완전 동기였던 매트릭스를 VOC 분석(POST /run-async)과 동일한 패턴으로 비동기화한 것.
 # VOC_RUN_REGISTRY를 그대로 공유하므로 _poll_until(위 절에서 정의)도 그대로 재사용한다.
+
+def test_cross_validation_matrix_run_async_failure_records_real_cause_in_error_log(monkeypatch):
+    """실제로 관찰된 장애(Anthropic 생성 중 실패) 재현 - 화면에는 안내 문구만 뜨지만,
+    오류 로그(GET /api/error-log)에는 실제 예외 메시지가 남아야 원인 파악이 가능하다."""
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
+    _XValFakeClient.fail_provider = "anthropic"
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "느려요", "content": "응답이 느립니다"})
+
+    start = client.post("/api/voc-analysis/cross-validation-matrix/run-async", json={"use_board": True})
+    assert start.status_code == 200
+    run_id = start.json()["run_id"]
+
+    final = _poll_until(client, f"/api/voc-analysis/cross-validation-matrix/run-async/{run_id}/status", {"done", "error"})
+    assert final["status"] == "error"
+    assert "anthropic" not in final["error"]  # 화면에는 안내 문구만(원문 예외 미노출)
+
+    entries = error_log.list_errors()
+    assert entries
+    assert entries[0]["feature"] == "voc_cross_validation_matrix"
+    assert entries[0]["run_id"] == run_id
+    assert "anthropic 생성 실패" in entries[0]["message"]
+
 
 def test_cross_validation_matrix_run_async_returns_run_id_immediately_then_completes(monkeypatch):
     monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)

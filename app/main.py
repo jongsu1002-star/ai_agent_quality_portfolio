@@ -59,6 +59,7 @@ except Exception as _addon_config_error:
     K6_HISTORY_ENABLED = False
     GRAFANA_LINK_ENABLED = False
 
+from qa_agent import error_log
 from qa_agent.board import BoardStore
 from qa_agent.config_loader import Config
 from qa_agent.excel_io import build_template_workbook, build_testcase_template_workbook, load_dataset, load_testcase
@@ -614,6 +615,17 @@ def list_users(request: Request) -> JSONResponse:
     if error:
         return error
     return JSONResponse(USER_STORE.list_all())
+
+
+@app.get("/api/error-log")
+def get_error_log(request: Request) -> JSONResponse:
+    """QA 파이프라인/VOC 분석/교차검증 매트릭스 실행 실패의 실제 원인(예외 메시지·스택트레이스)을
+    최근 순으로 반환 - 관리자 전용. 화면에는 "LLM 설정과 서버 로그를 확인하세요" 같은 안내
+    문구만 노출하고(내부 경로/설정값 유출 방지), 실제 원인은 이 API로만 확인 가능하다."""
+    error = _require_admin(request)
+    if error:
+        return error
+    return JSONResponse({"entries": error_log.list_errors()})
 
 
 @app.post("/api/users/{username}/approve")
@@ -1335,6 +1347,7 @@ def _execute_run(username: str, run_id: str, techniques: List[str], category_fil
     except Exception as exc:
         # stage는 일부러 덮어쓰지 않음 - 실패 시점에 마지막으로 기록됐던 단계 이름을 그대로
         # 남겨둬야, 폴링하는 화면이 "어느 단계에서 실패했는지"를 정확히 표시할 수 있다.
+        error_log.record_error("qa_pipeline", exc, username=username, run_id=run_id)
         with RUN_LOCK:
             RUN_REGISTRY[username][run_id]["status"] = "error"
             RUN_REGISTRY[username][run_id]["error"] = str(exc)

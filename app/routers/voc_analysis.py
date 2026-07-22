@@ -25,6 +25,7 @@ from fastapi import APIRouter, Request, UploadFile, File
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field, field_validator
 
+from qa_agent import error_log
 from qa_agent.board import BoardStore
 from qa_agent.excel_io import (
     build_voc_import_template_workbook,
@@ -417,17 +418,19 @@ def run_analysis(payload: VocRunRequest, request: Request) -> JSONResponse:
         )
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
-    except Exception:
+    except Exception as exc:
         logger.exception("VOC analysis generation failed")
+        error_log.record_error("voc_analysis", exc, username=prepared["username"])
         return JSONResponse({"error": "VOC 분석 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요."}, status_code=502)
 
     try:
         record = _build_and_save_analysis_record(prepared, result)
-    except Exception:
+    except Exception as exc:
         # 생성 자체는 성공했는데 저장 단계(디스크 가득 참, 권한 오류 등)에서 실패한 경우 -
         # 비동기 경로(_execute_voc_analysis_async)와 동일한 결함 클래스라 같은 방식으로
         # 방어함(내부 경로/예외 원문은 노출하지 않고 상세는 로그에만).
         logger.exception("VOC analysis result save failed")
+        error_log.record_error("voc_analysis_save", exc, username=prepared["username"])
         return JSONResponse({"error": "분석 결과를 저장하지 못했습니다. 서버 로그를 확인하거나 관리자에게 문의하세요."}, status_code=502)
     return JSONResponse(record)
 
@@ -597,14 +600,16 @@ def run_cross_validation(payload: VocRunRequest, request: Request) -> JSONRespon
         )
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
-    except Exception:
+    except Exception as exc:
         logger.exception("VOC cross-validation matrix failed")
+        error_log.record_error("voc_cross_validation_matrix", exc, username=prepared["username"])
         return JSONResponse({"error": "교차검증 매트릭스 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요."}, status_code=502)
 
     try:
         record = _build_and_save_xval_record(prepared["username"], prepared["params"], result)
-    except Exception:
+    except Exception as exc:
         logger.exception("VOC cross-validation matrix result save failed")
+        error_log.record_error("voc_cross_validation_matrix_save", exc, username=prepared["username"])
         return JSONResponse({"error": "매트릭스 결과를 저장하지 못했습니다. 서버 로그를 확인하거나 관리자에게 문의하세요."}, status_code=502)
     return JSONResponse(record)
 
@@ -633,16 +638,18 @@ def _execute_xval_async(username: str, run_id: str, prepared: Dict[str, Any]) ->
     except ValueError as exc:
         _finish_voc_run(username, run_id, "error", error=str(exc))
         return
-    except Exception:
+    except Exception as exc:
         logger.exception("VOC cross-validation matrix failed (async run_id=%s)", run_id)
+        error_log.record_error("voc_cross_validation_matrix", exc, username=username, run_id=run_id)
         _finish_voc_run(username, run_id, "error", error="교차검증 매트릭스 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요.")
         return
 
     _on_stage("저장 중")
     try:
         record = _build_and_save_xval_record(username, prepared["params"], result)
-    except Exception:
+    except Exception as exc:
         logger.exception("VOC cross-validation matrix result save failed (async run_id=%s)", run_id)
+        error_log.record_error("voc_cross_validation_matrix_save", exc, username=username, run_id=run_id)
         _finish_voc_run(username, run_id, "error", error="매트릭스 결과를 저장하지 못했습니다. 서버 로그를 확인하거나 관리자에게 문의하세요.")
         return
 
@@ -809,8 +816,9 @@ def _execute_voc_analysis_async(username: str, run_id: str, prepared: Dict[str, 
     except ValueError as exc:
         _finish_voc_run(username, run_id, "error", error=str(exc))
         return
-    except Exception:
+    except Exception as exc:
         logger.exception("VOC analysis generation failed (async run_id=%s)", run_id)
+        error_log.record_error("voc_analysis", exc, username=username, run_id=run_id)
         _finish_voc_run(username, run_id, "error", error="VOC 분석 처리에 실패했습니다. LLM 설정과 서버 로그를 확인하세요.")
         return
 
@@ -820,8 +828,9 @@ def _execute_voc_analysis_async(username: str, run_id: str, prepared: Dict[str, 
     _on_stage("저장 중")
     try:
         record = _build_and_save_analysis_record(prepared, result)
-    except Exception:
+    except Exception as exc:
         logger.exception("VOC analysis result save failed (async run_id=%s)", run_id)
+        error_log.record_error("voc_analysis_save", exc, username=username, run_id=run_id)
         _finish_voc_run(username, run_id, "error", error="분석 결과를 저장하지 못했습니다. 서버 로그를 확인하거나 관리자에게 문의하세요.")
         return
 

@@ -173,6 +173,7 @@
       <button type="button" class="tab-btn" data-tab="board" onclick="showTab('board')">게시판</button>
       <button type="button" class="tab-btn" data-tab="voc-analysis" onclick="showTab('voc-analysis')">VOC 분석</button>
       <button type="button" class="tab-btn" id="users-tab-btn" data-tab="users" onclick="showTab('users')" style="display:none;">사용자 관리</button>
+      <button type="button" class="tab-btn" id="error-log-tab-btn" data-tab="error-log" onclick="showTab('error-log')" style="display:none;">오류 로그</button>
     </div>
   </div>
 
@@ -533,6 +534,15 @@
     </div>
   </div>
 
+  <!-- ===================== 오류 로그 (관리자 전용) ===================== -->
+  <div id="tab-error-log" class="tab-panel">
+    <div class="card">
+      <h2>실행 오류 로그</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">QA 파이프라인/VOC 분석/교차검증 매트릭스 실행이 실패했을 때, 화면에는 안내 문구만 표시되지만 실제 원인(예외 메시지·스택트레이스)은 여기서 확인할 수 있습니다.</p>
+      <div id="error-log-table" class="table-view">불러오는 중...</div>
+    </div>
+  </div>
+
   <!-- ===================== 게시판 ===================== -->
   <div id="tab-board" class="tab-panel">
     <div class="card">
@@ -741,6 +751,7 @@
         _canModerate = !data.enabled || _isAdmin; // 계정 시스템이 꺼진 LAN 모드에서는 전원이 사실상 운영자
         const canSeeSettings = _canModerate;
         document.getElementById('users-tab-btn').style.display = _isAdmin ? '' : 'none';
+        document.getElementById('error-log-tab-btn').style.display = _isAdmin ? '' : 'none';
         document.getElementById('connection-settings-card').style.display = canSeeSettings ? '' : 'none';
         if (canSeeSettings) {
           loadSettings();
@@ -1716,6 +1727,43 @@ let _vocActiveRunId = null;
       loadUsers();
     }
 
+    const ERROR_LOG_FEATURE_LABELS = {
+      qa_pipeline: 'QA 파이프라인',
+      voc_analysis: 'VOC 분석',
+      voc_analysis_save: 'VOC 분석(저장)',
+      voc_cross_validation_matrix: '교차검증 매트릭스',
+      voc_cross_validation_matrix_save: '교차검증 매트릭스(저장)',
+    };
+
+    async function loadErrorLog() {
+      const el = document.getElementById('error-log-table');
+      const res = await fetch('/api/error-log');
+      if (!res.ok) {
+        el.innerHTML = '<p>관리자만 조회할 수 있습니다.</p>';
+        return;
+      }
+      const data = await res.json();
+      const entries = data.entries || [];
+      if (!entries.length) {
+        el.innerHTML = '<p>최근 발생한 오류가 없습니다.</p>';
+        return;
+      }
+      const rows = entries.map(e => `<tr>
+          <td>${escapeHtml(formatTimestamp(e.at))}</td>
+          <td>${escapeHtml(ERROR_LOG_FEATURE_LABELS[e.feature] || e.feature || '')}</td>
+          <td>${escapeHtml(e.username || '-')}</td>
+          <td>${escapeHtml(e.error_type || '')}</td>
+          <td class="table-view-wrap-cell">
+            ${escapeHtml(e.message || '')}
+            <details style="margin-top:0.3rem;">
+              <summary style="cursor:pointer; color:var(--text-secondary);">전체 스택트레이스</summary>
+              <pre style="white-space:pre-wrap; font-size:0.78rem; background:#f8fafc; color:#1f2937; padding:0.5rem 0.75rem; border-radius:6px; margin-top:0.3rem;">${escapeHtml(e.traceback || '')}</pre>
+            </details>
+          </td>
+        </tr>`).join('');
+      el.innerHTML = `<table><thead><tr><th>시각</th><th>기능</th><th>사용자</th><th>오류 유형</th><th>메시지 / 상세</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
     const STATUS_LABELS = {
       idle: '대기중',
       queued: '대기열 등록',
@@ -2326,6 +2374,9 @@ let _vocActiveRunId = null;
       }
       if (name === 'users') {
         loadUsers();
+      }
+      if (name === 'error-log') {
+        loadErrorLog();
       }
       if (name === 'board') {
         loadBoardPosts();

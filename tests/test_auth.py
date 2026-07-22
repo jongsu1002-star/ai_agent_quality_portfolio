@@ -151,6 +151,21 @@ def test_non_admin_cannot_access_user_management():
     assert bob_client.get("/api/users").status_code == 403
 
 
+def test_error_log_is_admin_only():
+    admin_client = TestClient(app)
+    _signup(admin_client, "alice", "secret123")
+
+    bob_client = TestClient(app)
+    _signup(bob_client, "bob", "secret456")
+    admin_client.post("/api/users/bob/approve")
+    bob_client.post("\login", json={"username": "bob", "password": "secret456"})
+
+    assert bob_client.get("/api/error-log").status_code == 403
+    admin_response = admin_client.get("/api/error-log")
+    assert admin_response.status_code == 200
+    assert "entries" in admin_response.json()
+
+
 def test_admin_can_approve_a_pending_signup():
     admin_client = TestClient(app)
     _signup(admin_client, "alice", "secret123")

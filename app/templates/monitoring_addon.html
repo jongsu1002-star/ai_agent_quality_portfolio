@@ -87,7 +87,9 @@
       <button type="button" class="tab-btn active">모니터링 애드온</button>
       <button type="button" class="tab-btn" onclick="window.location.href='/#board'">게시판</button>
       <button type="button" class="tab-btn" onclick="window.location.href='/#voc-analysis'">VOC 분석</button>
+      <button type="button" class="tab-btn" onclick="window.location.href='/#voc-results'">VOC 분석 결과</button>
       <button type="button" class="tab-btn" id="users-nav-btn" onclick="window.location.href='/#users'" style="display:none;">사용자 관리</button>
+      <button type="button" class="tab-btn" id="error-log-nav-btn" onclick="window.location.href='/#error-log'" style="display:none;">오류 로그</button>
     </div>
   </div>
 
@@ -254,6 +256,7 @@
         logoutBtn.style.display = data.enabled ? '' : 'none';
         logoutBtn.textContent = data.username ? `로그아웃 (${data.username})` : '로그아웃';
         document.getElementById('users-nav-btn').style.display = data.is_admin ? '' : 'none';
+        document.getElementById('error-log-nav-btn').style.display = data.is_admin ? '' : 'none';
       } catch (err) {
         // 조회 실패해도 화면 자체는 계속 써야 하므로 조용히 무시
       }

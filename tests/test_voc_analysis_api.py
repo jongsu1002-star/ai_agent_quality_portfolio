@@ -717,6 +717,24 @@ def test_quality_dashboard_includes_curated_defect_status():
     assert defect["p1_resolved"] <= defect["p1_total"]
 
 
+def test_prometheus_metrics_helper_matches_quality_dashboard_json():
+    """/metrics-addon(Prometheus)이 쓰는 get_quality_metrics_for_prometheus()가 화면의
+    /quality-dashboard와 같은 원본 함수를 재사용해 숫자가 어긋나지 않는지 확인."""
+    client = TestClient(app)
+    client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "불친절한 상담원 때문에 화가 납니다"})
+    client.post("/api/voc-analysis/run", json={"use_board": True})
+
+    dashboard = client.get("/api/voc-analysis/quality-dashboard").json()
+    prometheus_metrics = voc_analysis_module.get_quality_metrics_for_prometheus()
+
+    assert prometheus_metrics["voc_total_runs"] == dashboard["voc_history"]["total_runs"]
+    assert prometheus_metrics["judge_verdict"] == dashboard["voc_history"]["judge_verdict"]
+    assert prometheus_metrics["quality_gate"] == dashboard["voc_history"]["quality_gate"]
+    if dashboard["test_summary"].get("available"):
+        assert prometheus_metrics["test_total"] == dashboard["test_summary"]["total"]
+        assert prometheus_metrics["test_passed"] == dashboard["test_summary"]["passed"]
+
+
 def test_report_versions_list_returns_empty_when_no_snapshot_file():
     client = TestClient(app)
     response = client.get("/api/voc-analysis/report-versions/voc_quality_report")

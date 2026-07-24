@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -165,12 +167,74 @@ def test_voc_results_tab_wired_separately_from_voc_analysis_tab():
     assert "loadVocQualityDashboard();" in html
 
 
+def test_index_and_addon_nav_tabs_stay_in_sync():
+    """monitoring_addon.html은 index.html과 별도 문서라 상단 탭 메뉴를 통째로 복제해서
+    쓴다 - index.html에 새 탭(data-tab)을 추가할 때 이 복제본에 반영하는 걸 잊으면,
+    모니터링 애드온 화면에서만 그 탭으로 가는 메뉴가 안 보이는 채로 조용히 어긋난다
+    (실사용자가 "모니터링 애드온 탭에서 VOC 분석 결과 메뉴가 안 보인다"고 신고해 발견).
+    index.html의 모든 data-tab 값이 monitoring_addon.html의 탭 메뉴에도 '/#{tab}'
+    링크로 존재하는지 확인해 이 클래스의 회귀를 잡는다."""
+    index_html = INDEX_HTML.read_text(encoding="utf-8")
+    addon_html = MONITORING_ADDON_HTML.read_text(encoding="utf-8")
+
+    tab_names = re.findall(r'data-tab="([a-z-]+)"', index_html)
+    assert tab_names, "index.html에서 data-tab 탭을 찾지 못함 - 정규식이 깨졌을 가능성"
+
+    for tab_name in tab_names:
+        assert f"/#{tab_name}'" in addon_html or f'/#{tab_name}"' in addon_html, (
+            f'monitoring_addon.html 탭 메뉴에 "{tab_name}" 탭으로 가는 링크가 없음'
+        )
+
+
 def test_voc_quality_chart_full_page_link_present():
     """모니터링 애드온의 Prometheus/Grafana(임베딩 차트 + 새 창 링크)와 동일한 형식 -
     차트 카드 안에 새 창으로 여는 전용 페이지 링크가 있어야 한다."""
     html = INDEX_HTML.read_text(encoding="utf-8")
     assert '<a href="/voc-quality-chart" target="_blank">' in html
     assert "차트 크게 보기" in html
+
+
+def test_voc_grafana_card_wired_in_index_and_standalone_page():
+    """VOC 판정/게이트 분포를 실제 Prometheus/Grafana로 보여주는 카드 - 모니터링 애드온과
+    동일하게 GRAFANA_LINK_ENABLED 플래그로 노출 여부를 제어하고, 같은 Grafana 대시보드
+    (qa-platform-voc)를 임베드+링크 두 곳 모두에서 가리켜야 한다."""
+    index_html = INDEX_HTML.read_text(encoding="utf-8")
+    voc_chart_html = (REPO_ROOT / "app" / "templates" / "voc_quality_chart.html").read_text(encoding="utf-8")
+
+    for html in (index_html, voc_chart_html):
+        assert 'id="voc-grafana-card"' in html
+        assert "const GRAFANA_LINK_ENABLED = __GRAFANA_LINK_ENABLED__;" in html
+        assert "function loadVocPrometheusChart" in html
+        assert "qa_platform_voc_judge_pass" in html
+        assert "qa_platform_voc_judge_fail" in html
+        assert "d-solo/qa-platform-voc/qa-platform-voc-analysis-quality" in html
+        assert "id=\"voc-prometheus-link\"" in html
+        assert "id=\"voc-grafana-link\"" in html
+
+
+def test_voc_grafana_dashboard_json_is_valid_and_matches_exported_metrics():
+    """Grafana가 자동 프로비저닝하는 대시보드 JSON이 유효하고, 패널들이 실제로
+    /metrics-addon이 내보내는 지표 이름을 그대로 쿼리하는지 확인(오타로 빈 패널이 되는
+    것을 방지)."""
+    dashboard_path = REPO_ROOT / "infra" / "grafana" / "dashboards" / "qa-platform-voc.json"
+    dashboard = json.loads(dashboard_path.read_text(encoding="utf-8"))
+    assert dashboard["uid"] == "qa-platform-voc"
+
+    exprs = " ".join(
+        target["expr"]
+        for panel in dashboard["panels"]
+        for target in panel.get("targets", [])
+    )
+    for metric in (
+        "qa_platform_voc_total_runs",
+        "qa_platform_voc_test_passed",
+        "qa_platform_voc_test_total",
+        "qa_platform_voc_judge_pass",
+        "qa_platform_voc_judge_fail",
+        "qa_platform_voc_gate_approved",
+        "qa_platform_voc_gate_rejected",
+    ):
+        assert metric in exprs, f"대시보드 어떤 패널도 {metric}을 쿼리하지 않음"
 
 
 def test_voc_cross_validation_history_loaded_on_tab_switch_and_after_run():

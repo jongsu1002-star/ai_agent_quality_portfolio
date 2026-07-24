@@ -677,7 +677,9 @@ def index() -> HTMLResponse:
     no-store를 안 붙이면 브라우저가 이 HTML을 디스크 캐시에 담아두고 새로고침(F5)에도
     캐시를 그대로 써버려서, 서버는 최신 파일을 읽어도 화면은 예전 코드로 남는 문제가 있었음."""
     html_path = Path(__file__).with_name("templates").joinpath("index.html")
-    return HTMLResponse(html_path.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
+    html = html_path.read_text(encoding="utf-8")
+    html = html.replace("__GRAFANA_LINK_ENABLED__", "true" if GRAFANA_LINK_ENABLED else "false")
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/voc-quality-chart", response_class=HTMLResponse)
@@ -687,7 +689,9 @@ def voc_quality_chart_page() -> HTMLResponse:
     적용한 것. index.html과 별도 문서라 /api/voc-analysis/quality-dashboard를 직접
     호출해 같은 차트를 렌더링한다(로그인 미들웨어는 이 경로도 그대로 적용됨)."""
     html_path = Path(__file__).with_name("templates").joinpath("voc_quality_chart.html")
-    return HTMLResponse(html_path.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
+    html = html_path.read_text(encoding="utf-8")
+    html = html.replace("__GRAFANA_LINK_ENABLED__", "true" if GRAFANA_LINK_ENABLED else "false")
+    return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/health")

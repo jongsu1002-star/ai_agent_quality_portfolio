@@ -1,0 +1,71 @@
+{
+  "title": "QA Platform - VOC Analysis Quality",
+  "uid": "qa-platform-voc",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "VOC Total Runs",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "qa_platform_voc_total_runs", "refId": "A" } ]
+    },
+    {
+      "id": 2,
+      "title": "Test Suite Pass Rate",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "targets": [ { "expr": "qa_platform_voc_test_passed / qa_platform_voc_test_total", "refId": "A" } ]
+    },
+    {
+      "id": 3,
+      "title": "Independent Judge Verdict Distribution",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "qa_platform_voc_judge_pass", "legendFormat": "PASS", "refId": "A" },
+        { "expr": "qa_platform_voc_judge_fail", "legendFormat": "FAIL", "refId": "B" },
+        { "expr": "qa_platform_voc_judge_skipped", "legendFormat": "SKIPPED", "refId": "C" },
+        { "expr": "qa_platform_voc_judge_error", "legendFormat": "ERROR", "refId": "D" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Quality Gate Distribution",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "qa_platform_voc_gate_approved", "legendFormat": "APPROVED", "refId": "A" },
+        { "expr": "qa_platform_voc_gate_rejected", "legendFormat": "REJECTED", "refId": "B" },
+        { "expr": "qa_platform_voc_gate_review_required", "legendFormat": "REVIEW_REQUIRED", "refId": "C" },
+        { "expr": "qa_platform_voc_gate_unverified", "legendFormat": "UNVERIFIED", "refId": "D" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Quality Gate - Approved (latest)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "qa_platform_voc_gate_approved", "refId": "A" } ]
+    },
+    {
+      "id": 6,
+      "title": "Quality Gate - Rejected (latest)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [ { "expr": "qa_platform_voc_gate_rejected", "refId": "A" } ]
+    }
+  ]
+}

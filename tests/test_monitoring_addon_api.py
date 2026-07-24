@@ -117,6 +117,24 @@ def test_metrics_addon_includes_k6_metrics_after_import(isolated_addon_db):
     assert "qa_platform_k6_thresholds_passed 1" in response.text
 
 
+def test_metrics_addon_includes_voc_quality_gauges(isolated_addon_db):
+    """Prometheus가 이 값을 주기적으로 스크레이프하면서 자체 시계열을 쌓으므로(별도 스냅샷
+    DB 불필요), VOC 판정/게이트 분포가 매 요청마다 현재 값으로 노출되는지만 확인하면 된다."""
+    client = TestClient(app)
+    response = client.get("/metrics-addon")
+    assert response.status_code == 200
+    for metric in (
+        "qa_platform_voc_test_total",
+        "qa_platform_voc_test_passed",
+        "qa_platform_voc_total_runs",
+        "qa_platform_voc_judge_pass",
+        "qa_platform_voc_judge_fail",
+        "qa_platform_voc_gate_approved",
+        "qa_platform_voc_gate_rejected",
+    ):
+        assert metric in response.text
+
+
 def test_monitoring_addon_page_is_served_separately_from_main_dashboard():
     client = TestClient(app)
     addon_page = client.get("/monitoring-addon")

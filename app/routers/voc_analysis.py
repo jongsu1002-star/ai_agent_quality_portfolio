@@ -1081,6 +1081,23 @@ def _scan_voc_history() -> Dict[str, Any]:
     return {"total_runs": total, "judge_verdict": dict(verdicts), "quality_gate": dict(gates)}
 
 
+def get_quality_metrics_for_prometheus() -> Dict[str, Any]:
+    """`/metrics-addon`(Prometheus 스크레이프 대상)이 쓰는 VOC 품질 지표 - `quality_dashboard()`와
+    동일한 원본 함수(`_read_test_summary`/`_scan_voc_history`)를 그대로 재사용해 두 곳의 숫자가
+    어긋나지 않게 한다. Prometheus가 이 값을 주기적으로(기본 15초) 스크레이프하면서 자체
+    시계열을 쌓으므로, 이 앱이 별도로 스냅샷을 저장할 필요는 없다(기존 서버 요청수/응답시간
+    게이지와 동일한 방식 - 매 스크레이프 시점의 "현재 값"만 계산해서 돌려주면 됨)."""
+    test_summary = _read_test_summary()
+    history = _scan_voc_history()
+    return {
+        "test_total": test_summary.get("total", 0) if test_summary.get("available") else 0,
+        "test_passed": test_summary.get("passed", 0) if test_summary.get("available") else 0,
+        "voc_total_runs": history["total_runs"],
+        "judge_verdict": history["judge_verdict"],
+        "quality_gate": history["quality_gate"],
+    }
+
+
 @router.get("/quality-dashboard")
 def quality_dashboard() -> JSONResponse:
     """VOC 분석 탭 하단 품질 차트가 쓰는 실시간 집계 API.

@@ -671,6 +671,28 @@
       <div id="voc-quality-dashboard"><p class="chart-hint">불러오는 중...</p></div>
     </div>
 
+    <div class="card" id="voc-grafana-card" style="display:none;">
+      <h2>VOC 지표 Prometheus / Grafana</h2>
+      <p class="chart-hint">
+        위 품질 지표 차트와 같은 값(판정 분포/품질게이트 분포/테스트 통과율)을 Prometheus가
+        15초 주기로 <code>/metrics-addon</code>을 스크레이프해 자체적으로 추이(시계열)를 쌓습니다.
+        아래 스택은 <code>infra/docker-compose.monitoring.yml</code>로 별도 실행해야 보입니다
+        (기존 <code>docker-compose.yml</code>과 별개). 실행 방법은 <strong>사용자_매뉴얼.md 11장</strong> 참고.
+      </p>
+      <h3 style="margin-top:0.5rem;">Prometheus 쿼리 (실시간 차트)</h3>
+      <p class="chart-hint">독립 Judge 판정(PASS/FAIL) 최근 1시간 추이.</p>
+      <svg id="voc-prometheus-chart" class="viz-svg" viewBox="0 0 600 200" style="background:#0b0b0b; border-radius:8px;"></svg>
+      <p id="voc-prometheus-embed-error" class="chart-hint" style="display:none; color: var(--status-critical);">Prometheus 데이터를 불러올 수 없습니다 (컨테이너가 안 떠 있거나 연결할 수 없음) - 아래 링크로 직접 접속해보세요.</p>
+
+      <h3 style="margin-top:1.25rem;">Grafana 대시보드 (실시간 임베딩)</h3>
+      <div id="voc-grafana-embed-grid" style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem;"></div>
+      <p id="voc-grafana-embed-error" class="chart-hint" style="display:none; color: var(--status-critical);">Grafana 임베딩을 불러올 수 없습니다 (컨테이너가 안 떠 있거나 연결할 수 없음) - 아래 링크로 직접 접속해보세요.</p>
+      <ul style="margin-top:0.75rem;">
+        <li>Prometheus: <a id="voc-prometheus-link" href="#" target="_blank"></a></li>
+        <li>Grafana (새 창으로 열기): <a id="voc-grafana-link" href="#" target="_blank"></a> (기본 계정 admin/admin, 위 임베딩은 로그인 없이 바로 보임)</li>
+      </ul>
+    </div>
+
     <div class="card">
       <h2>VOC 분석 파이프라인 품질평가 보고서</h2>
       <p style="color: var(--text-secondary); font-size: 0.9rem;">이 기능(게시판 + VOC 자동분석 + 독립 LLM Judge 교차검증)의 실제 구현·테스트 내용을 정리한 보고서입니다.</p>
@@ -706,6 +728,10 @@
   <div id="toast-container" aria-live="polite"></div>
 
   <script>
+    // VOC 분석 결과 탭의 "VOC 지표 Prometheus/Grafana" 카드 표시 여부 - 모니터링 애드온
+    // 페이지의 동일한 플래그(__GRAFANA_LINK_ENABLED__)를 index.html에도 그대로 템플릿 치환.
+    const GRAFANA_LINK_ENABLED = __GRAFANA_LINK_ENABLED__;
+
     // 성공 피드백 공용 컴포넌트 - 이전엔 쓰기 동작(게시글 등록 등)이 성공해도 조용히
     // 화면만 새로고침돼서, 사용자가 "됐는지 안 됐는지" 확신하지 못하는 문제가 있었음
     // (실사용자의 "게시판 등록이 안 되는 것 같다" 신고로 확인 - 실제로는 항상 성공하고
@@ -1665,6 +1691,99 @@ let _vocActiveRunId = null;
       }
     }
 
+    // ---------- VOC 지표 Prometheus/Grafana (모니터링 애드온 탭과 동일한 형식: 임베드 차트 + 새 창 링크) ----------
+    // Prometheus가 /metrics-addon을 주기적으로(기본 15초) 스크레이프하면서 자체 시계열을
+    // 쌓으므로, 이 앱은 별도 스냅샷 저장 없이 "현재 값"만 노출하면 된다 - 기존 모니터링
+    // 애드온의 서버 요청수/응답시간 차트와 동일한 방식.
+    let _vocGrafanaLoaded = false;
+    let _vocPrometheusInterval = null;
+
+    function _initVocGrafanaCard() {
+      if (!GRAFANA_LINK_ENABLED) return;
+      document.getElementById('voc-grafana-card').style.display = 'block';
+      if (_vocGrafanaLoaded) return;
+      _vocGrafanaLoaded = true;
+
+      const addonHost = window.location.hostname || 'localhost';
+      const prometheusUrl = `http://${addonHost}:9090/graph?g0.expr=qa_platform_voc_judge_pass&g0.tab=0`;
+      const grafanaUrl = `http://${addonHost}:3000/d/qa-platform-voc/qa-platform-voc-analysis-quality`;
+      document.getElementById('voc-prometheus-link').href = prometheusUrl;
+      document.getElementById('voc-prometheus-link').textContent = `http://${addonHost}:9090`;
+      document.getElementById('voc-grafana-link').href = grafanaUrl;
+      document.getElementById('voc-grafana-link').textContent = `http://${addonHost}:3000`;
+
+      loadVocPrometheusChart(addonHost);
+      _vocPrometheusInterval = setInterval(() => loadVocPrometheusChart(addonHost), 30000);
+
+      const VOC_GRAFANA_PANELS = [
+        { id: 1, height: 220 },
+        { id: 2, height: 220 },
+        { id: 3, height: 280, wide: true },
+        { id: 4, height: 280, wide: true },
+        { id: 5, height: 220 },
+        { id: 6, height: 220 },
+      ];
+      const embedGrid = document.getElementById('voc-grafana-embed-grid');
+      let embedLoadFailures = 0;
+      VOC_GRAFANA_PANELS.forEach(panel => {
+        const iframe = document.createElement('iframe');
+        iframe.title = `VOC Grafana panel ${panel.id}`;
+        iframe.style.cssText = `width:100%; height:${panel.height}px; border:1px solid var(--gridline); border-radius:8px; background:#111;`;
+        if (panel.wide) iframe.style.gridColumn = 'span 2';
+        iframe.src = `http://${addonHost}:3000/d-solo/qa-platform-voc/qa-platform-voc-analysis-quality?orgId=1&panelId=${panel.id}&theme=dark&refresh=30s`;
+        iframe.addEventListener('error', () => {
+          embedLoadFailures += 1;
+          if (embedLoadFailures === 1) document.getElementById('voc-grafana-embed-error').style.display = 'block';
+        });
+        embedGrid.appendChild(iframe);
+      });
+    }
+
+    async function loadVocPrometheusChart(addonHost) {
+      const errEl = document.getElementById('voc-prometheus-embed-error');
+      const svg = document.getElementById('voc-prometheus-chart');
+      const end = Math.floor(Date.now() / 1000);
+      const start = end - 3600;
+      try {
+        const [passRes, failRes] = await Promise.all([
+          fetch(`http://${addonHost}:9090/api/v1/query_range?query=qa_platform_voc_judge_pass&start=${start}&end=${end}&step=60`),
+          fetch(`http://${addonHost}:9090/api/v1/query_range?query=qa_platform_voc_judge_fail&start=${start}&end=${end}&step=60`),
+        ]);
+        if (!passRes.ok || !failRes.ok) throw new Error(`HTTP ${passRes.status}/${failRes.status}`);
+        const passData = await passRes.json();
+        const failData = await failRes.json();
+        const passSeries = (passData.data && passData.data.result && passData.data.result[0]) ? passData.data.result[0].values : [];
+        const failSeries = (failData.data && failData.data.result && failData.data.result[0]) ? failData.data.result[0].values : [];
+        if (!passSeries.length && !failSeries.length) {
+          svg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" font-size="13" fill="#898781">아직 데이터가 없습니다.</text>';
+          errEl.style.display = 'none';
+          return;
+        }
+        const width = 600, height = 200, padding = 36;
+        const toPoints = series => series.map(([t, v]) => ({ t: Number(t), v: Number(v) }));
+        const passPoints = toPoints(passSeries);
+        const failPoints = toPoints(failSeries);
+        const allValues = [...passPoints, ...failPoints].map(p => p.v);
+        const maxV = Math.max(...allValues, 1);
+        const refPoints = passPoints.length >= failPoints.length ? passPoints : failPoints;
+        const stepX = refPoints.length > 1 ? (width - padding * 2) / (refPoints.length - 1) : 0;
+        const xy = (i, v) => [padding + i * stepX, height - padding - (v / maxV) * (height - padding * 2)];
+        const pathFor = points => points.map((p, i) => { const [x, y] = xy(i, p.v); return `${i === 0 ? 'M' : 'L'} ${x} ${y}`; }).join(' ');
+        const lastLabel = refPoints.length ? new Date(refPoints[refPoints.length - 1].t * 1000).toLocaleTimeString() : '';
+        svg.innerHTML = `
+          <text x="8" y="16" font-size="11" fill="#898781">독립 Judge 판정 (최근 1시간)</text>
+          <path d="${pathFor(passPoints)}" fill="none" stroke="#16a34a" stroke-width="2" />
+          <path d="${pathFor(failPoints)}" fill="none" stroke="#dc2626" stroke-width="2" />
+          <text x="8" y="32" font-size="10" fill="#16a34a">— PASS</text>
+          <text x="70" y="32" font-size="10" fill="#dc2626">— FAIL</text>
+          <text x="${width - 8}" y="${height - 8}" text-anchor="end" font-size="10" fill="#898781">${escapeHtml(lastLabel)}</text>`;
+        errEl.style.display = 'none';
+      } catch (err) {
+        errEl.style.display = 'block';
+        errEl.textContent = `Prometheus 데이터를 불러올 수 없습니다: ${err.message} - 아래 링크로 직접 접속해보세요.`;
+      }
+    }
+
     async function loadUsers() {
       const el = document.getElementById('users-table');
       const res = await fetch('/api/users');
@@ -2400,6 +2519,15 @@ let _vocActiveRunId = null;
           loadVocReportVersionList('voc_quality_report', 'voc-quality-report-version');
           loadVocReportVersionList('voc_defect_report', 'voc-defect-report-version');
         }
+        _initVocGrafanaCard();
+        if (GRAFANA_LINK_ENABLED && _vocPrometheusInterval === null && _vocGrafanaLoaded) {
+          // 다른 탭에 갔다가 돌아온 경우 - 카드/임베드는 이미 만들어져 있으니 새로고침만 재개
+          const addonHost = window.location.hostname || 'localhost';
+          _vocPrometheusInterval = setInterval(() => loadVocPrometheusChart(addonHost), 30000);
+        }
+      } else if (_vocPrometheusInterval !== null) {
+        clearInterval(_vocPrometheusInterval);
+        _vocPrometheusInterval = null;
       }
     }
 
@@ -3526,7 +3654,7 @@ let _vocActiveRunId = null;
     // 모니터링 애드온 페이지 등 다른 화면에서 특정 탭으로 바로 돌아올 수 있도록
     // (예: /#monitoring), URL 해시로 지정된 탭이 있으면 그 탭을 열어줌
     const initialTab = (location.hash || '').replace('#', '');
-    if (['settings', 'run', 'dashboard', 'monitoring', 'users', 'board', 'voc-analysis', 'voc-results'].includes(initialTab)) {
+    if (['settings', 'run', 'dashboard', 'monitoring', 'users', 'error-log', 'board', 'voc-analysis', 'voc-results'].includes(initialTab)) {
       showTab(initialTab);
     }
   </script>

@@ -171,7 +171,15 @@ def metrics_addon() -> PlainTextResponse:
         summary = metrics.summary() if metrics is not None else {}
         db = _state["db"]
         latest_run = db.get_latest_k6_run() if (MONITORING_ADDON_DB_ENABLED and db is not None) else None
-        text = render_prometheus_text(summary, latest_run)
+        try:
+            # VOC 지표 계산이 실패해도(예: docs/테스트_결과.md 형식 변경) 기존 서버/k6
+            # 지표까지 통째로 500이 되면 안 되므로 별도로 감싼다.
+            from app.routers.voc_analysis import get_quality_metrics_for_prometheus
+
+            voc_quality = get_quality_metrics_for_prometheus()
+        except Exception:
+            voc_quality = None
+        text = render_prometheus_text(summary, latest_run, voc_quality)
         return PlainTextResponse(text, media_type="text/plain; version=0.0.4")
     except Exception as exc:
         return PlainTextResponse(f"# error generating metrics: {exc}\n", status_code=500)

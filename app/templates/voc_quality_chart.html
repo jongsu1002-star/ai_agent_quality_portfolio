@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VOC 분석 품질 지표 차트 (확대보기)</title>
+  <style>
+    :root {
+      --text-primary: #0b0b0b;
+      --text-secondary: #52514e;
+      --gridline: #e1e0d9;
+    }
+    body { font-family: Arial, sans-serif; margin: 2rem; background: linear-gradient(135deg, #eff6ff, #f8fafc); color: #1f2937; }
+    .card { background: white; padding: 1.75rem 2rem; border-radius: 14px; box-shadow: 0 8px 24px rgba(37, 99, 235, 0.12); margin-bottom: 1rem; }
+    .title { color: #1d4ed8; margin: 0; }
+    a { color: #2563eb; }
+    .logout-btn { background: white; border: 1px solid var(--gridline); color: var(--text-secondary); padding: 0.55rem 0.9rem; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    .logout-btn:hover { background: #f8fafc; }
+    .muted { color: var(--text-secondary); font-size: 0.9rem; }
+    .chart-hint { color: var(--text-secondary); font-size: 0.9rem; }
+    /* 이 페이지는 "확대보기" 전용이라 index.html의 같은 클래스보다 폰트/여백을 한 단계 키움
+       (index.html과는 완전히 별도 문서라 CSS를 공유하지 않으므로 여기서도 그대로 복제) */
+    .voc-chart-block { margin-bottom: 2.2rem; }
+    .voc-chart-block:last-child { margin-bottom: 0; }
+    .voc-chart-title { font-size: 1.05rem; font-weight: 700; color: var(--text-primary); margin: 0 0 1rem; }
+    .voc-bar-row { display: grid; grid-template-columns: 13rem 1fr 3.2rem; align-items: center; gap: 0.8rem; font-size: 1rem; margin-bottom: 0.6rem; }
+    .voc-bar-label { color: var(--text-secondary); overflow-wrap: anywhere; }
+    .voc-bar-track { background: #eef2f7; border-radius: 999px; height: 0.9rem; overflow: hidden; }
+    .voc-bar-fill { height: 100%; border-radius: 999px; }
+    .voc-bar-fill.accent { background: linear-gradient(90deg, #2563eb, #3b82f6); }
+    .voc-bar-fill.pass { background: #16a34a; }
+    .voc-bar-fill.fail { background: #dc2626; }
+    .voc-bar-value { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+    .voc-chart-note { font-size: 0.88rem; color: var(--text-secondary); margin: 0.6rem 0 0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+      <h1 class="title">VOC 분석 품질 지표 차트 (확대보기)</h1>
+      <button type="button" id="logout-btn" class="logout-btn" onclick="logout()" style="display:none;">로그아웃</button>
+    </div>
+    <p class="muted">
+      <a href="/#voc-results">메인 대시보드의 "VOC 분석 결과" 탭</a>에 있는 것과 동일한 차트를 새 창에서 크게 봅니다 -
+      여기서 무엇을 하든 기존 화면/API에는 영향을 주지 않습니다. 30초마다 자동으로 새로고침됩니다.
+    </p>
+  </div>
+
+  <div class="card">
+    <div id="voc-quality-chart"><p class="chart-hint">불러오는 중...</p></div>
+    <p id="voc-quality-chart-generated" class="chart-hint" style="margin-top:0.75rem;"></p>
+  </div>
+
+  <script>
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+
+    function _vocBarRow(label, value, max, cls, valueText) {
+      const pct = max > 0 ? Math.max(4, Math.round((value / max) * 100)) : 0;
+      return `<div class="voc-bar-row"><div class="voc-bar-label">${escapeHtml(label)}</div><div class="voc-bar-track"><div class="voc-bar-fill ${cls}" style="width:${pct}%;"></div></div><div class="voc-bar-value">${escapeHtml(valueText !== undefined ? valueText : String(value))}</div></div>`;
+    }
+
+    function _renderVocQualityDashboard(data) {
+      const parts = [];
+      const ts = data.test_summary || {};
+      if (ts.available) {
+        const layerMax = Math.max(1, ...ts.layer_breakdown.map(r => r.count));
+        parts.push(`
+          <div class="voc-chart-block">
+            <p class="voc-chart-title">전체 테스트 스위트 — ${ts.total}개 중 ${ts.passed}개 통과</p>
+            <p class="voc-chart-note">docs/테스트_결과.md 최종 갱신: ${escapeHtml(ts.generated_at)}</p>
+          </div>
+          <div class="voc-chart-block">
+            <p class="voc-chart-title">점검 범위 — 테스트 레이어별 건수</p>
+            ${ts.layer_breakdown.map(row => _vocBarRow(row.label, row.count, layerMax, 'accent')).join('')}
+          </div>`);
+      } else {
+        parts.push(`<div class="voc-chart-block"><p class="chart-hint">⚠ 검증 데이터 없음(${escapeHtml(ts.reason || '테스트 결과 문서를 찾을 수 없음')})</p></div>`);
+      }
+
+      const hist = data.voc_history || {};
+      if (hist.total_runs > 0) {
+        const verdictOrder = ['PASS', 'FAIL', 'SKIPPED', 'ERROR', 'UNKNOWN'];
+        const verdictCls = { PASS: 'pass', FAIL: 'fail', ERROR: 'fail', SKIPPED: 'accent', UNKNOWN: 'accent' };
+        const verdictMax = Math.max(1, ...Object.values(hist.judge_verdict));
+        const verdictRows = verdictOrder.filter(k => hist.judge_verdict[k]).map(k => _vocBarRow(k, hist.judge_verdict[k], verdictMax, verdictCls[k])).join('');
+        parts.push(`
+          <div class="voc-chart-block">
+            <p class="voc-chart-title">독립 Judge 판정 분포 — 전체 실행 이력 ${hist.total_runs}건</p>
+            ${verdictRows}
+          </div>`);
+
+        const gateOrder = ['APPROVED', 'REVIEW_REQUIRED', 'REJECTED', 'UNVERIFIED', 'UNKNOWN'];
+        const gateCls = { APPROVED: 'pass', REVIEW_REQUIRED: 'accent', REJECTED: 'fail', UNVERIFIED: 'accent', UNKNOWN: 'accent' };
+        const gateMax = Math.max(1, ...Object.values(hist.quality_gate));
+        const gateRows = gateOrder.filter(k => hist.quality_gate[k]).map(k => _vocBarRow(k, hist.quality_gate[k], gateMax, gateCls[k])).join('');
+        parts.push(`
+          <div class="voc-chart-block">
+            <p class="voc-chart-title">품질 게이트 판정 분포 — 전체 실행 이력 ${hist.total_runs}건</p>
+            ${gateRows}
+            <p class="voc-chart-note">UNKNOWN은 quality_gate 필드 도입 이전(구버전 코드)에 생성된 결과입니다.</p>
+          </div>`);
+      } else {
+        parts.push('<div class="voc-chart-block"><p class="chart-hint">⚠ 검증 데이터 없음 - 아직 실행된 VOC 분석이 없습니다.</p></div>');
+      }
+
+      const defect = data.defect_status || {};
+      if (defect.p0_total !== undefined) {
+        parts.push(`
+          <div class="voc-chart-block">
+            <p class="voc-chart-title">결함 상태 — 코드 리뷰에서 발견된 결함의 수정 현황</p>
+            ${_vocBarRow('P0(즉시수정)', defect.p0_resolved, defect.p0_total, defect.p0_resolved === defect.p0_total ? 'pass' : 'accent', `${defect.p0_resolved}/${defect.p0_total}`)}
+            ${_vocBarRow('P1(품질개선)', defect.p1_resolved, defect.p1_total, defect.p1_resolved === defect.p1_total ? 'pass' : 'accent', `${defect.p1_resolved}/${defect.p1_total}`)}
+            <p class="voc-chart-note">${escapeHtml(defect.source || '')} · 이 항목만 사람이 검토·확정한 값이라 자동 계산 대상이 아닙니다.</p>
+          </div>`);
+      }
+
+      return parts.join('');
+    }
+
+    async function loadVocQualityChart() {
+      const el = document.getElementById('voc-quality-chart');
+      try {
+        const res = await fetch('/api/voc-analysis/quality-dashboard');
+        const data = await res.json();
+        el.innerHTML = _renderVocQualityDashboard(data);
+        document.getElementById('voc-quality-chart-generated').textContent = `서버 집계 시각: ${data.generated_at || ''}`;
+      } catch (err) {
+        el.innerHTML = '<p class="chart-hint">차트를 불러오지 못했습니다.</p>';
+      }
+    }
+
+    async function logout() {
+      await fetch('/logout', { method: 'POST' });
+      window.location.href = '/login';
+    }
+
+    async function initAuthUi() {
+      try {
+        const res = await fetch('/api/auth/status');
+        const data = await res.json();
+        const logoutBtn = document.getElementById('logout-btn');
+        logoutBtn.style.display = data.enabled ? '' : 'none';
+        logoutBtn.textContent = data.username ? `로그아웃 (${data.username})` : '로그아웃';
+      } catch (err) {
+        // 조회 실패해도 화면 자체는 계속 써야 하므로 조용히 무시
+      }
+    }
+
+    loadVocQualityChart();
+    setInterval(loadVocQualityChart, 30000);
+    initAuthUi();
+  </script>
+</body>
+</html>

@@ -144,6 +144,35 @@ def test_voc_cross_validation_history_list_wired():
     assert "onclick=\"event.stopPropagation(); deleteVocCrossValidation(" in html
 
 
+def test_voc_results_tab_wired_separately_from_voc_analysis_tab():
+    """VOC 분석 실행(폼)과 결과 조회(이력/차트/보고서)를 별도 탭으로 분리 - 실행 탭에는
+    더 이상 이력/차트/보고서 마크업이 남아있지 않아야 하고, 새 탭에 전부 있어야 한다."""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert 'data-tab="voc-results" onclick="showTab(\'voc-results\')"' in html
+    assert 'id="tab-voc-results"' in html
+
+    run_tab_start = html.index('id="tab-voc-analysis"')
+    run_tab_end = html.index('id="tab-voc-results"')
+    run_tab_html = html[run_tab_start:run_tab_end]
+    results_tab_html = html[run_tab_end:]
+
+    for moved_id in ("voc-history-list", "voc-xval-history-list", "voc-quality-dashboard", "voc-quality-report", "voc-defect-report"):
+        assert f'id="{moved_id}"' not in run_tab_html, f"{moved_id}가 여전히 VOC 분석(실행) 탭에 남아있음"
+        assert f'id="{moved_id}"' in results_tab_html, f"{moved_id}가 새 VOC 분석 결과 탭에 없음"
+
+    assert "if (name === 'voc-results') {" in html
+    assert "loadVocHistory();" in html
+    assert "loadVocQualityDashboard();" in html
+
+
+def test_voc_quality_chart_full_page_link_present():
+    """모니터링 애드온의 Prometheus/Grafana(임베딩 차트 + 새 창 링크)와 동일한 형식 -
+    차트 카드 안에 새 창으로 여는 전용 페이지 링크가 있어야 한다."""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert '<a href="/voc-quality-chart" target="_blank">' in html
+    assert "차트 크게 보기" in html
+
+
 def test_voc_cross_validation_history_loaded_on_tab_switch_and_after_run():
     """이력 목록이 실제로 (1) VOC 탭 진입 시, (2) 매트릭스 실행 완료 직후 갱신되는지 확인 -
     함수만 정의돼 있고 아무도 호출하지 않으면 목록이 절대 새로고침되지 않으므로 별도 확인."""

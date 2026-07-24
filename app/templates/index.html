@@ -172,6 +172,7 @@
       <button type="button" class="tab-btn" title="성능테스트(k6) · Prometheus/Grafana" onclick="window.location.href='/monitoring-addon'">모니터링 애드온</button>
       <button type="button" class="tab-btn" data-tab="board" onclick="showTab('board')">게시판</button>
       <button type="button" class="tab-btn" data-tab="voc-analysis" onclick="showTab('voc-analysis')">VOC 분석</button>
+      <button type="button" class="tab-btn" data-tab="voc-results" onclick="showTab('voc-results')">VOC 분석 결과</button>
       <button type="button" class="tab-btn" id="users-tab-btn" data-tab="users" onclick="showTab('users')" style="display:none;">사용자 관리</button>
       <button type="button" class="tab-btn" id="error-log-tab-btn" data-tab="error-log" onclick="showTab('error-log')" style="display:none;">오류 로그</button>
     </div>
@@ -647,6 +648,10 @@
         <div id="voc-xval-result" style="margin-top:1rem;"></div>
       </div>
     </div>
+  </div>
+
+  <!-- ===================== VOC 분석 결과(이력/차트/보고서) ===================== -->
+  <div id="tab-voc-results" class="tab-panel">
     <div class="card">
       <h2>지난 분석 이력</h2>
       <div id="voc-history-list" class="table-view">불러오는 중...</div>
@@ -656,7 +661,10 @@
       <div id="voc-xval-history-list" class="table-view">불러오는 중...</div>
     </div>
     <div class="card">
-      <h2>VOC 분석 파이프라인 품질 지표 차트</h2>
+      <div class="board-actions" style="justify-content: space-between; align-items: flex-start;">
+        <h2 style="margin:0;">VOC 분석 파이프라인 품질 지표 차트</h2>
+        <a href="/voc-quality-chart" target="_blank"><button type="button" class="btn-secondary">차트 크게 보기 (새 창)</button></a>
+      </div>
       <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 0 0 0.4rem;">아래 보고서 본문(마크다운)에는 그래프를 그릴 수 없어, 같은 실측치를 이 페이지에 직접 차트로 렌더링했습니다.</p>
       <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 0 0 0.4rem;"><strong>이 카드는 서버 API(<code>/api/voc-analysis/quality-dashboard</code>)에서 매번 실시간으로 다시 계산한 값을 보여줍니다.</strong><br>pytest를 새로 돌리거나 VOC 분석을 새로 실행하면 다음 새로고침에 바로 반영됩니다.</p>
       <p class="chart-hint" style="margin: 0 0 0.8rem;">※ 결함 수정 현황만은 예외입니다 — 코드 리뷰로 사람이 검토·확정하는 값이라 자동 계산 대상이 아닙니다.</p>
@@ -2381,7 +2389,7 @@ let _vocActiveRunId = null;
       if (name === 'board') {
         loadBoardPosts();
       }
-      if (name === 'voc-analysis') {
+      if (name === 'voc-results') {
         loadVocHistory();
         loadVocCrossValidationHistory();
         loadVocQualityDashboard();
@@ -3518,7 +3526,7 @@ let _vocActiveRunId = null;
     // 모니터링 애드온 페이지 등 다른 화면에서 특정 탭으로 바로 돌아올 수 있도록
     // (예: /#monitoring), URL 해시로 지정된 탭이 있으면 그 탭을 열어줌
     const initialTab = (location.hash || '').replace('#', '');
-    if (['settings', 'run', 'dashboard', 'monitoring', 'users', 'board', 'voc-analysis'].includes(initialTab)) {
+    if (['settings', 'run', 'dashboard', 'monitoring', 'users', 'board', 'voc-analysis', 'voc-results'].includes(initialTab)) {
       showTab(initialTab);
     }
   </script>

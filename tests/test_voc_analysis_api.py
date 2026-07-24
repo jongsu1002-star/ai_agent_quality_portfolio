@@ -252,6 +252,18 @@ def test_voc_excel_template_and_upload_round_trip():
     assert run.json()["result"]["raw_source_counts"]["excel"] == 2
 
 
+def test_voc_quality_chart_page_is_served_separately_from_main_dashboard():
+    """모니터링 애드온의 Prometheus/Grafana "새 창으로 열기" 링크와 동일한 형식 - VOC 품질
+    지표 차트도 index.html과 별도인 독립 페이지로 서빙되어야 한다."""
+    client = TestClient(app)
+    chart_page = client.get("/voc-quality-chart")
+    main_page = client.get("/")
+    assert chart_page.status_code == 200
+    assert "VOC 분석 품질 지표 차트" in chart_page.text
+    assert "/api/voc-analysis/quality-dashboard" in chart_page.text
+    assert "AI Agent 품질관리·운영 모니터링 플랫폼" in main_page.text  # 기존 대시보드 타이틀 그대로
+
+
 def test_voc_excel_upload_rejects_invalid_path_on_run():
     client = TestClient(app)
     client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})

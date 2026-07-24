@@ -680,6 +680,16 @@ def index() -> HTMLResponse:
     return HTMLResponse(html_path.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
 
 
+@app.get("/voc-quality-chart", response_class=HTMLResponse)
+def voc_quality_chart_page() -> HTMLResponse:
+    """VOC 분석 품질 지표 차트를 새 창에서 크게 보기 위한 전용 페이지 - 모니터링 애드온의
+    Prometheus/Grafana(임베딩 차트 + 새 창 링크)와 동일한 형식을 이 앱 내부 데이터에도
+    적용한 것. index.html과 별도 문서라 /api/voc-analysis/quality-dashboard를 직접
+    호출해 같은 차트를 렌더링한다(로그인 미들웨어는 이 경로도 그대로 적용됨)."""
+    html_path = Path(__file__).with_name("templates").joinpath("voc_quality_chart.html")
+    return HTMLResponse(html_path.read_text(encoding="utf-8"), headers={"Cache-Control": "no-store"})
+
+
 @app.get("/health")
 def healthcheck() -> JSONResponse:
     """헬스체크 - monitoring.HealthChecker에 위임.

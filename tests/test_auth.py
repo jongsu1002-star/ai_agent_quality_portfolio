@@ -166,6 +166,42 @@ def test_error_log_is_admin_only():
     assert "entries" in admin_response.json()
 
 
+def test_ip_allowlist_crud_is_admin_only():
+    admin_client = TestClient(app)
+    _signup(admin_client, "alice", "secret123")
+
+    bob_client = TestClient(app)
+    _signup(bob_client, "bob", "secret456")
+    admin_client.post("/api/users/bob/approve")
+    bob_client.post("\login", json={"username": "bob", "password": "secret456"})
+
+    assert bob_client.get("/api/ip-allowlist").status_code == 403
+    assert bob_client.post("/api/ip-allowlist", json={"network": "203.0.113.5"}).status_code == 403
+
+    add_response = admin_client.post("/api/ip-allowlist", json={"network": "203.0.113.5", "label": "사무실"})
+    assert add_response.status_code == 200
+    entry_id = add_response.json()["id"]
+
+    assert bob_client.delete(f"/api/ip-allowlist/{entry_id}").status_code == 403
+    assert bob_client.put(f"/api/ip-allowlist/{entry_id}", json={"label": "x"}).status_code == 403
+
+    list_response = admin_client.get("/api/ip-allowlist")
+    assert list_response.status_code == 200
+    assert len(list_response.json()) == 1
+
+    assert admin_client.put(f"/api/ip-allowlist/{entry_id}", json={"label": "본사"}).status_code == 200
+    assert admin_client.delete(f"/api/ip-allowlist/{entry_id}").status_code == 200
+    assert admin_client.get("/api/ip-allowlist").json() == []
+
+
+def test_ip_allowlist_rejects_invalid_network():
+    admin_client = TestClient(app)
+    _signup(admin_client, "alice", "secret123")
+
+    response = admin_client.post("/api/ip-allowlist", json={"network": "not-an-ip"})
+    assert response.status_code == 400
+
+
 def test_admin_can_approve_a_pending_signup():
     admin_client = TestClient(app)
     _signup(admin_client, "alice", "secret123")

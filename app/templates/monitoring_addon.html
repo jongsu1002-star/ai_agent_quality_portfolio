@@ -90,6 +90,7 @@
       <button type="button" class="tab-btn" onclick="window.location.href='/#voc-results'">VOC 분석 결과</button>
       <button type="button" class="tab-btn" id="users-nav-btn" onclick="window.location.href='/#users'" style="display:none;">사용자 관리</button>
       <button type="button" class="tab-btn" id="error-log-nav-btn" onclick="window.location.href='/#error-log'" style="display:none;">오류 로그</button>
+      <button type="button" class="tab-btn" id="ip-allowlist-nav-btn" onclick="window.location.href='/#ip-allowlist'" style="display:none;">접근 허용 IP</button>
     </div>
   </div>
 
@@ -257,6 +258,7 @@
         logoutBtn.textContent = data.username ? `로그아웃 (${data.username})` : '로그아웃';
         document.getElementById('users-nav-btn').style.display = data.is_admin ? '' : 'none';
         document.getElementById('error-log-nav-btn').style.display = data.is_admin ? '' : 'none';
+        document.getElementById('ip-allowlist-nav-btn').style.display = data.is_admin ? '' : 'none';
       } catch (err) {
         // 조회 실패해도 화면 자체는 계속 써야 하므로 조용히 무시
       }
@@ -594,19 +596,18 @@
       document.getElementById('grafana-card').style.display = 'block';
     }
 
-    // Prometheus/Grafana 링크는 지금 이 페이지에 접속한 호스트명을 그대로 사용 -
-    // "localhost"로 고정해두면 다른 PC에서 접속했을 때 그 PC 자신의 localhost를
-    // 가리키게 되어 링크가 동작하지 않음 (팀원용 접속 가이드와 같은 이유)
-    const addonHost = window.location.hostname || 'localhost';
+    // 3000/9090 포트로 직접 접속하지 않고, app/main.py의 /grafana-proxy·/prometheus-proxy
+    // (로그인 + "접근 허용 IP" 관리자 탭의 IP 허용목록을 거침)를 통해 같은 오리진으로
+    // 접근한다 - AWS 등 공개 배포 시 보안그룹에서 3000/9090을 열지 않아도 됨.
     // 홈 화면만 보여주는 대신, 실제 지표가 바로 보이는 화면으로 딥링크
-    const prometheusUrl = `http://${addonHost}:9090/graph?g0.expr=qa_platform_total_requests&g0.tab=0`;
-    const grafanaUrl = `http://${addonHost}:3000/d/qa-platform-addon/qa-platform-monitoring-addon`;
+    const prometheusUrl = '/prometheus-proxy/graph?g0.expr=qa_platform_total_requests&g0.tab=0';
+    const grafanaUrl = '/grafana-proxy/d/qa-platform-addon/qa-platform-monitoring-addon';
     const prometheusLink = document.getElementById('prometheus-link');
     const grafanaLink = document.getElementById('grafana-link');
     prometheusLink.href = prometheusUrl;
-    prometheusLink.textContent = `http://${addonHost}:9090`;
+    prometheusLink.textContent = window.location.origin + prometheusUrl;
     grafanaLink.href = grafanaUrl;
-    grafanaLink.textContent = `http://${addonHost}:3000`;
+    grafanaLink.textContent = window.location.origin + grafanaUrl;
 
     // Prometheus 자체 UI(v3부터 React SPA)를 크로스오리진 iframe에 넣으면 URL 파라미터로
     // 지정한 쿼리가 자동 실행되지 않는 경우가 있어(임베딩 특성상 브라우저가 스토리지를
@@ -618,7 +619,7 @@
       const svg = document.getElementById('prometheus-chart');
       const end = Math.floor(Date.now() / 1000);
       const start = end - 3600;
-      const url = `http://${addonHost}:9090/api/v1/query_range?query=qa_platform_total_requests&start=${start}&end=${end}&step=60`;
+      const url = `/prometheus-proxy/api/v1/query_range?query=qa_platform_total_requests&start=${start}&end=${end}&step=60`;
       try {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -669,7 +670,7 @@
       iframe.title = `Grafana panel ${panel.id}`;
       iframe.style.cssText = `width:100%; height:${panel.height}px; border:1px solid #333; border-radius:8px; background:#111;`;
       if (panel.wide) iframe.style.gridColumn = 'span 2';
-      iframe.src = `http://${addonHost}:3000/d-solo/qa-platform-addon/qa-platform-monitoring-addon?orgId=1&panelId=${panel.id}&theme=dark&refresh=30s`;
+      iframe.src = `/grafana-proxy/d-solo/qa-platform-addon/qa-platform-monitoring-addon?orgId=1&panelId=${panel.id}&theme=dark&refresh=30s`;
       iframe.addEventListener('error', () => {
         embedLoadFailures += 1;
         if (embedLoadFailures === 1) document.getElementById('grafana-embed-error').style.display = 'block';

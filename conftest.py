@@ -151,6 +151,24 @@ def _isolate_board_store(tmp_path, monkeypatch):
     isolated_store.close_thread_connection()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_ip_allowlist_store(tmp_path, monkeypatch):
+    """app.main.IP_ALLOWLIST_STORE도 같은 이유로 격리 - 실서비스 data/ip_allowlist.db에
+    테스트용 IP가 쌓이는 것도, 이전 테스트가 등록한 IP가 다음 테스트로 새어나가 허용/거부
+    판정이 우연히 달라지는 것도 막는다. app/main.py의 엔드포인트들이 모듈 전역 이름
+    IP_ALLOWLIST_STORE를 직접 참조하므로(라우터에 별도로 주입되지 않음), 이 monkeypatch
+    하나로 충분히 격리된다."""
+    try:
+        import app.main as main_module
+        from qa_agent.ip_allowlist import IpAllowlistStore
+    except Exception:
+        return
+    isolated_store = IpAllowlistStore(path=str(tmp_path / "ip_allowlist.db"))
+    monkeypatch.setattr(main_module, "IP_ALLOWLIST_STORE", isolated_store)
+    yield
+    isolated_store.close_thread_connection()
+
+
 def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
     """전체 스위트 실행만 종합 결과 문서를 갱신한다.
 

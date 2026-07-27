@@ -212,6 +212,34 @@ def test_voc_grafana_card_wired_in_index_and_standalone_page():
         assert "id=\"voc-grafana-link\"" in html
 
 
+def test_grafana_prometheus_cards_use_ip_gated_proxy_not_direct_ports():
+    """3000/9090으로 직접 접속하던 것을 이 세션에서 /grafana-proxy·/prometheus-proxy(IP
+    허용목록 게이트)로 전환했다 - 직접 포트 패턴이 다시 섞여 들어오는 회귀를 잡는다."""
+    index_html = INDEX_HTML.read_text(encoding="utf-8")
+    voc_chart_html = (REPO_ROOT / "app" / "templates" / "voc_quality_chart.html").read_text(encoding="utf-8")
+    addon_html = MONITORING_ADDON_HTML.read_text(encoding="utf-8")
+
+    for html in (index_html, voc_chart_html, addon_html):
+        assert ":3000" not in html, "Grafana 직접 포트(3000) 참조가 남아있음 - /grafana-proxy를 써야 함"
+        assert ":9090" not in html, "Prometheus 직접 포트(9090) 참조가 남아있음 - /prometheus-proxy를 써야 함"
+        assert "addonHost" not in html, "더 이상 쓰이지 않는 addonHost 변수가 남아있음"
+        assert "/grafana-proxy/" in html
+        assert "/prometheus-proxy/" in html
+
+
+def test_ip_allowlist_admin_tab_wired():
+    """관리자 전용 '접근 허용 IP' 탭 - 사용자 관리/오류 로그 탭과 동일한 관리자 전용
+    노출 패턴(is_admin일 때만 표시) + CRUD(등록/조회/삭제/수정) 함수가 모두 배선돼 있는지."""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert 'id="ip-allowlist-tab-btn"' in html
+    assert 'id="tab-ip-allowlist"' in html
+    assert "document.getElementById('ip-allowlist-tab-btn').style.display = _isAdmin" in html
+    assert "if (name === 'ip-allowlist') {" in html
+    assert "loadIpAllowlist();" in html
+    for fn in ("async function loadIpAllowlist", "async function addIpAllowlistEntry", "async function deleteIpAllowlistEntry", "function startEditIpAllowlistEntry", "async function saveIpAllowlistEntry"):
+        assert fn in html
+
+
 def test_voc_grafana_dashboard_json_is_valid_and_matches_exported_metrics():
     """Grafana가 자동 프로비저닝하는 대시보드 JSON이 유효하고, 패널들이 실제로
     /metrics-addon이 내보내는 지표 이름을 그대로 쿼리하는지 확인(오타로 빈 패널이 되는

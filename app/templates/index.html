@@ -175,6 +175,7 @@
       <button type="button" class="tab-btn" data-tab="voc-results" onclick="showTab('voc-results')">VOC 분석 결과</button>
       <button type="button" class="tab-btn" id="users-tab-btn" data-tab="users" onclick="showTab('users')" style="display:none;">사용자 관리</button>
       <button type="button" class="tab-btn" id="error-log-tab-btn" data-tab="error-log" onclick="showTab('error-log')" style="display:none;">오류 로그</button>
+      <button type="button" class="tab-btn" id="ip-allowlist-tab-btn" data-tab="ip-allowlist" onclick="showTab('ip-allowlist')" style="display:none;">접근 허용 IP</button>
     </div>
   </div>
 
@@ -544,6 +545,33 @@
     </div>
   </div>
 
+  <!-- ===================== 접근 허용 IP (관리자 전용) ===================== -->
+  <div id="tab-ip-allowlist" class="tab-panel">
+    <div class="card">
+      <h2>접근 허용 IP (Grafana/Prometheus)</h2>
+      <p style="color: var(--text-secondary); font-size: 0.9rem;">
+        여기 등록된 IP/CIDR 대역에서 접속할 때만 <code>/grafana-proxy</code>, <code>/prometheus-proxy</code>
+        경로로 Grafana/Prometheus를 이용할 수 있습니다 - 3000/9090 포트를 인터넷에 직접 열지 않고
+        이 앱(로그인 필요)을 거쳐서만 접근하게 하기 위한 것입니다(AWS 등 공개 배포 시 권장).
+        계정이 하나도 없는 LAN 모드에서는 이 목록과 무관하게 항상 허용됩니다.
+      </p>
+      <div class="grid">
+        <div>
+          <label>IP 주소 또는 CIDR 대역</label>
+          <input id="ip-allowlist-new-network" placeholder="예: 203.0.113.5 또는 203.0.113.0/24" />
+        </div>
+        <div>
+          <label>설명 (선택)</label>
+          <input id="ip-allowlist-new-label" placeholder="예: 사무실" />
+        </div>
+      </div>
+      <div class="board-actions">
+        <button type="button" onclick="addIpAllowlistEntry()">추가</button>
+      </div>
+      <div id="ip-allowlist-table" class="table-view" style="margin-top:1rem;">불러오는 중...</div>
+    </div>
+  </div>
+
   <!-- ===================== 게시판 ===================== -->
   <div id="tab-board" class="tab-panel">
     <div class="card">
@@ -786,6 +814,7 @@
         const canSeeSettings = _canModerate;
         document.getElementById('users-tab-btn').style.display = _isAdmin ? '' : 'none';
         document.getElementById('error-log-tab-btn').style.display = _isAdmin ? '' : 'none';
+        document.getElementById('ip-allowlist-tab-btn').style.display = _isAdmin ? '' : 'none';
         document.getElementById('connection-settings-card').style.display = canSeeSettings ? '' : 'none';
         if (canSeeSettings) {
           loadSettings();
@@ -1704,16 +1733,18 @@ let _vocActiveRunId = null;
       if (_vocGrafanaLoaded) return;
       _vocGrafanaLoaded = true;
 
-      const addonHost = window.location.hostname || 'localhost';
-      const prometheusUrl = `http://${addonHost}:9090/graph?g0.expr=qa_platform_voc_judge_pass&g0.tab=0`;
-      const grafanaUrl = `http://${addonHost}:3000/d/qa-platform-voc/qa-platform-voc-analysis-quality`;
+      // 3000/9090 포트로 직접 접속하지 않고, 이 앱의 로그인 + IP 허용목록을 거치는
+      // 같은 오리진의 프록시 경로를 사용(AWS 등 공개 배포 시 보안그룹에서 3000/9090을
+      // 열지 않아도 되게 하기 위함 - "접근 허용 IP" 관리자 탭 참고).
+      const prometheusUrl = '/prometheus-proxy/graph?g0.expr=qa_platform_voc_judge_pass&g0.tab=0';
+      const grafanaUrl = '/grafana-proxy/d/qa-platform-voc/qa-platform-voc-analysis-quality';
       document.getElementById('voc-prometheus-link').href = prometheusUrl;
-      document.getElementById('voc-prometheus-link').textContent = `http://${addonHost}:9090`;
+      document.getElementById('voc-prometheus-link').textContent = window.location.origin + prometheusUrl;
       document.getElementById('voc-grafana-link').href = grafanaUrl;
-      document.getElementById('voc-grafana-link').textContent = `http://${addonHost}:3000`;
+      document.getElementById('voc-grafana-link').textContent = window.location.origin + grafanaUrl;
 
-      loadVocPrometheusChart(addonHost);
-      _vocPrometheusInterval = setInterval(() => loadVocPrometheusChart(addonHost), 30000);
+      loadVocPrometheusChart();
+      _vocPrometheusInterval = setInterval(loadVocPrometheusChart, 30000);
 
       const VOC_GRAFANA_PANELS = [
         { id: 1, height: 220 },
@@ -1730,7 +1761,7 @@ let _vocActiveRunId = null;
         iframe.title = `VOC Grafana panel ${panel.id}`;
         iframe.style.cssText = `width:100%; height:${panel.height}px; border:1px solid var(--gridline); border-radius:8px; background:#111;`;
         if (panel.wide) iframe.style.gridColumn = 'span 2';
-        iframe.src = `http://${addonHost}:3000/d-solo/qa-platform-voc/qa-platform-voc-analysis-quality?orgId=1&panelId=${panel.id}&theme=dark&refresh=30s`;
+        iframe.src = `/grafana-proxy/d-solo/qa-platform-voc/qa-platform-voc-analysis-quality?orgId=1&panelId=${panel.id}&theme=dark&refresh=30s`;
         iframe.addEventListener('error', () => {
           embedLoadFailures += 1;
           if (embedLoadFailures === 1) document.getElementById('voc-grafana-embed-error').style.display = 'block';
@@ -1739,15 +1770,15 @@ let _vocActiveRunId = null;
       });
     }
 
-    async function loadVocPrometheusChart(addonHost) {
+    async function loadVocPrometheusChart() {
       const errEl = document.getElementById('voc-prometheus-embed-error');
       const svg = document.getElementById('voc-prometheus-chart');
       const end = Math.floor(Date.now() / 1000);
       const start = end - 3600;
       try {
         const [passRes, failRes] = await Promise.all([
-          fetch(`http://${addonHost}:9090/api/v1/query_range?query=qa_platform_voc_judge_pass&start=${start}&end=${end}&step=60`),
-          fetch(`http://${addonHost}:9090/api/v1/query_range?query=qa_platform_voc_judge_fail&start=${start}&end=${end}&step=60`),
+          fetch(`/prometheus-proxy/api/v1/query_range?query=qa_platform_voc_judge_pass&start=${start}&end=${end}&step=60`),
+          fetch(`/prometheus-proxy/api/v1/query_range?query=qa_platform_voc_judge_fail&start=${start}&end=${end}&step=60`),
         ]);
         if (!passRes.ok || !failRes.ok) throw new Error(`HTTP ${passRes.status}/${failRes.status}`);
         const passData = await passRes.json();
@@ -1889,6 +1920,103 @@ let _vocActiveRunId = null;
           </td>
         </tr>`).join('');
       el.innerHTML = `<table><thead><tr><th>시각</th><th>기능</th><th>사용자</th><th>오류 유형</th><th>메시지 / 상세</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    // ---------- 접근 허용 IP (Grafana/Prometheus 프록시 게이트) ----------
+    let _ipAllowlistEntries = {};
+
+    async function loadIpAllowlist() {
+      const el = document.getElementById('ip-allowlist-table');
+      const res = await fetch('/api/ip-allowlist');
+      if (!res.ok) {
+        el.innerHTML = '<p>관리자만 조회할 수 있습니다.</p>';
+        return;
+      }
+      const entries = await res.json();
+      _ipAllowlistEntries = Object.fromEntries(entries.map(e => [e.id, e]));
+      if (!entries.length) {
+        el.innerHTML = '<p>등록된 IP가 없습니다 - 계정이 있는 배포에서는 등록 전까지 Grafana/Prometheus 프록시 접근이 전부 차단됩니다.</p>';
+        return;
+      }
+      const rows = entries.map(e => `<tr id="ip-allowlist-row-${e.id}">
+          <td>${escapeHtml(e.network)}</td>
+          <td>${escapeHtml(e.label || '')}</td>
+          <td>${escapeHtml(e.created_by || '')}</td>
+          <td>${escapeHtml(formatTimestamp(e.created_at))}</td>
+          <td>
+            <button type="button" onclick="startEditIpAllowlistEntry(${e.id})">수정</button>
+            <button type="button" onclick="deleteIpAllowlistEntry(${e.id})">삭제</button>
+          </td>
+        </tr>`).join('');
+      el.innerHTML = `<table><thead><tr><th>IP/CIDR</th><th>설명</th><th>등록자</th><th>등록일</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    async function addIpAllowlistEntry() {
+      const networkInput = document.getElementById('ip-allowlist-new-network');
+      const labelInput = document.getElementById('ip-allowlist-new-label');
+      const network = networkInput.value.trim();
+      if (!network) {
+        showToast('IP 주소 또는 CIDR 대역을 입력하세요.', 'error');
+        return;
+      }
+      const res = await fetch('/api/ip-allowlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ network, label: labelInput.value.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || '추가하지 못했습니다.', 'error');
+        return;
+      }
+      networkInput.value = '';
+      labelInput.value = '';
+      showToast('IP를 등록했습니다.');
+      loadIpAllowlist();
+    }
+
+    async function deleteIpAllowlistEntry(id) {
+      if (!confirm('이 IP를 목록에서 삭제할까요?')) return;
+      const res = await fetch(`/api/ip-allowlist/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || '삭제하지 못했습니다.', 'error');
+        return;
+      }
+      showToast('삭제했습니다.');
+      loadIpAllowlist();
+    }
+
+    function startEditIpAllowlistEntry(id) {
+      const entry = _ipAllowlistEntries[id];
+      if (!entry) return;
+      const row = document.getElementById(`ip-allowlist-row-${id}`);
+      row.innerHTML = `
+        <td><input id="ip-allowlist-edit-network-${id}" value="${escapeHtml(entry.network)}" /></td>
+        <td><input id="ip-allowlist-edit-label-${id}" value="${escapeHtml(entry.label || '')}" /></td>
+        <td>${escapeHtml(entry.created_by || '')}</td>
+        <td>${escapeHtml(formatTimestamp(entry.created_at))}</td>
+        <td>
+          <button type="button" onclick="saveIpAllowlistEntry(${id})">저장</button>
+          <button type="button" onclick="loadIpAllowlist()">취소</button>
+        </td>`;
+    }
+
+    async function saveIpAllowlistEntry(id) {
+      const network = document.getElementById(`ip-allowlist-edit-network-${id}`).value.trim();
+      const label = document.getElementById(`ip-allowlist-edit-label-${id}`).value.trim();
+      const res = await fetch(`/api/ip-allowlist/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ network, label }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || '수정하지 못했습니다.', 'error');
+        return;
+      }
+      showToast('수정했습니다.');
+      loadIpAllowlist();
     }
 
     const STATUS_LABELS = {
@@ -2505,6 +2633,9 @@ let _vocActiveRunId = null;
       if (name === 'error-log') {
         loadErrorLog();
       }
+      if (name === 'ip-allowlist') {
+        loadIpAllowlist();
+      }
       if (name === 'board') {
         loadBoardPosts();
       }
@@ -2522,8 +2653,7 @@ let _vocActiveRunId = null;
         _initVocGrafanaCard();
         if (GRAFANA_LINK_ENABLED && _vocPrometheusInterval === null && _vocGrafanaLoaded) {
           // 다른 탭에 갔다가 돌아온 경우 - 카드/임베드는 이미 만들어져 있으니 새로고침만 재개
-          const addonHost = window.location.hostname || 'localhost';
-          _vocPrometheusInterval = setInterval(() => loadVocPrometheusChart(addonHost), 30000);
+          _vocPrometheusInterval = setInterval(loadVocPrometheusChart, 30000);
         }
       } else if (_vocPrometheusInterval !== null) {
         clearInterval(_vocPrometheusInterval);
@@ -3654,7 +3784,7 @@ let _vocActiveRunId = null;
     // 모니터링 애드온 페이지 등 다른 화면에서 특정 탭으로 바로 돌아올 수 있도록
     // (예: /#monitoring), URL 해시로 지정된 탭이 있으면 그 탭을 열어줌
     const initialTab = (location.hash || '').replace('#', '');
-    if (['settings', 'run', 'dashboard', 'monitoring', 'users', 'error-log', 'board', 'voc-analysis', 'voc-results'].includes(initialTab)) {
+    if (['settings', 'run', 'dashboard', 'monitoring', 'users', 'error-log', 'ip-allowlist', 'board', 'voc-analysis', 'voc-results'].includes(initialTab)) {
       showTab(initialTab);
     }
   </script>

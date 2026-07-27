@@ -53,6 +53,12 @@ services:
       # Grafana는 기본적으로 다른 페이지의 iframe 안에 자신을 못 넣게 막아둠(X-Frame-Options) -
       # /monitoring-addon 페이지에 대시보드를 직접 임베딩하려면 이걸 켜야 함
       GF_SECURITY_ALLOW_EMBEDDING: "true"
+      # app/main.py의 /grafana-proxy(IP 허용목록 게이트) 뒤에서 서빙되도록 서브패스 설정 -
+      # 이게 없으면 프록시를 거칠 때 Grafana의 JS/CSS 등 정적 리소스 경로가 어긋나 화면이
+      # 깨진다. GRAFANA_ROOT_URL은 .env에서 실제 배포 도메인으로 덮어쓸 것(예:
+      # https://your-domain.com/grafana-proxy/) - AWS_배포_가이드.pptx 참고.
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost/grafana-proxy/}
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro

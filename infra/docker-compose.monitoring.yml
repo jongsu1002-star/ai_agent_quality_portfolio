@@ -3,6 +3,12 @@
 # prometheus/grafana 서비스가 포함되어 있음). 이 파일은 앱을 로컬에서 `uvicorn app.main:app`으로
 # 직접 띄워둔 경우에만 씁니다 - Prometheus가 host.docker.internal:8000/metrics-addon을 스크레이프합니다.
 #
+# 앱이 이 compose 네트워크 밖(호스트)에서 돌기 때문에, /grafana-proxy·/prometheus-proxy가
+# 컨테이너를 찾을 때 도커 서비스명(grafana/prometheus)이 아니라 호스트에 노출된 포트로
+# 접근해야 합니다 - .env에 다음을 설정하세요:
+#   GRAFANA_INTERNAL_URL=http://localhost:3000
+#   PROMETHEUS_INTERNAL_URL=http://localhost:9090
+#
 # 실행: docker compose -f infra/docker-compose.monitoring.yml up -d
 # 종료: docker compose -f infra/docker-compose.monitoring.yml down
 services:
@@ -34,6 +40,10 @@ services:
       # Grafana는 기본적으로 다른 페이지의 iframe 안에 자신을 못 넣게 막아둠(X-Frame-Options) -
       # /monitoring-addon 페이지에 대시보드를 직접 임베딩하려면 이걸 켜야 함
       GF_SECURITY_ALLOW_EMBEDDING: "true"
+      # app/main.py의 /grafana-proxy(IP 허용목록 게이트) 뒤에서 서빙되도록 서브패스 설정 -
+      # GRAFANA_ROOT_URL은 .env에서 실제 배포 도메인으로 덮어쓸 것.
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost/grafana-proxy/}
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro

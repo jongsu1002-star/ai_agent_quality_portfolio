@@ -171,15 +171,15 @@
 
     const GRAFANA_LINK_ENABLED = __GRAFANA_LINK_ENABLED__;
 
-    async function loadVocPrometheusChart(addonHost) {
+    async function loadVocPrometheusChart() {
       const errEl = document.getElementById('voc-prometheus-embed-error');
       const svg = document.getElementById('voc-prometheus-chart');
       const end = Math.floor(Date.now() / 1000);
       const start = end - 3600;
       try {
         const [passRes, failRes] = await Promise.all([
-          fetch(`http://${addonHost}:9090/api/v1/query_range?query=qa_platform_voc_judge_pass&start=${start}&end=${end}&step=60`),
-          fetch(`http://${addonHost}:9090/api/v1/query_range?query=qa_platform_voc_judge_fail&start=${start}&end=${end}&step=60`),
+          fetch(`/prometheus-proxy/api/v1/query_range?query=qa_platform_voc_judge_pass&start=${start}&end=${end}&step=60`),
+          fetch(`/prometheus-proxy/api/v1/query_range?query=qa_platform_voc_judge_fail&start=${start}&end=${end}&step=60`),
         ]);
         if (!passRes.ok || !failRes.ok) throw new Error(`HTTP ${passRes.status}/${failRes.status}`);
         const passData = await passRes.json();
@@ -220,16 +220,15 @@
       if (!GRAFANA_LINK_ENABLED) return;
       document.getElementById('voc-grafana-card').style.display = 'block';
 
-      const addonHost = window.location.hostname || 'localhost';
-      const prometheusUrl = `http://${addonHost}:9090/graph?g0.expr=qa_platform_voc_judge_pass&g0.tab=0`;
-      const grafanaUrl = `http://${addonHost}:3000/d/qa-platform-voc/qa-platform-voc-analysis-quality`;
+      const prometheusUrl = '/prometheus-proxy/graph?g0.expr=qa_platform_voc_judge_pass&g0.tab=0';
+      const grafanaUrl = '/grafana-proxy/d/qa-platform-voc/qa-platform-voc-analysis-quality';
       document.getElementById('voc-prometheus-link').href = prometheusUrl;
-      document.getElementById('voc-prometheus-link').textContent = `http://${addonHost}:9090`;
+      document.getElementById('voc-prometheus-link').textContent = window.location.origin + prometheusUrl;
       document.getElementById('voc-grafana-link').href = grafanaUrl;
-      document.getElementById('voc-grafana-link').textContent = `http://${addonHost}:3000`;
+      document.getElementById('voc-grafana-link').textContent = window.location.origin + grafanaUrl;
 
-      loadVocPrometheusChart(addonHost);
-      setInterval(() => loadVocPrometheusChart(addonHost), 30000);
+      loadVocPrometheusChart();
+      setInterval(loadVocPrometheusChart, 30000);
 
       const VOC_GRAFANA_PANELS = [
         { id: 1, height: 220 }, { id: 2, height: 220 },
@@ -243,7 +242,7 @@
         iframe.title = `VOC Grafana panel ${panel.id}`;
         iframe.style.cssText = `width:100%; height:${panel.height}px; border:1px solid #333; border-radius:8px; background:#111;`;
         if (panel.wide) iframe.style.gridColumn = 'span 2';
-        iframe.src = `http://${addonHost}:3000/d-solo/qa-platform-voc/qa-platform-voc-analysis-quality?orgId=1&panelId=${panel.id}&theme=dark&refresh=30s`;
+        iframe.src = `/grafana-proxy/d-solo/qa-platform-voc/qa-platform-voc-analysis-quality?orgId=1&panelId=${panel.id}&theme=dark&refresh=30s`;
         iframe.addEventListener('error', () => {
           embedLoadFailures += 1;
           if (embedLoadFailures === 1) document.getElementById('voc-grafana-embed-error').style.display = 'block';

@@ -63,6 +63,7 @@ from qa_agent import error_log
 from qa_agent.board import BoardStore
 from qa_agent.config_loader import Config
 from qa_agent.excel_io import build_template_workbook, build_testcase_template_workbook, load_dataset, load_testcase
+from qa_agent.ip_allowlist import IpAllowlistStore
 from qa_agent.jira_notifier import JiraNotifier
 from qa_agent.models import GoldenCase
 from qa_agent.pipeline import ALL_TECHNIQUES, PipelineOrchestrator
@@ -189,6 +190,7 @@ METRICS = MetricsCollector()  # 모니터링 탭이 조회하는 서버 운영 �
 EXTERNAL_MONITOR = ExternalMonitorRegistry(path=str(Path("reports") / "monitoring_targets.json"))  # 외부 URL 합성 모니터링 대상 저장소
 USER_STORE = UserStore(path=str(Path("data") / "users.db"))  # 계정(가입/승인/역할) 저장소 - monitoring_addon과 같은 SQLite 패턴
 BOARD_STORE = BoardStore(path=str(Path("data") / "board.db"))  # 게시판(일반/FAQ/VOC) + 댓글 저장소
+IP_ALLOWLIST_STORE = IpAllowlistStore(path=str(Path("data") / "ip_allowlist.db"))  # Grafana/Prometheus 프록시 접근 허용 IP 목록
 
 MONITORING_ADDON_DB = None  # 모니터링 애드온 전용 SQLite (기존 어떤 저장소도 대체하지 않음)
 if MONITORING_ADDON_ENABLED and MONITORING_ADDON_DB_ENABLED:
@@ -307,6 +309,30 @@ def _require_admin(request: Request) -> Optional[JSONResponse]:
     if not _is_admin(request):
         return JSONResponse({"error": "관리자만 접근할 수 있습니다"}, status_code=403)
     return None
+
+
+def _client_ip(request: Request) -> str:
+    """실제 접속 IP - Nginx 등 리버스 프록시 뒤에서는 request.client.host가 프록시 자신의
+    주소이므로, X-Forwarded-For 헤더(가장 앞의 IP)를 우선 사용한다. 이 헤더는 신뢰할 수
+    있는 리버스 프록시가 설정해준다는 전제(AWS 배포 가이드의 Nginx 설정 참고)이며, 그런
+    프록시가 없는 로컬/LAN 환경에서는 클라이언트가 헤더를 위조해도 자기 자신의 접근
+    판단에만 영향을 주므로 위험이 크지 않다."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else ""
+
+
+def _is_ip_allowed(request: Request) -> bool:
+    """/grafana-proxy, /prometheus-proxy 접근 허용 여부.
+
+    계정이 하나도 없는 LAN 모드에서는 로그인 정책과 동일하게 전원 허용 - 관리자가 IP를
+    등록하는 화면 자체가 로그인 뒤에 있으므로, 계정 모드일 때만 이 목록이 의미를 갖는다.
+    계정이 하나라도 있으면(공개 배포로 간주) 목록에 있는 IP/대역만 허용하고, 목록이
+    비어 있으면 기본값은 거부(안전 우선 - 명시적으로 등록해야 열림)."""
+    if not USER_STORE.has_any_users():
+        return True
+    return IP_ALLOWLIST_STORE.is_allowed(_client_ip(request))
 
 
 def _safe_next_path(value: str) -> str:
@@ -626,6 +652,60 @@ def get_error_log(request: Request) -> JSONResponse:
     if error:
         return error
     return JSONResponse({"entries": error_log.list_errors()})
+
+
+@app.get("/api/ip-allowlist")
+def list_ip_allowlist(request: Request) -> JSONResponse:
+    """Grafana/Prometheus 프록시(/grafana-proxy, /prometheus-proxy) 접근을 허용할
+    IP/CIDR 목록 - 관리자 전용."""
+    error = _require_admin(request)
+    if error:
+        return error
+    return JSONResponse(IP_ALLOWLIST_STORE.list_all())
+
+
+@app.post("/api/ip-allowlist")
+def add_ip_allowlist(request: Request, payload: Dict[str, Any]) -> JSONResponse:
+    error = _require_admin(request)
+    if error:
+        return error
+    ip_or_cidr = str(payload.get("network") or "").strip()
+    label = str(payload.get("label") or "").strip()
+    try:
+        entry = IP_ALLOWLIST_STORE.add(ip_or_cidr, label, _current_username(request))
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse(entry)
+
+
+@app.put("/api/ip-allowlist/{entry_id}")
+def update_ip_allowlist(entry_id: int, request: Request, payload: Dict[str, Any]) -> JSONResponse:
+    error = _require_admin(request)
+    if error:
+        return error
+    network = payload.get("network")
+    label = payload.get("label")
+    try:
+        updated = IP_ALLOWLIST_STORE.update(
+            entry_id,
+            str(network).strip() if network is not None else None,
+            str(label) if label is not None else None,
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    if not updated:
+        return JSONResponse({"error": "존재하지 않는 항목입니다"}, status_code=404)
+    return JSONResponse({"updated": True})
+
+
+@app.delete("/api/ip-allowlist/{entry_id}")
+def delete_ip_allowlist(entry_id: int, request: Request) -> JSONResponse:
+    error = _require_admin(request)
+    if error:
+        return error
+    if not IP_ALLOWLIST_STORE.delete(entry_id):
+        return JSONResponse({"error": "존재하지 않는 항목입니다"}, status_code=404)
+    return JSONResponse({"deleted": True})
 
 
 @app.post("/api/users/{username}/approve")
@@ -1581,5 +1661,55 @@ if MONITORING_ADDON_ENABLED:
             html = html_path.read_text(encoding="utf-8")
             html = html.replace("__GRAFANA_LINK_ENABLED__", "true" if GRAFANA_LINK_ENABLED else "false")
             return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+        # ----- Grafana/Prometheus 리버스 프록시 (IP 허용목록 게이트) -----
+        # AWS 등 공개 배포 시 3000/9090 포트를 인터넷에 직접 열지 않고(보안그룹 미개방),
+        # 이 앱의 기존 로그인 + 새 IP 허용목록을 거쳐 같은 오리진(80/443/8000)으로만
+        # 접근하게 한다. Grafana는 이 경로 뒤에서 서빙되도록 GF_SERVER_ROOT_URL/
+        # GF_SERVER_SERVE_FROM_SUB_PATH가 docker-compose.yml에 설정돼 있어야 정적
+        # 리소스(JS/CSS)까지 정상 로드된다 - 설계서 참고.
+        GRAFANA_PROXY_TARGET = os.environ.get("GRAFANA_INTERNAL_URL", "http://grafana:3000").rstrip("/")
+        PROMETHEUS_PROXY_TARGET = os.environ.get("PROMETHEUS_INTERNAL_URL", "http://prometheus:9090").rstrip("/")
+        _PROXY_STRIP_RESPONSE_HEADERS = {
+            "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
+            "trailers", "transfer-encoding", "upgrade", "content-encoding", "content-length",
+            "x-frame-options", "content-security-policy",
+        }
+        _PROXY_STRIP_REQUEST_HEADERS = {"host", "content-length", "connection", "cookie", "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host"}
+
+        async def _proxy_request(upstream_url: str, request: Request) -> Response:
+            if not _is_ip_allowed(request):
+                return JSONResponse(
+                    {"error": "허용되지 않은 IP입니다 - 관리자에게 IP 등록을 요청하세요."},
+                    status_code=403,
+                )
+            import requests as _requests
+
+            body = await request.body()
+            forward_headers = {k: v for k, v in request.headers.items() if k.lower() not in _PROXY_STRIP_REQUEST_HEADERS}
+            try:
+                upstream = _requests.request(
+                    request.method,
+                    upstream_url,
+                    params=dict(request.query_params),
+                    data=body or None,
+                    headers=forward_headers,
+                    timeout=10,
+                )
+            except _requests.RequestException as exc:
+                return JSONResponse({"error": f"프록시 대상에 연결할 수 없습니다: {exc}"}, status_code=502)
+            response_headers = {k: v for k, v in upstream.headers.items() if k.lower() not in _PROXY_STRIP_RESPONSE_HEADERS}
+            return Response(content=upstream.content, status_code=upstream.status_code, headers=response_headers)
+
+        @app.api_route("/grafana-proxy/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+        async def grafana_proxy(path: str, request: Request) -> Response:
+            """Grafana는 GF_SERVER_SERVE_FROM_SUB_PATH=true로 이 경로 자체를 내부에서도
+            그대로 쓰므로(root_url이 .../grafana-proxy/), 접두사를 벗기지 않고 그대로 전달."""
+            return await _proxy_request(f"{GRAFANA_PROXY_TARGET}/grafana-proxy/{path}", request)
+
+        @app.api_route("/prometheus-proxy/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+        async def prometheus_proxy(path: str, request: Request) -> Response:
+            """Prometheus는 HTML UI 없이 /api/v1/* JSON만 호출하므로 접두사를 벗기고 그대로 전달."""
+            return await _proxy_request(f"{PROMETHEUS_PROXY_TARGET}/{path}", request)
     except Exception as e:
         print(f"[monitoring-addon] router load skipped: {e}")

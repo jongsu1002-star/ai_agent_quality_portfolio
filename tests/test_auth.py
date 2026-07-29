@@ -21,7 +21,23 @@ def test_auth_disabled_by_default_allows_everything():
     assert client.get("/api/dataset/current").status_code == 200
 
     status = client.get("/api/auth/status").json()
-    assert status == {"enabled": False, "authenticated": True, "username": None, "is_admin": False}
+    assert status["enabled"] is False
+    assert status["authenticated"] is True
+    assert status["username"] is None
+    assert status["is_admin"] is False
+    assert "client_ip" in status
+
+
+def test_auth_status_reports_client_ip_for_ip_allowlist_registration():
+    """화면 상단(로그아웃 버튼 왼쪽)에 보여주는 "내 접속 IP"가 실제 IP 허용목록 판정에
+    쓰이는 값(X-Forwarded-For 우선)과 정확히 일치해야, 사용자가 그 값을 그대로 등록했을 때
+    실제로 통과된다."""
+    client = TestClient(app)
+    status = client.get("/api/auth/status", headers={"X-Forwarded-For": "203.0.113.42, 10.0.0.1"}).json()
+    assert status["client_ip"] == "203.0.113.42"
+
+    status_no_header = client.get("/api/auth/status").json()
+    assert status_no_header["client_ip"]  # 헤더 없으면 request.client.host로 폴백, 빈 값은 아님
 
 
 def test_first_signup_is_auto_approved_admin_and_logs_in_immediately():
@@ -83,7 +99,11 @@ def test_exempt_paths_stay_open_without_login():
     assert client.get("/login").status_code == 200
     assert client.get("/signup").status_code == 200
     status = client.get("/api/auth/status").json()
-    assert status == {"enabled": True, "authenticated": False, "username": None, "is_admin": False}
+    assert status["enabled"] is True
+    assert status["authenticated"] is False
+    assert status["username"] is None
+    assert status["is_admin"] is False
+    assert "client_ip" in status
 
 
 def test_wrong_password_is_rejected():

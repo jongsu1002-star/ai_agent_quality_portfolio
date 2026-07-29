@@ -627,11 +627,21 @@ def logout(request: Request) -> JSONResponse:
 
 @app.get("/api/auth/status")
 def auth_status(request: Request) -> JSONResponse:
-    """대시보드가 로그아웃 버튼/사용자 관리 탭을 보여줄지 판단하는 용도(인증 자체는 미들웨어가 이미 강제함)."""
+    """대시보드가 로그아웃 버튼/사용자 관리 탭을 보여줄지 판단하는 용도(인증 자체는 미들웨어가 이미 강제함).
+
+    client_ip는 "접근 허용 IP" 관리자 탭에 무엇을 등록해야 할지 사용자가 직접 알 수 있도록
+    화면 상단에 표시하는 용도 - _is_ip_allowed()가 실제 판단에 쓰는 것과 동일한 값(X-Forwarded-For
+    우선)이라, 여기 보이는 값을 그대로 등록하면 된다."""
     enabled = USER_STORE.has_any_users()
     authenticated = (not enabled) or _is_authenticated(request)
     username = _current_username(request) if enabled and authenticated else None
-    return JSONResponse({"enabled": enabled, "authenticated": authenticated, "username": username, "is_admin": _is_admin(request)})
+    return JSONResponse({
+        "enabled": enabled,
+        "authenticated": authenticated,
+        "username": username,
+        "is_admin": _is_admin(request),
+        "client_ip": _client_ip(request),
+    })
 
 
 @app.get("/api/users")

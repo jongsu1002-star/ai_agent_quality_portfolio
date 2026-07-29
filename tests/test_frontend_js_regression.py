@@ -240,6 +240,18 @@ def test_ip_allowlist_admin_tab_wired():
         assert fn in html
 
 
+def test_my_ip_display_wired_next_to_logout_button_everywhere():
+    """모든 화면(index.html, monitoring_addon.html, voc_quality_chart.html)의 로그아웃
+    버튼 왼쪽에 접속 IP를 보여줘야 한다 - 사용자가 "접근 허용 IP" 탭에 무엇을 등록해야
+    하는지 직접 알 수 있게 하기 위함(/api/auth/status의 client_ip를 그대로 표시)."""
+    voc_chart_html = (REPO_ROOT / "app" / "templates" / "voc_quality_chart.html").read_text(encoding="utf-8")
+    for html in (INDEX_HTML.read_text(encoding="utf-8"), MONITORING_ADDON_HTML.read_text(encoding="utf-8"), voc_chart_html):
+        assert 'id="my-ip-display"' in html
+        assert "data.client_ip" in html
+        # 마크업 순서상 my-ip-display가 logout-btn보다 먼저 나와야("왼쪽") 함
+        assert html.index('id="my-ip-display"') < html.index('id="logout-btn"')
+
+
 def test_voc_grafana_dashboard_json_is_valid_and_matches_exported_metrics():
     """Grafana가 자동 프로비저닝하는 대시보드 JSON이 유효하고, 패널들이 실제로
     /metrics-addon이 내보내는 지표 이름을 그대로 쿼리하는지 확인(오타로 빈 패널이 되는

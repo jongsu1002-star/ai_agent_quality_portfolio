@@ -39,7 +39,10 @@
   <div class="card">
     <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
       <h1 class="title">VOC 분석 품질 지표 차트 (확대보기)</h1>
-      <button type="button" id="logout-btn" class="logout-btn" onclick="logout()" style="display:none;">로그아웃</button>
+      <div style="display:flex; align-items:center; gap:0.7rem;">
+        <span id="my-ip-display" class="muted" style="display:none;" title="접근 허용 IP 등록 시 이 값을 그대로 쓰면 됩니다"></span>
+        <button type="button" id="logout-btn" class="logout-btn" onclick="logout()" style="display:none;">로그아웃</button>
+      </div>
     </div>
     <p class="muted">
       <a href="/#voc-results">메인 대시보드의 "VOC 분석 결과" 탭</a>에 있는 것과 동일한 차트를 새 창에서 크게 봅니다 -
@@ -164,6 +167,13 @@
         const logoutBtn = document.getElementById('logout-btn');
         logoutBtn.style.display = data.enabled ? '' : 'none';
         logoutBtn.textContent = data.username ? `로그아웃 (${data.username})` : '로그아웃';
+        const ipDisplay = document.getElementById('my-ip-display');
+        if (data.client_ip) {
+          ipDisplay.textContent = `내 접속 IP: ${data.client_ip}`;
+          ipDisplay.style.display = '';
+        } else {
+          ipDisplay.style.display = 'none';
+        }
       } catch (err) {
         // 조회 실패해도 화면 자체는 계속 써야 하므로 조용히 무시
       }

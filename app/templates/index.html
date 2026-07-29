@@ -161,7 +161,10 @@
   <div class="card">
     <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
       <h1 class="title" style="margin:0;">AI Agent 품질관리·운영 모니터링 플랫폼</h1>
-      <button type="button" id="logout-btn" class="logout-btn" onclick="logout()" style="display:none;">로그아웃</button>
+      <div style="display:flex; align-items:center; gap:0.7rem;">
+        <span id="my-ip-display" class="chart-hint" style="display:none;" title="접근 허용 IP 등록 시 이 값을 그대로 쓰면 됩니다"></span>
+        <button type="button" id="logout-btn" class="logout-btn" onclick="logout()" style="display:none;">로그아웃</button>
+      </div>
     </div>
     <p>QA 파이프라인, 리포팅, 모니터링 대시보드입니다.</p>
     <div class="tabs">
@@ -808,6 +811,13 @@
         const logoutBtn = document.getElementById('logout-btn');
         logoutBtn.style.display = data.enabled ? '' : 'none';
         logoutBtn.textContent = data.username ? `로그아웃 (${data.username})` : '로그아웃';
+        const ipDisplay = document.getElementById('my-ip-display');
+        if (data.client_ip) {
+          ipDisplay.textContent = `내 접속 IP: ${data.client_ip}`;
+          ipDisplay.style.display = '';
+        } else {
+          ipDisplay.style.display = 'none';
+        }
         _isAdmin = !!data.is_admin;
         _currentUsername = data.username || 'shared';
         _canModerate = !data.enabled || _isAdmin; // 계정 시스템이 꺼진 LAN 모드에서는 전원이 사실상 운영자

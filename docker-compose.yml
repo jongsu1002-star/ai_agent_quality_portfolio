@@ -19,17 +19,47 @@ services:
       # 파일 공유 계층이 그 잠금 방식을 완전히 지원하지 않기 때문). 네임드 볼륨은
       # 도커 VM 내부 파일시스템에 저장되므로 이 문제가 없음 - 재시작해도 데이터는 유지됨.
       - qa-platform-data:/app/data
+      # scripts/backup_data.py의 산출물 - 바인드 마운트라 호스트 디스크에 남아, 컨테이너를
+      # 재생성해도 백업 스냅샷 자체는 사라지지 않음(진짜 재해 복구 대비는 여기서 더 나아가
+      # 이 디렉터리를 주기적으로 S3 등 외부로 옮기는 것을 권장 - AWS_배포_가이드.pptx 참고).
+      - ./backups:/app/backups
     restart: unless-stopped
+    # 단일 EC2 인스턴스에서 다른 서비스(prometheus/grafana)와 자원을 나눠 쓰므로, 이 앱
+    # 하나가 메모리 누수 등으로 인스턴스 전체를 먹통으로 만들지 않도록 상한을 둠. 값이
+    # 부족하면(OOM으로 재시작됨) docker-compose.prod.yml 등에서 인스턴스 사양에 맞게 조정.
+    mem_limit: 1g
+    cpus: 1.5
+    logging:
+      driver: json-file
+      options:
+        # 로그가 디스크를 무한정 채우지 않도록 파일당 10MB, 최대 3개(총 30MB)까지만 보관 -
+        # 단일 EC2 인스턴스는 로그 수집 파이프라인(ELK 등)이 없어 기본 드라이버가 무제한
+        # 누적되면 디스크가 꽉 차 서비스 전체가 멈추는 사고로 이어질 수 있음.
+        max-size: "10m"
+        max-file: "3"
+    # healthcheck는 여기서 따로 정의하지 않음 - Dockerfile에 이미 HEALTHCHECK(같은 /health
+    # 엔드포인트)가 있고, 여기서 또 정의하면 그걸 덮어써서 같은 내용이 두 곳에 중복된다.
 
   # 아래 prometheus/grafana는 모니터링 애드온용(선택 사항) - qa-platform과 완전히 독립적으로
   # 뜨고 죽으며, 이 두 서비스가 없어도 qa-platform은 정상 동작함. 안 띄우고 싶으면
   # `docker compose up -d qa-platform`처럼 서비스 이름을 지정해서 그것만 띄우면 됨.
   prometheus:
-    image: prom/prometheus:latest
+    # :latest 대신 버전을 고정 - 재현 가능한 배포를 위함(같은 코드로 오늘 배포한 것과 1년 뒤
+    # 배포한 것이 서로 다른 Prometheus 버전을 받는 걸 방지). 올릴 때는 이 태그를 의도적으로
+    # 바꾸고 변경 이력에 남길 것.
+    image: prom/prometheus:v3.13.0
     ports:
-      - "9090:9090"
+      # 127.0.0.1에만 바인딩 - 이 호스트 안(같은 머신)에서만 포트로 직접 접근 가능하고, 다른
+      # PC/인터넷에서는 이 포트로 직접 못 들어옴(app/main.py의 /prometheus-proxy, IP
+      # 허용목록을 거쳐야 함). qa-platform 컨테이너는 이 포트가 아니라 도커 내부
+      # 네트워크(서비스명 prometheus:9090)로 접근하므로 이 바인딩 변경과 무관하게 계속 동작함.
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # TSDB(수집된 지표 데이터) 영속화 - 이게 없으면(이전 상태) 컨테이너를 재생성할 때마다
+      # (이미지 업데이트, docker compose up --force-recreate 등) 그동안 쌓인 지표 이력이
+      # 통째로 사라짐. 네임드 볼륨이라 qa-platform-data와 같은 이유로 재시작에도 유지됨.
+      - prometheus-data:/prometheus
     extra_hosts:
       - "host.docker.internal:host-gateway"
     # --web.cors.origin: /monitoring-addon 페이지가 자체 차트를 그리려고 브라우저에서 직접
@@ -39,11 +69,30 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--web.cors.origin=.*"
     restart: unless-stopped
+    # qa-platform과 동일한 이유(단일 인스턴스 자원 보호 + 로그 무한 증가 방지).
+    mem_limit: 512m
+    cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      # 공식 이미지가 busybox 기반이라 curl은 없지만 wget(busybox 내장)은 있음 - Prometheus
+      # 자체 헬스체크 엔드포인트.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   grafana:
-    image: grafana/grafana:latest
+    # :latest 대신 버전 고정(위 prometheus와 동일한 이유)
+    image: grafana/grafana:13.1.0
     ports:
-      - "3000:3000"
+      # 127.0.0.1에만 바인딩 - Prometheus와 동일한 이유(위 주석 참고). qa-platform 컨테이너는
+      # 도커 내부 네트워크(서비스명 grafana:3000)로 접근하므로 영향 없음.
+      - "127.0.0.1:3000:3000"
     environment:
       # 로그인 화면 없이 대시보드가 바로 열리도록 익명 접속을 Viewer 권한으로 허용 - 이 플랫폼
       # 자체가 이미 LAN 내에서 별도 인증 없이 쓰이는 내부 도구라 동일한 보안 수준을 맞춘 것.
@@ -59,12 +108,39 @@ services:
       # https://your-domain.com/grafana-proxy/) - AWS_배포_가이드.pptx 참고.
       GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost/grafana-proxy/}
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      # 우리 리버스 프록시(app/main.py의 /grafana-proxy)는 일반 HTTP 요청/응답만 중계하고
+      # WebSocket 업그레이드를 지원하지 않는다 - Grafana Live(실시간 스트리밍 패널 갱신)가
+      # 켜져 있으면 그 기능만 계속 실패한다(다른 화면/차트는 영향 없음). 양방향 WebSocket
+      # 프록시를 새로 구현하는 대신, Live 자체를 꺼서 해당 패널들이 자동으로 폴링 방식으로
+      # 동작하게 한다(0으로 설정하면 Live 기능이 비활성화됨 - Grafana 공식 문서 권장 방식).
+      GF_LIVE_MAX_CONNECTIONS: "0"
     volumes:
+      # Grafana 자체 DB(조직/사용자/스타 등 내부 설정) 영속화 - 대시보드 자체는 이미
+      # provisioning으로 파일에서 재생성되지만, 이 볼륨이 없으면 컨테이너 재생성마다
+      # Grafana 내부 상태(예: GF_SECURITY_ADMIN_PASSWORD로 설정한 관리자 비밀번호 해시)가
+      # 초기화된다. 아래 두 bind mount는 이 볼륨 안의 하위 경로만 읽기 전용으로 덮어씀
+      # (Docker가 더 구체적인 하위 경로 마운트를 우선 적용하므로 공존 가능).
+      - grafana-data:/var/lib/grafana
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
     depends_on:
       - prometheus
     restart: unless-stopped
+    mem_limit: 512m
+    cpus: "1.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   qa-platform-data:
+  prometheus-data:
+  grafana-data:

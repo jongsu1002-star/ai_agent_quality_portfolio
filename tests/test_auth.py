@@ -1,8 +1,10 @@
 import json
+import time
 
 from fastapi.testclient import TestClient
 
-from app.main import app
+import app.main as main_module
+from app.main import app, _fetch_public_ip as _real_fetch_public_ip
 
 
 def _signup(client: TestClient, username: str, password: str):
@@ -26,6 +28,66 @@ def test_auth_disabled_by_default_allows_everything():
     assert status["username"] is None
     assert status["is_admin"] is False
     assert "client_ip" in status
+
+
+def test_auth_status_includes_public_ip_field():
+    """공인 IP 조회는 conftest.py의 autouse 픽스처가 고정값으로 대체하므로(실제 네트워크
+    호출 방지), 응답에 그 필드가 그대로 실려 나가는지만 확인."""
+    client = TestClient(app)
+    status = client.get("/api/auth/status").json()
+    assert status["public_ip"] == "203.0.113.1"
+
+
+def test_fetch_public_ip_caches_result_and_survives_failure(monkeypatch):
+    """_fetch_public_ip() 자체의 캐싱/실패 처리 로직 - conftest의 autouse 픽스처가 이
+    함수 자체를 통째로 대체해두므로, 모듈 임포트 시점에 잡아둔 원본 함수 참조로 직접
+    테스트한다."""
+    monkeypatch.setattr(main_module, "_PUBLIC_IP_CACHE", {"value": None, "fetched_at": 0.0})
+
+    calls = {"n": 0}
+
+    class _FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ip": "198.51.100.7"}
+
+    def _fake_get(url, timeout):
+        calls["n"] += 1
+        return _FakeResponse()
+
+    monkeypatch.setattr("requests.get", _fake_get)
+
+    assert _real_fetch_public_ip() == "198.51.100.7"
+    assert _real_fetch_public_ip() == "198.51.100.7"  # 캐시 TTL 안이라 재호출 없음
+    assert calls["n"] == 1
+
+
+def test_fetch_public_ip_returns_none_on_failure_without_raising(monkeypatch):
+    monkeypatch.setattr(main_module, "_PUBLIC_IP_CACHE", {"value": None, "fetched_at": 0.0})
+
+    def _fake_get(url, timeout):
+        raise ConnectionError("no network")
+
+    monkeypatch.setattr("requests.get", _fake_get)
+
+    assert _real_fetch_public_ip() is None
+
+
+def test_fetch_public_ip_refetches_after_ttl_expires(monkeypatch):
+    monkeypatch.setattr(main_module, "_PUBLIC_IP_CACHE", {"value": "old-ip", "fetched_at": time.time() - 10_000})
+
+    class _FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"ip": "203.0.113.99"}
+
+    monkeypatch.setattr("requests.get", lambda url, timeout: _FakeResponse())
+
+    assert _real_fetch_public_ip() == "203.0.113.99"
 
 
 def test_auth_status_reports_client_ip_for_ip_allowlist_registration():

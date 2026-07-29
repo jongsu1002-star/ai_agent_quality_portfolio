@@ -162,7 +162,7 @@
     <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
       <h1 class="title" style="margin:0;">AI Agent 품질관리·운영 모니터링 플랫폼</h1>
       <div style="display:flex; align-items:center; gap:0.7rem;">
-        <span id="my-ip-display" class="chart-hint" style="display:none;" title="접근 허용 IP 등록 시 이 값을 그대로 쓰면 됩니다"></span>
+        <span id="my-ip-display" class="chart-hint" style="display:none;" title="접근 허용 IP 등록 시: 같은 LAN/사무실에서 접속하면 내부 IP를, 인터넷을 통해 공개 배포된 곳에 접속하면 공인 IP를 등록하세요"></span>
         <button type="button" id="logout-btn" class="logout-btn" onclick="logout()" style="display:none;">로그아웃</button>
       </div>
     </div>
@@ -813,7 +813,8 @@
         logoutBtn.textContent = data.username ? `로그아웃 (${data.username})` : '로그아웃';
         const ipDisplay = document.getElementById('my-ip-display');
         if (data.client_ip) {
-          ipDisplay.textContent = `내 접속 IP: ${data.client_ip}`;
+          const publicIpText = data.public_ip ? data.public_ip : '확인 불가';
+          ipDisplay.textContent = `내부 IP: ${data.client_ip} · 공인 IP: ${publicIpText}`;
           ipDisplay.style.display = '';
         } else {
           ipDisplay.style.display = 'none';

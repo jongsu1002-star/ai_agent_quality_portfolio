@@ -78,6 +78,21 @@ def _no_real_secrets_in_tests(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_public_ip_lookup_in_tests(monkeypatch):
+    """GET /api/auth/status(수많은 테스트가 호출)가 app.main._fetch_public_ip()를 통해
+    실제 외부 서비스(ipify)에 네트워크 호출을 하지 않도록 항상 고정값으로 대체.
+
+    이 픽스처가 없으면 테스트 스위트 전체에서 최초 1회 실제 인터넷 접속을 시도하게 되어
+    (5분 TTL 캐시라 그 뒤로는 캐시를 타지만), 샌드박스/오프라인 CI에서 최대 2초 타임아웃
+    지연이나 실패가 생길 수 있음 - OPENAI_API_KEY 등 실제 비밀값을 막는 것과 같은 이유."""
+    try:
+        import app.main as main_module
+    except Exception:
+        return
+    monkeypatch.setattr(main_module, "_fetch_public_ip", lambda: "203.0.113.1")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_user_store(tmp_path, monkeypatch):
     """app.main.USER_STORE는 기본적으로 실서비스 data/users.db를 가리키는 싱글턴이라,
     이 픽스처 없이 /signup·/login 등을 TestClient로 두드리면 실제 계정 DB에 테스트용

@@ -225,6 +225,10 @@ _ACTIVE_SESSIONS: Dict[str, str] = {}  # 세션 토큰 -> username. 메모리 �
 _SHARED_BUCKET = "shared"  # 계정이 하나도 없는(=로그인이 꺼진) 상태에서 모두가 공유하는 고정 버킷 - 기존 단일사용자 동작과 완전히 동일한 경로를 그대로 씀
 _AUTH_EXEMPT_PATHS = {"/login", "/logout", "/signup", "/health", "/metrics-addon", "/api/auth/status", "/api/signup/requires-setup-code"}  # 로그인 없이 항상 허용
 _SAFE_NEXT_PATTERN = re.compile(r"^/[A-Za-z0-9/_\-]*$")
+
+_PUBLIC_IP_CACHE: Dict[str, Any] = {"value": None, "fetched_at": 0.0}  # 이 서버가 나가는 공인(외부) IP 캐시
+_PUBLIC_IP_CACHE_TTL_SECONDS = 300  # 5분 - 매 /api/auth/status 호출마다 외부 API를 부르지 않기 위함
+_PUBLIC_IP_LOCK = Lock()
 _SAFE_USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_\-]{3,32}$")
 
 LOGIN_MAX_ATTEMPTS = 5
@@ -321,6 +325,32 @@ def _client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else ""
+
+
+def _fetch_public_ip() -> Optional[str]:
+    """이 서버가 인터넷으로 나갈 때 쓰는 공인(외부) IP.
+
+    로컬/LAN에서 개발·운영 중일 때 화면의 "내부 IP"(_client_ip, 사설 IP인 경우가 많음)만으로는
+    나중에 AWS 등에 공개 배포했을 때 실제로 등록해야 할 IP를 알 수 없다 - 이 서버와 사용자가
+    같은 공유기/네트워크 뒤에 있다는 전제 하에, 외부 서비스(ipify)에 물어본 "우리 네트워크의
+    공인 IP"를 함께 보여줘서 미리 참고할 수 있게 한다. 외부 API 호출이라 실패할 수 있으므로
+    항상 실패를 조용히 처리하고, 매 요청마다 부르지 않도록 5분 TTL 캐시를 둔다."""
+    now = time.time()
+    with _PUBLIC_IP_LOCK:
+        if now - _PUBLIC_IP_CACHE["fetched_at"] < _PUBLIC_IP_CACHE_TTL_SECONDS:
+            return _PUBLIC_IP_CACHE["value"]
+    try:
+        import requests
+
+        resp = requests.get("https://api.ipify.org?format=json", timeout=2)
+        resp.raise_for_status()
+        ip = resp.json().get("ip")
+    except Exception:
+        ip = None
+    with _PUBLIC_IP_LOCK:
+        _PUBLIC_IP_CACHE["value"] = ip
+        _PUBLIC_IP_CACHE["fetched_at"] = now
+    return ip
 
 
 def _is_ip_allowed(request: Request) -> bool:
@@ -631,7 +661,9 @@ def auth_status(request: Request) -> JSONResponse:
 
     client_ip는 "접근 허용 IP" 관리자 탭에 무엇을 등록해야 할지 사용자가 직접 알 수 있도록
     화면 상단에 표시하는 용도 - _is_ip_allowed()가 실제 판단에 쓰는 것과 동일한 값(X-Forwarded-For
-    우선)이라, 여기 보이는 값을 그대로 등록하면 된다."""
+    우선)이라, 여기 보이는 값을 그대로 등록하면 된다. public_ip는 이 서버 네트워크의 공인
+    IP(_fetch_public_ip 참고) - client_ip가 사설 IP(LAN 내부)일 때, 나중에 공개 배포 시
+    실제로 등록해야 할 IP를 미리 참고할 수 있게 함께 보여준다."""
     enabled = USER_STORE.has_any_users()
     authenticated = (not enabled) or _is_authenticated(request)
     username = _current_username(request) if enabled and authenticated else None
@@ -641,6 +673,7 @@ def auth_status(request: Request) -> JSONResponse:
         "username": username,
         "is_admin": _is_admin(request),
         "client_ip": _client_ip(request),
+        "public_ip": _fetch_public_ip(),
     })
 
 

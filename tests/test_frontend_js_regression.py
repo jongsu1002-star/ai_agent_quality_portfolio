@@ -242,12 +242,16 @@ def test_ip_allowlist_admin_tab_wired():
 
 def test_my_ip_display_wired_next_to_logout_button_everywhere():
     """모든 화면(index.html, monitoring_addon.html, voc_quality_chart.html)의 로그아웃
-    버튼 왼쪽에 접속 IP를 보여줘야 한다 - 사용자가 "접근 허용 IP" 탭에 무엇을 등록해야
-    하는지 직접 알 수 있게 하기 위함(/api/auth/status의 client_ip를 그대로 표시)."""
+    버튼 왼쪽에 내부 IP와 공인 IP를 함께 보여줘야 한다 - 사용자가 "접근 허용 IP" 탭에
+    무엇을 등록해야 하는지 직접 알 수 있게 하기 위함(/api/auth/status의 client_ip/
+    public_ip를 그대로 표시 - 내부 IP는 LAN 접속 시, 공인 IP는 공개 배포 후 등록에 사용)."""
     voc_chart_html = (REPO_ROOT / "app" / "templates" / "voc_quality_chart.html").read_text(encoding="utf-8")
     for html in (INDEX_HTML.read_text(encoding="utf-8"), MONITORING_ADDON_HTML.read_text(encoding="utf-8"), voc_chart_html):
         assert 'id="my-ip-display"' in html
         assert "data.client_ip" in html
+        assert "data.public_ip" in html
+        assert "내부 IP" in html
+        assert "공인 IP" in html
         # 마크업 순서상 my-ip-display가 logout-btn보다 먼저 나와야("왼쪽") 함
         assert html.index('id="my-ip-display"') < html.index('id="logout-btn"')
 

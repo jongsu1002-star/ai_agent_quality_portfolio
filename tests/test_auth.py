@@ -8,12 +8,233 @@ from app.main import app, _fetch_public_ip as _real_fetch_public_ip
 
 
 def _signup(client: TestClient, username: str, password: str):
-    return client.post("/signup", json={"username": username, "password": password})
+    return client.post("/signup", json={"username": username, "password": password, "note": "테스트 신청", "contact": "test@example.com"})
 
 
 def _upload_dataset(client: TestClient, filename: str = "cases.json"):
     payload = json.dumps([{"id": "TC-1", "category": "COM", "question": "q", "golden_answer": "a"}]).encode()
     return client.post("/api/dataset/upload", files={"file": (filename, payload, "application/json")})
+
+
+def test_session_cookie_defaults_to_not_secure_for_local_dev():
+    """COOKIE_SECURE 기본값(false)에서는 Secure 속성이 없어야 함 - 평문 HTTP로 돌아가는
+    로컬 개발 환경에서 Secure 쿠키를 강제하면 브라우저가 쿠키 저장 자체를 거부해
+    로그인이 깨지기 때문(운영에서만 docker-compose.prod.yml이 COOKIE_SECURE=true로 켬)."""
+    client = TestClient(app)
+    response = _signup(client, "alice", "secret12345")
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "qa_session=" in set_cookie
+    assert "secure" not in set_cookie.lower()
+    assert "httponly" in set_cookie.lower()
+    assert "samesite=lax" in set_cookie.lower()
+
+
+def test_session_cookie_is_secure_when_cookie_secure_env_enabled(monkeypatch):
+    """COOKIE_SECURE=true(운영 배포)일 때는 로그인/가입 쿠키 모두 Secure 속성이 붙어야 함.
+
+    Secure 쿠키는 표준에 따라 HTTPS 연결에만 다시 실려 나가므로, TestClient도 https://
+    base_url로 만들어야 가입 이후의 요청(승인 등)에도 세션 쿠키가 정상적으로 동봉된다
+    (기본 http://testserver로는 브라우저와 동일하게 쿠키가 아예 재전송되지 않음 - 이것도
+    Secure 플래그가 실제로 지켜지고 있다는 방증)."""
+    monkeypatch.setattr(main_module, "COOKIE_SECURE", True)
+    client = TestClient(app, base_url="https://testserver")
+    response = _signup(client, "alice", "secret12345")
+    assert "secure" in response.headers.get("set-cookie", "").lower()
+
+    bob_client = TestClient(app, base_url="https://testserver")
+    _signup(bob_client, "bob", "secret12345")
+    client.post("/api/users/bob/approve")
+    login_response = bob_client.post("/login", json={"username": "bob", "password": "secret12345"})
+    assert "secure" in login_response.headers.get("set-cookie", "").lower()
+
+
+def test_logout_delete_cookie_matches_secure_setting(monkeypatch):
+    """삭제(로그아웃) 쿠키도 설정된 쿠키와 동일한 secure/samesite/path 속성을 써야
+    브라우저가 정확히 같은 쿠키로 인식해 지운다."""
+    monkeypatch.setattr(main_module, "COOKIE_SECURE", True)
+    client = TestClient(app)
+    _signup(client, "alice", "secret12345")
+    logout_response = client.post("/logout")
+    delete_cookie_header = logout_response.headers.get("set-cookie", "")
+    assert "qa_session=" in delete_cookie_header
+    assert "secure" in delete_cookie_header.lower()
+    assert "samesite=lax" in delete_cookie_header.lower()
+
+
+def test_session_survives_simulated_server_restart(monkeypatch):
+    """세션이 SQLite에 영속화돼야 컨테이너 재배포(재시작)에도 로그인이 풀리지 않는다 -
+    같은 DB 파일을 가리키는 새 SessionStore 인스턴스(=프로세스 재시작을 흉내)로 바꿔도
+    기존 쿠키가 여전히 인증돼야 함(예전엔 메모리 dict라 재시작하면 전부 무효화됐음)."""
+    from qa_agent.sessions import SessionStore
+
+    client = TestClient(app)
+    _signup(client, "alice", "secret12345")
+    assert client.get("/api/auth/status").json()["authenticated"] is True
+
+    db_path = main_module.SESSION_STORE._path
+    fresh_store_simulating_restart = SessionStore(path=str(db_path))
+    monkeypatch.setattr(main_module, "SESSION_STORE", fresh_store_simulating_restart)
+
+    assert client.get("/api/auth/status").json()["authenticated"] is True
+
+
+def test_session_expires_server_side_after_ttl(monkeypatch):
+    """서버 측 만료가 실제로 강제돼야 함 - 쿠키(client-side)의 max_age와 별개로, 서버가
+    독립적으로 세션 TTL이 지난 토큰을 거부해야 한다."""
+    monkeypatch.setattr(main_module, "SESSION_TTL_SECONDS", -1)  # 이미 만료된 상태로 발급되게 함
+    client = TestClient(app)
+    _signup(client, "alice", "secret12345")
+    assert client.get("/api/auth/status").json()["authenticated"] is False
+
+
+def test_is_https_request_ignores_forwarded_proto_header_by_default():
+    """TRUST_PROXY_HEADERS가 꺼져 있으면(기본값) X-Forwarded-Proto를 무조건 신뢰하지
+    않아야 함 - 신뢰할 수 있는 리버스 프록시가 없는 한 누구나 이 헤더를 위조해 HTTPS인
+    척할 수 있기 때문."""
+    from app.main import _is_https_request
+    from starlette.requests import Request as StarletteRequest
+
+    scope = {
+        "type": "http",
+        "scheme": "http",
+        "headers": [(b"x-forwarded-proto", b"https")],
+        "method": "GET",
+        "path": "/",
+    }
+    request = StarletteRequest(scope)
+    assert _is_https_request(request) is False
+
+
+def test_security_headers_absent_by_default():
+    """SECURITY_HEADERS_ENABLED 기본값(false)에서는 기존 응답과 완전히 동일해야 함 -
+    로컬 개발 환경에 영향이 없어야 하기 때문."""
+    client = TestClient(app)
+    response = client.get("/health")
+    assert "Content-Security-Policy" not in response.headers
+    assert "X-Content-Type-Options" not in response.headers
+    assert "Strict-Transport-Security" not in response.headers
+
+
+def test_security_headers_present_when_enabled(monkeypatch):
+    """SECURITY_HEADERS_ENABLED=true(운영)일 때 5개 헤더가 모두 응답에 실려야 하며, CSP는
+    기존 인라인 <script>/style="..." 사용(nosniff 대상 소스코드 자체 변경 없음)을 깨지
+    않도록 script-src/style-src에 'unsafe-inline'을 포함해야 한다."""
+    monkeypatch.setattr(main_module, "SECURITY_HEADERS_ENABLED", True)
+    client = TestClient(app)
+    response = client.get("/health")
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+    assert "Permissions-Policy" in response.headers
+    csp = response.headers["Content-Security-Policy"]
+    assert "script-src 'self' 'unsafe-inline'" in csp
+    assert "style-src 'self' 'unsafe-inline'" in csp
+    assert "frame-src 'self'" in csp
+    # 평문 HTTP 테스트 요청에는 HSTS를 붙이지 않아야 함(HTTPS일 때만 의미가 있으므로)
+    assert "Strict-Transport-Security" not in response.headers
+
+
+def test_security_headers_include_hsts_when_request_is_https(monkeypatch):
+    monkeypatch.setattr(main_module, "SECURITY_HEADERS_ENABLED", True)
+    client = TestClient(app, base_url="https://testserver")
+    response = client.get("/health")
+    assert "max-age=" in response.headers["Strict-Transport-Security"]
+
+
+def test_is_https_request_honors_forwarded_proto_when_trust_enabled(monkeypatch):
+    monkeypatch.setattr(main_module, "TRUST_PROXY_HEADERS", True)
+    from app.main import _is_https_request
+    from starlette.requests import Request as StarletteRequest
+
+    scope = {
+        "type": "http",
+        "scheme": "http",
+        "headers": [(b"x-forwarded-proto", b"https")],
+        "method": "GET",
+        "path": "/",
+    }
+    request = StarletteRequest(scope)
+    assert _is_https_request(request) is True
+
+
+def test_signup_rejects_password_shorter_than_default_minimum():
+    """PASSWORD_MIN_LENGTH를 설정하지 않은 로컬 개발 기본값(4자)은 기존 동작과 동일해야 함."""
+    client = TestClient(app)
+    response = _signup(client, "alice", "abc")
+    assert response.status_code == 400
+    assert "4자" in response.json()["error"]
+
+
+def test_signup_rejects_password_shorter_than_configured_minimum(monkeypatch):
+    """PASSWORD_MIN_LENGTH=12(운영 기본값)일 때 그보다 짧은 신규 가입은 거부되고, 오류
+    메시지도 실제 설정된 길이를 정확히 알려줘야 한다(클라이언트 안내 문구와 일치시키기 위함)."""
+    monkeypatch.setattr(main_module, "PASSWORD_MIN_LENGTH", 12)
+    client = TestClient(app)
+    response = _signup(client, "alice", "short12345")  # 10자 - 12자 미만
+    assert response.status_code == 400
+    assert "12자" in response.json()["error"]
+
+    ok_response = _signup(client, "alice2", "a" * 12)
+    assert ok_response.status_code == 200
+
+
+def test_signup_requires_setup_code_endpoint_reports_password_min_length(monkeypatch):
+    monkeypatch.setattr(main_module, "PASSWORD_MIN_LENGTH", 12)
+    client = TestClient(app)
+    response = client.get("/api/signup/requires-setup-code")
+    assert response.json()["password_min_length"] == 12
+
+
+def test_raising_password_min_length_does_not_break_existing_users_login(monkeypatch):
+    """운영에서 PASSWORD_MIN_LENGTH를 12로 올려도, 이미 짧은 비밀번호로 가입해둔 기존
+    사용자의 로그인은 절대 깨지면 안 된다(길이 검사는 가입/생성 시점에만 적용)."""
+    client = TestClient(app)
+    _signup(client, "alice", "abcd")  # 4자 - 기존 정책 하에서 가입
+    monkeypatch.setattr(main_module, "PASSWORD_MIN_LENGTH", 12)
+    login_response = client.post("/login", json={"username": "alice", "password": "abcd"})
+    assert login_response.status_code == 200
+
+
+def test_signup_requires_note_identifying_the_applicant():
+    """관리자가 승인 여부를 판단할 수 있도록, 가입 신청 시 본인 소개(신청 사유)가 없으면
+    거부돼야 한다."""
+    client = TestClient(app)
+    response = client.post("/signup", json={"username": "alice", "password": "secret123", "contact": "a@example.com"})
+    assert response.status_code == 400
+    assert "소개" in response.json()["error"]
+
+
+def test_signup_requires_contact_identifying_the_applicant():
+    client = TestClient(app)
+    response = client.post("/signup", json={"username": "alice", "password": "secret123", "note": "안녕하세요"})
+    assert response.status_code == 400
+    assert "연락처" in response.json()["error"]
+
+
+def test_signup_rejects_note_and_contact_over_max_length():
+    client = TestClient(app)
+    too_long_note = "a" * (main_module.SIGNUP_NOTE_MAX_LENGTH + 1)
+    response = client.post("/signup", json={"username": "alice", "password": "secret123", "note": too_long_note, "contact": "a@example.com"})
+    assert response.status_code == 400
+
+    too_long_contact = "a" * (main_module.SIGNUP_CONTACT_MAX_LENGTH + 1)
+    response2 = client.post("/signup", json={"username": "alice", "password": "secret123", "note": "안녕하세요", "contact": too_long_contact})
+    assert response2.status_code == 400
+
+
+def test_signup_stores_note_and_contact_and_admin_can_see_it_for_approval():
+    """관리자가 "사용자 관리" 탭에서 대기 중인 신청자가 누구인지 확인할 수 있어야 함 -
+    /api/users 응답에 note/contact가 그대로 실려야 한다."""
+    admin_client = TestClient(app)
+    _signup(admin_client, "alice", "secret123")
+
+    bob_client = TestClient(app)
+    response = bob_client.post("/signup", json={"username": "bob", "password": "secret456", "note": "영업팀 김철수, QA 결과 확인 목적", "contact": "bob@example.com"})
+    assert response.status_code == 200
+
+    users = admin_client.get("/api/users").json()
+    bob_entry = next(u for u in users if u["username"] == "bob")
+    assert bob_entry["note"] == "영업팀 김철수, QA 결과 확인 목적"
+    assert bob_entry["contact"] == "bob@example.com"
 
 
 def test_auth_disabled_by_default_allows_everything():
@@ -221,6 +442,65 @@ def test_metrics_addon_path_stays_open_for_prometheus_scraping():
     assert response.status_code != 401
 
 
+def test_admin_can_disable_and_re_enable_a_user():
+    admin_client = TestClient(app)
+    _signup(admin_client, "alice", "secret123")
+
+    bob_client = TestClient(app)
+    _signup(bob_client, "bob", "secret456")
+    admin_client.post("/api/users/bob/approve")
+
+    disable_response = admin_client.post("/api/users/bob/disable")
+    assert disable_response.status_code == 200
+
+    login_response = bob_client.post("/login", json={"username": "bob", "password": "secret456"})
+    assert login_response.status_code == 403
+    assert "중지" in login_response.json()["error"]
+
+    enable_response = admin_client.post("/api/users/bob/enable")
+    assert enable_response.status_code == 200
+    login_response2 = bob_client.post("/login", json={"username": "bob", "password": "secret456"})
+    assert login_response2.status_code == 200
+
+
+def test_disabling_a_user_immediately_kills_their_active_session():
+    """이미 로그인된 세션이 있는 상태에서 관리자가 계정을 중지하면, 그 세션으로도 더 이상
+    인증된 요청을 할 수 없어야 함(로그아웃 처리 없이 계속 활동하는 구멍을 막기 위함)."""
+    admin_client = TestClient(app)
+    _signup(admin_client, "alice", "secret123")
+
+    bob_client = TestClient(app)
+    _signup(bob_client, "bob", "secret456")
+    admin_client.post("/api/users/bob/approve")
+    bob_client.post("/login", json={"username": "bob", "password": "secret456"})
+    assert bob_client.get("/api/auth/status").json()["authenticated"] is True
+
+    admin_client.post("/api/users/bob/disable")
+
+    status_after = bob_client.get("/api/auth/status").json()
+    assert status_after["authenticated"] is False
+
+
+def test_disable_endpoint_is_admin_only():
+    admin_client = TestClient(app)
+    _signup(admin_client, "alice", "secret123")
+
+    bob_client = TestClient(app)
+    _signup(bob_client, "bob", "secret456")
+    admin_client.post("/api/users/bob/approve")
+    bob_client.post("/login", json={"username": "bob", "password": "secret456"})
+
+    assert bob_client.post("/api/users/alice/disable").status_code == 403
+
+
+def test_last_admin_cannot_be_disabled_via_api():
+    admin_client = TestClient(app)
+    _signup(admin_client, "alice", "secret123")
+
+    response = admin_client.post("/api/users/alice/disable")
+    assert response.status_code == 400
+
+
 def test_non_admin_cannot_access_user_management():
     admin_client = TestClient(app)
     _signup(admin_client, "alice", "secret123")
@@ -240,7 +520,7 @@ def test_error_log_is_admin_only():
     bob_client = TestClient(app)
     _signup(bob_client, "bob", "secret456")
     admin_client.post("/api/users/bob/approve")
-    bob_client.post("\login", json={"username": "bob", "password": "secret456"})
+    bob_client.post("/login", json={"username": "bob", "password": "secret456"})
 
     assert bob_client.get("/api/error-log").status_code == 403
     admin_response = admin_client.get("/api/error-log")
@@ -255,7 +535,7 @@ def test_ip_allowlist_crud_is_admin_only():
     bob_client = TestClient(app)
     _signup(bob_client, "bob", "secret456")
     admin_client.post("/api/users/bob/approve")
-    bob_client.post("\login", json={"username": "bob", "password": "secret456"})
+    bob_client.post("/login", json={"username": "bob", "password": "secret456"})
 
     assert bob_client.get("/api/ip-allowlist").status_code == 403
     assert bob_client.post("/api/ip-allowlist", json={"network": "203.0.113.5"}).status_code == 403

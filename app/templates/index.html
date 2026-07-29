@@ -599,6 +599,12 @@
       </div>
       <div id="board-post-list" class="table-view" style="margin-top:0.75rem;">불러오는 중...</div>
     </div>
+    <div class="card" id="desktop-app-download-card">
+      <h2>데스크톱 앱 다운로드</h2>
+      <p class="chart-hint">브라우저 없이 바로 실행하는 윈도우 설치형 앱입니다(내부적으로는 이 서버에 접속하는 얇은 래퍼입니다).</p>
+      <p class="chart-hint" id="desktop-app-download-hint">확인 중...</p>
+      <button type="button" id="desktop-app-download-btn" onclick="downloadDesktopApp()" disabled>다운로드 (Windows .exe)</button>
+    </div>
   </div>
 
   <!-- 게시글 상세+댓글 모달 - #chart-modal과 같은 이유로 탭 바깥에 둠(탭이 숨겨져 있어도
@@ -837,6 +843,30 @@
 
     function _canEditBoardItem(author) {
       return author === _currentUsername || _canModerate;
+    }
+
+    // ===================== 데스크톱 앱 다운로드 =====================
+    async function loadDesktopAppInfo() {
+      const hint = document.getElementById('desktop-app-download-hint');
+      const btn = document.getElementById('desktop-app-download-btn');
+      try {
+        const res = await fetch('/api/desktop-app/info');
+        const data = await res.json();
+        if (data.available) {
+          hint.textContent = `${data.size_display} · ${data.modified_at} 업데이트`;
+          btn.disabled = false;
+        } else {
+          hint.textContent = '현재 다운로드 가능한 파일이 없습니다.';
+          btn.disabled = true;
+        }
+      } catch (err) {
+        hint.textContent = '정보를 불러오지 못했습니다.';
+        btn.disabled = true;
+      }
+    }
+
+    function downloadDesktopApp() {
+      window.location.href = '/api/desktop-app/download';
     }
 
     // ===================== 게시판 =====================
@@ -1826,6 +1856,48 @@ let _vocActiveRunId = null;
       }
     }
 
+    function _userStatusLabel(status) {
+      if (status === 'approved') return '활성';
+      if (status === 'disabled') return '사용 중지됨';
+      return '대기중';
+    }
+
+    function _renderUserRow(u) {
+      const actions = [];
+      if (u.status === 'pending') {
+        actions.push(`<button type="button" onclick="approveUser('${u.username}')">승인</button>`);
+        actions.push(`<button type="button" onclick="rejectUser('${u.username}')">거부</button>`);
+      } else {
+        if (u.role === 'admin') {
+          actions.push(`<button type="button" onclick="setUserRole('${u.username}', 'user')">관리자 권한 회수</button>`);
+        } else {
+          actions.push(`<button type="button" onclick="setUserRole('${u.username}', 'admin')">관리자 권한 부여</button>`);
+        }
+        if (u.status === 'approved') {
+          actions.push(`<button type="button" class="btn-secondary" onclick="disableUser('${u.username}')">사용 중지</button>`);
+        } else if (u.status === 'disabled') {
+          actions.push(`<button type="button" onclick="enableUser('${u.username}')">사용 재개</button>`);
+        }
+      }
+      return `<tr>
+        <td>${escapeHtml(u.username)}</td>
+        <td>${_userStatusLabel(u.status)}</td>
+        <td>${u.role === 'admin' ? '관리자' : '일반'}</td>
+        <td>${escapeHtml(u.contact || '-')}</td>
+        <td title="${escapeHtml(u.note || '')}">${escapeHtml(u.note || '-')}</td>
+        <td>${escapeHtml(formatTimestamp(u.created_at))}</td>
+        <td>${actions.join(' ')}</td>
+      </tr>`;
+    }
+
+    function _userTableHtml(users) {
+      if (!users.length) {
+        return '<p class="chart-hint">없음</p>';
+      }
+      const rows = users.map(_renderUserRow).join('');
+      return `<table><thead><tr><th>아이디</th><th>상태</th><th>역할</th><th>연락처</th><th>가입 사유/소개</th><th>가입일</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
     async function loadUsers() {
       const el = document.getElementById('users-table');
       const res = await fetch('/api/users');
@@ -1838,25 +1910,40 @@ let _vocActiveRunId = null;
         el.innerHTML = '<p>가입한 계정이 없습니다.</p>';
         return;
       }
-      const rows = users.map(u => {
-        const actions = [];
-        if (u.status === 'pending') {
-          actions.push(`<button type="button" onclick="approveUser('${u.username}')">승인</button>`);
-          actions.push(`<button type="button" onclick="rejectUser('${u.username}')">거부</button>`);
-        } else if (u.role === 'admin') {
-          actions.push(`<button type="button" onclick="setUserRole('${u.username}', 'user')">관리자 권한 회수</button>`);
-        } else {
-          actions.push(`<button type="button" onclick="setUserRole('${u.username}', 'admin')">관리자 권한 부여</button>`);
-        }
-        return `<tr>
-          <td>${escapeHtml(u.username)}</td>
-          <td>${u.status === 'approved' ? '승인됨' : '대기중'}</td>
-          <td>${u.role === 'admin' ? '관리자' : '일반'}</td>
-          <td>${escapeHtml(formatTimestamp(u.created_at))}</td>
-          <td>${actions.join(' ')}</td>
-        </tr>`;
-      }).join('');
-      el.innerHTML = `<table><thead><tr><th>아이디</th><th>상태</th><th>역할</th><th>가입일</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+      // 관리자/일반 사용자를 그룹으로 나눠서 보여줌 - 승인 대기 중인 신청은 아직 어느
+      // 그룹에도 속하지 않으므로 별도 섹션으로 맨 위에 노출
+      const pending = users.filter(u => u.status === 'pending');
+      const admins = users.filter(u => u.status !== 'pending' && u.role === 'admin');
+      const generalUsers = users.filter(u => u.status !== 'pending' && u.role === 'user');
+      const sections = [];
+      if (pending.length) {
+        sections.push(`<h3>승인 대기 (${pending.length})</h3>${_userTableHtml(pending)}`);
+      }
+      sections.push(`<h3>관리자 그룹 (${admins.length})</h3>${_userTableHtml(admins)}`);
+      sections.push(`<h3>일반 사용자 그룹 (${generalUsers.length})</h3>${_userTableHtml(generalUsers)}`);
+      el.innerHTML = sections.join('');
+    }
+
+    async function disableUser(username) {
+      const res = await fetch(`/api/users/${encodeURIComponent(username)}/disable`, { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || '사용 중지하지 못했습니다.', 'error');
+      } else {
+        showToast(`${username} 계정을 사용 중지했습니다.`);
+      }
+      loadUsers();
+    }
+
+    async function enableUser(username) {
+      const res = await fetch(`/api/users/${encodeURIComponent(username)}/enable`, { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showToast(data.error || '사용 재개하지 못했습니다.', 'error');
+      } else {
+        showToast(`${username} 계정을 사용 재개했습니다.`);
+      }
+      loadUsers();
     }
 
     async function approveUser(username) {
@@ -2649,6 +2736,7 @@ let _vocActiveRunId = null;
       }
       if (name === 'board') {
         loadBoardPosts();
+        loadDesktopAppInfo();
       }
       if (name === 'voc-results') {
         loadVocHistory();

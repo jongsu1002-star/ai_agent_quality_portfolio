@@ -28,6 +28,15 @@ CREATE TABLE IF NOT EXISTS users (
 );
 """
 
+# users 테이블에 나중에 추가된 컬럼들 - 이미 운영 중인 users.db(구 스키마)에도 ALTER TABLE로
+# 안전하게 얹기 위해 CREATE TABLE의 컬럼 목록에 직접 넣지 않고 별도 마이그레이션으로 분리함
+# (신규 DB는 CREATE TABLE 직후 이미 컬럼이 없으므로 마이그레이션이 그대로 추가해준다 -
+# 신규/기존 경로를 하나로 통일).
+_MIGRATION_COLUMNS = {
+    "note": "TEXT NOT NULL DEFAULT ''",
+    "contact": "TEXT NOT NULL DEFAULT ''",
+}
+
 
 class UserStore:
     """가입 신청/승인/역할 변경을 담당하는 SQLite 저장소.
@@ -56,6 +65,10 @@ class UserStore:
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.executescript(_DDL)
+                existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+                for column, ddl_type in _MIGRATION_COLUMNS.items():
+                    if column not in existing_columns:
+                        conn.execute(f"ALTER TABLE users ADD COLUMN {column} {ddl_type}")
                 conn.commit()
             finally:
                 conn.close()
@@ -86,11 +99,16 @@ class UserStore:
         row = self._conn().execute("SELECT COUNT(*) AS n FROM users WHERE role='admin' AND status='approved'").fetchone()
         return int(row["n"])
 
-    def create_user(self, username: str, password: str) -> Optional[Dict[str, Any]]:
+    def create_user(self, username: str, password: str, note: str = "", contact: str = "") -> Optional[Dict[str, Any]]:
         """가입 신청 - 아이디가 이미 있으면 None(호출부가 "이미 사용 중" 안내).
 
         DB에 계정이 하나도 없을 때(전체 서비스 최초 가입)만 자동으로 admin+approved로
         만들고, 그 외에는 항상 user+pending으로 시작해 관리자 승인을 거치게 함.
+
+        note/contact는 관리자가 승인 여부를 판단할 때 "이 사람이 누구인지" 알 수 있게
+        신청 시 함께 받는 자기소개/연락처 - 검증(비어있으면 안 됨 등)은 이 계층이 아니라
+        app/main.py::signup_submit이 담당(scripts/create_admin.py처럼 UI 없이 CLI로 만드는
+        비상 관리자 계정은 이 값들이 필요 없어 기본값 빈 문자열을 그대로 씀).
         """
         username = username.strip()
         if not username or not password:
@@ -102,8 +120,8 @@ class UserStore:
         try:
             with conn:
                 conn.execute(
-                    "INSERT INTO users (username, password_hash, role, status, created_at) VALUES (?, ?, ?, ?, ?)",
-                    (username, hash_password(password), role, status, datetime.now(timezone.utc).isoformat()),
+                    "INSERT INTO users (username, password_hash, role, status, created_at, note, contact) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (username, hash_password(password), role, status, datetime.now(timezone.utc).isoformat(), note.strip(), contact.strip()),
                 )
         except sqlite3.IntegrityError:
             return None
@@ -114,7 +132,7 @@ class UserStore:
         return dict(row) if row else None
 
     def list_all(self) -> List[Dict[str, Any]]:
-        rows = self._conn().execute("SELECT id, username, role, status, created_at FROM users ORDER BY created_at ASC").fetchall()
+        rows = self._conn().execute("SELECT id, username, role, status, created_at, note, contact FROM users ORDER BY created_at ASC").fetchall()
         return [dict(row) for row in rows]
 
     def verify_login(self, username: str, password: str) -> Optional[Dict[str, Any]]:
@@ -152,6 +170,27 @@ class UserStore:
         conn = self._conn()
         with conn:
             cursor = conn.execute("DELETE FROM users WHERE username = ?", (username,))
+        return cursor.rowcount > 0
+
+    def disable_user(self, username: str) -> bool:
+        """승인된 계정을 사용 중지(로그인 차단) - 삭제와 달리 데이터/이력이 그대로 남고
+        나중에 enable_user로 되돌릴 수 있음. 마지막 남은 관리자는 중지할 수 없음
+        (delete_user/set_role과 동일한 락아웃 방지 규칙)."""
+        user = self.get_user(username)
+        if not user or user["status"] != "approved":
+            return False
+        if user["role"] == "admin" and self.count_admins() <= 1:
+            return False
+        conn = self._conn()
+        with conn:
+            cursor = conn.execute("UPDATE users SET status='disabled' WHERE username = ? AND status='approved'", (username,))
+        return cursor.rowcount > 0
+
+    def enable_user(self, username: str) -> bool:
+        """사용 중지된 계정을 다시 승인 상태로 되돌림."""
+        conn = self._conn()
+        with conn:
+            cursor = conn.execute("UPDATE users SET status='approved' WHERE username = ? AND status='disabled'", (username,))
         return cursor.rowcount > 0
 
     def set_role(self, username: str, role: str) -> bool:

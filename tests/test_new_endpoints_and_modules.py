@@ -39,15 +39,58 @@ def test_monitoring_summary_endpoint_tracks_requests():
     client = TestClient(app)
     before = client.get("/api/monitoring/summary").json()
 
-    client.get("/health")
-    client.get("/health")
+    client.get("/api/config/connector-defaults")
+    client.get("/api/config/connector-defaults")
 
     after = client.get("/api/monitoring/summary").json()
-    assert after["total_requests"] >= before["total_requests"] + 3  # 자기 자신의 두 /monitoring/summary 호출 + /health 2건
+    assert after["total_requests"] >= before["total_requests"] + 3  # 자기 자신의 첫 /monitoring/summary 호출 + connector-defaults 2건
     assert "avg_response_ms" in after
     assert "requests_per_minute" in after
     assert "by_path" in after
     assert after["health"]["status"] in ("ok", "degraded")
+
+
+def test_health_and_metrics_addon_endpoints_are_excluded_from_metrics():
+    """Prometheus가 15초 주기로 스크레이프하는 /health·/metrics-addon이 요청수/응답시간
+    지표에 섞이면, 실제 사용자 트래픽의 응답시간 통계(평균/p95)가 왜곡된다 - 이 두 경로는
+    집계에서 제외돼야 한다."""
+    client = TestClient(app)
+    before = client.get("/api/monitoring/summary").json()
+
+    client.get("/health")
+    client.get("/health")
+    client.get("/metrics-addon")
+
+    after = client.get("/api/monitoring/summary").json()
+    # 세 번의 호출이 집계에 전혀 반영되지 않아야 하므로, 유일한 증가분은 "첫 monitoring/summary
+    # 호출 1건"뿐이어야 한다(그 자체는 집계 대상 - 실제 사용자가 모니터링 탭을 보는 행동임).
+    assert after["total_requests"] == before["total_requests"] + 1
+    assert not any(row["path"] == "/health" for row in after["by_path"])
+    assert not any(row["path"] == "/metrics-addon" for row in after["by_path"])
+
+
+def test_unhandled_exception_is_still_recorded_as_500_in_metrics(monkeypatch):
+    """핸들러에서 처리되지 않은 예외가 나면(결국 500으로 응답됨) METRICS에도 그 사실이
+    반영돼야 한다 - 이전에는 call_next()가 예외로 끝나면 그 아래 기록 코드가 아예
+    실행되지 않아, 실제로는 500이 나갔는데도 지표에는 전혀 안 잡히는 공백이 있었음."""
+    import app.main as main_module
+
+    original_current_username = main_module._current_username
+
+    def _boom(request):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(main_module, "_current_username", _boom)
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.get("/api/dataset/current")
+    assert response.status_code == 500
+
+    # monkeypatch.undo()는 이 테스트의 다른 autouse 픽스처(USER_STORE 격리 등)까지 전부
+    # 되돌려버리므로 쓰면 안 됨 - 이 속성 하나만 원래 함수로 다시 되돌린다.
+    monkeypatch.setattr(main_module, "_current_username", original_current_username)
+    after = client.get("/api/monitoring/summary").json()
+    dataset_row = next(row for row in after["by_path"] if row["path"] == "/api/dataset/current")
+    assert dataset_row["error_count"] >= 1
 
 
 def test_monitoring_summary_response_shape_is_unchanged_by_monitoring_addon():

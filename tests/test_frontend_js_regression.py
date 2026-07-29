@@ -256,6 +256,48 @@ def test_my_ip_display_wired_next_to_logout_button_everywhere():
         assert html.index('id="my-ip-display"') < html.index('id="logout-btn"')
 
 
+def test_signup_form_collects_note_and_contact():
+    """가입 화면이 본인 소개(신청 사유)와 연락처를 입력받고, 서버와 동일한 필드명(note/
+    contact)으로 전송해야 한다 - 관리자가 승인 시 신청자를 식별할 수 있게 하기 위함."""
+    signup_html = (REPO_ROOT / "app" / "templates" / "signup.html").read_text(encoding="utf-8")
+    assert 'id="signup-note"' in signup_html
+    assert 'id="signup-contact"' in signup_html
+    assert "note," in signup_html or "note:" in signup_html
+    assert "contact," in signup_html or "contact:" in signup_html
+
+
+def test_user_management_table_shows_note_and_contact_columns():
+    """"사용자 관리" 탭 표에 연락처/가입 사유 열이 있어야 관리자가 승인 전 신청자를
+    식별할 수 있다."""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert "u.contact" in html
+    assert "u.note" in html
+
+
+def test_user_management_groups_admins_and_general_users_with_enable_disable():
+    """"사용자 관리" 탭이 관리자 그룹/일반 사용자 그룹으로 나눠 보여주고, 각 계정에
+    사용 중지/재개 버튼을 배선해야 한다."""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert "관리자 그룹" in html
+    assert "일반 사용자 그룹" in html
+    assert "disableUser(" in html
+    assert "enableUser(" in html
+    assert "/disable" in html
+    assert "/enable" in html
+
+
+def test_board_tab_has_desktop_app_download_card():
+    """게시판 탭에 데스크톱 앱(.exe) 다운로드 카드가 배선돼 있어야 함 - 버튼은 로드 시
+    비활성 상태로 시작해 /api/desktop-app/info 조회 결과(available)에 따라서만 활성화되고,
+    다운로드는 별도 API 엔드포인트로 이동하는 방식이어야 한다."""
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert 'id="desktop-app-download-btn"' in html
+    assert 'id="desktop-app-download-hint"' in html
+    assert "/api/desktop-app/info" in html
+    assert "/api/desktop-app/download" in html
+    assert html.index('id="tab-board"') < html.index('id="desktop-app-download-btn"')
+
+
 def test_voc_grafana_dashboard_json_is_valid_and_matches_exported_metrics():
     """Grafana가 자동 프로비저닝하는 대시보드 JSON이 유효하고, 패널들이 실제로
     /metrics-addon이 내보내는 지표 이름을 그대로 쿼리하는지 확인(오타로 빈 패널이 되는

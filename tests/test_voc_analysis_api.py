@@ -541,11 +541,11 @@ def test_voc_analysis_history_and_detail_are_visible_to_all_users_but_uploads_st
     """이력 조회/상세는 게시판·Jira 티켓과 같은 팀 공용 산출물이라 전원 공개로 바뀌었지만
     (실행자 격리 폐지), 업로드 파일은 여전히 사용자별로 격리됨(별개 정책 - 그대로 유지)."""
     admin = TestClient(app)
-    assert admin.post("/signup", json={"username": "alice", "password": "secret123"}).status_code == 200
+    assert admin.post("/signup", json={"username": "alice", "password": "secret123", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     admin.post("/api/board/posts", json={"board_type": "voc", "title": "대기", "content": "오래 기다림"})
 
     bob = TestClient(app)
-    assert bob.post("/signup", json={"username": "bob", "password": "secret456"}).status_code == 200
+    assert bob.post("/signup", json={"username": "bob", "password": "secret456", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     assert admin.post("/api/users/bob/approve").status_code == 200
     assert bob.post("/login", json={"username": "bob", "password": "secret456"}).status_code == 200
 
@@ -572,7 +572,7 @@ def test_voc_analysis_detail_never_exposes_excel_path_to_anyone():
     """P1-2: excel_path는 서버 파일시스템 경로라 관리자/실행자 본인을 포함해 그 누구도
     상세 응답으로 돌려받아서는 안 된다."""
     admin = TestClient(app)
-    assert admin.post("/signup", json={"username": "alice", "password": "secret123"}).status_code == 200
+    assert admin.post("/signup", json={"username": "alice", "password": "secret123", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     upload = admin.post("/api/voc-analysis/excel/upload", files={"file": ("voc.xlsx", _build_voc_xlsx_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
     run = admin.post("/api/voc-analysis/run", json={"use_board": False, "use_excel": True, "excel_path": upload.json()["excel_path"]})
     assert run.status_code == 200
@@ -587,11 +587,11 @@ def test_voc_analysis_detail_hides_jira_jql_and_focus_instruction_from_other_use
     """P1-2: jira_jql/focus_instruction은 실행자/관리자에게는 보이지만, 그 외 일반
     사용자에게는 상세 응답에서 빠져야 한다(둘 다 실행자가 입력한 조회조건/지시문)."""
     admin = TestClient(app)
-    assert admin.post("/signup", json={"username": "alice", "password": "secret123"}).status_code == 200
+    assert admin.post("/signup", json={"username": "alice", "password": "secret123", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     admin.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
 
     bob = TestClient(app)
-    assert bob.post("/signup", json={"username": "bob", "password": "secret456"}).status_code == 200
+    assert bob.post("/signup", json={"username": "bob", "password": "secret456", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     assert admin.post("/api/users/bob/approve").status_code == 200
     assert bob.post("/login", json={"username": "bob", "password": "secret456"}).status_code == 200
 
@@ -606,7 +606,7 @@ def test_voc_analysis_detail_hides_jira_jql_and_focus_instruction_from_other_use
     assert detail_as_admin["params"]["focus_instruction"] == "속도 이슈만"
 
     carol = TestClient(app)
-    assert carol.post("/signup", json={"username": "carol", "password": "secret789"}).status_code == 200
+    assert carol.post("/signup", json={"username": "carol", "password": "secret789", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     assert admin.post("/api/users/carol/approve").status_code == 200
     assert carol.post("/login", json={"username": "carol", "password": "secret789"}).status_code == 200
     detail_as_third_party = carol.get(f"/api/voc-analysis/{analysis_id}")
@@ -630,16 +630,16 @@ def test_voc_analysis_delete_allowed_for_admin_or_owner_only():
     """삭제는 여전히 좁게 제한됨 - 관리자이거나 그 분석을 실행한 본인만 가능. 관리자도
     작성자도 아닌 제3자는 남의 실행 결과를 지울 수 없어야 한다."""
     admin = TestClient(app)
-    assert admin.post("/signup", json={"username": "alice", "password": "secret123"}).status_code == 200
+    assert admin.post("/signup", json={"username": "alice", "password": "secret123", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     admin.post("/api/board/posts", json={"board_type": "voc", "title": "대기", "content": "오래 기다림"})
 
     bob = TestClient(app)
-    assert bob.post("/signup", json={"username": "bob", "password": "secret456"}).status_code == 200
+    assert bob.post("/signup", json={"username": "bob", "password": "secret456", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     assert admin.post("/api/users/bob/approve").status_code == 200
     assert bob.post("/login", json={"username": "bob", "password": "secret456"}).status_code == 200
 
     carol = TestClient(app)
-    assert carol.post("/signup", json={"username": "carol", "password": "secret789"}).status_code == 200
+    assert carol.post("/signup", json={"username": "carol", "password": "secret789", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     assert admin.post("/api/users/carol/approve").status_code == 200
     assert carol.post("/login", json={"username": "carol", "password": "secret789"}).status_code == 200
 
@@ -989,11 +989,11 @@ def test_run_async_different_users_run_independently_without_409():
     """사용자별 상한(1건)이지 전역 상한이 아니므로, 서로 다른 사용자는 동시에 각자
     실행할 수 있어야 함."""
     admin = TestClient(app)
-    assert admin.post("/signup", json={"username": "alice_p02", "password": "secret123"}).status_code == 200
+    assert admin.post("/signup", json={"username": "alice_p02", "password": "secret123", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     admin.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
 
     bob = TestClient(app)
-    assert bob.post("/signup", json={"username": "bob_p02", "password": "secret456"}).status_code == 200
+    assert bob.post("/signup", json={"username": "bob_p02", "password": "secret456", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     assert admin.post("/api/users/bob_p02/approve").status_code == 200
     assert bob.post("/login", json={"username": "bob_p02", "password": "secret456"}).status_code == 200
 
@@ -1154,7 +1154,7 @@ def test_cross_validation_matrix_detail_hides_focus_instruction_from_third_party
     """P1-2와 동일한 정책이 매트릭스 상세 응답에도 적용돼야 함."""
     monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
     admin = TestClient(app)
-    assert admin.post("/signup", json={"username": "alice", "password": "secret123"}).status_code == 200
+    assert admin.post("/signup", json={"username": "alice", "password": "secret123", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     admin.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
 
     run = admin.post("/api/voc-analysis/cross-validation-matrix", json={"use_board": True, "focus_instruction": "속도만"})
@@ -1165,7 +1165,7 @@ def test_cross_validation_matrix_detail_hides_focus_instruction_from_third_party
     assert detail_as_owner["params"]["focus_instruction"] == "속도만"
 
     bob = TestClient(app)
-    assert bob.post("/signup", json={"username": "bob", "password": "secret456"}).status_code == 200
+    assert bob.post("/signup", json={"username": "bob", "password": "secret456", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     assert admin.post("/api/users/bob/approve").status_code == 200
     assert bob.post("/login", json={"username": "bob", "password": "secret456"}).status_code == 200
     detail_as_third_party = bob.get(f"/api/voc-analysis/cross-validation-matrix/{analysis_id}")
@@ -1176,13 +1176,13 @@ def test_cross_validation_matrix_detail_hides_focus_instruction_from_third_party
 def test_cross_validation_matrix_delete_allowed_for_admin_or_owner_only(monkeypatch):
     monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _XValFakeClient)
     admin = TestClient(app)
-    assert admin.post("/signup", json={"username": "alice", "password": "secret123"}).status_code == 200
+    assert admin.post("/signup", json={"username": "alice", "password": "secret123", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     admin.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
     run = admin.post("/api/voc-analysis/cross-validation-matrix", json={"use_board": True})
     analysis_id = run.json()["id"]
 
     bob = TestClient(app)
-    assert bob.post("/signup", json={"username": "bob", "password": "secret456"}).status_code == 200
+    assert bob.post("/signup", json={"username": "bob", "password": "secret456", "note": "테스트 신청", "contact": "test@example.com"}).status_code == 200
     assert admin.post("/api/users/bob/approve").status_code == 200
     assert bob.post("/login", json={"username": "bob", "password": "secret456"}).status_code == 200
     assert bob.delete(f"/api/voc-analysis/cross-validation-matrix/{analysis_id}").status_code == 403

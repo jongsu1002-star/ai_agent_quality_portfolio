@@ -1,0 +1,38 @@
+# AWS(운영) 환경 전용 오버라이드 - docker-compose.yml과 함께 사용합니다(자동으로 로드되지
+# 않음 - 로컬 개발 환경의 기존 동작을 절대 깨지 않기 위해 명시적으로 -f를 지정해야만 적용됨).
+#
+# 실행 예시:
+#   export GIT_SHA=$(git rev-parse HEAD)
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml build --build-arg GIT_SHA=$GIT_SHA qa-platform
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# 여기서 바꾸는 것: 운영 환경에서만 필요한 보안 강화 설정(세션 쿠키 Secure, Grafana 익명
+# 접속 끄기 + 관리자 비밀번호 필수화). 그 외 서비스 구성(볼륨, 포트 바인딩 등)은
+# docker-compose.yml을 그대로 상속합니다.
+services:
+  qa-platform:
+    environment:
+      # 운영(HTTPS 뒤)에서는 세션 쿠키에 Secure 플래그를 강제 - app/main.py 참고.
+      COOKIE_SECURE: "true"
+      # 이 앱 바로 앞에 신뢰할 수 있는 리버스 프록시(Nginx/ALB)가 있다는 뜻 - X-Forwarded-Proto
+      # 헤더를 신뢰해 HTTPS 여부를 판단하게 함(app/main.py::_is_https_request 참고).
+      TRUST_PROXY_HEADERS: "true"
+      # 운영 환경에서만 보안 헤더(HSTS/CSP 등)를 응답에 추가 - app/main.py::_add_security_headers 참고.
+      SECURITY_HEADERS_ENABLED: "true"
+      # 신규 가입/관리자 생성(scripts/create_admin.py)에만 적용되는 비밀번호 최소 길이 -
+      # 기존 사용자의 로그인은 길이를 다시 검사하지 않으므로 영향 없음(app/main.py 참고).
+      PASSWORD_MIN_LENGTH: "12"
+      # 세션 서버 측 만료(초) - 로컬 개발 기본값(30일)보다 짧게(7일) 강제. 세션은
+      # data/sessions.db(SQLite)에 영속화되므로 재배포해도 이 만료 정책과 무관하게
+      # 로그인이 유지되지만, 그만큼 탈취된 쿠키의 유효기간도 길어지므로 운영에서는 더
+      # 타이트하게 잡음(app/main.py::_session_ttl_seconds 참고).
+      SESSION_TTL_SECONDS: "604800"
+
+  grafana:
+    environment:
+      # 운영 환경에서는 로그인 없는 익명 Viewer 접속을 끔 - 로컬 개발용 기본값(true)과 다름.
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # 관리자 비밀번호는 반드시 .env 또는 AWS Secrets Manager에서 주입하세요(하드코딩 금지).
+      # 값이 없으면 docker compose config/up 자체가 에러로 실패합니다(운영에서 admin/admin
+      # 기본값이 그대로 쓰이는 사고를 막기 위한 의도적인 필수값 처리).
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD를 .env 또는 AWS Secrets Manager로 설정하세요}

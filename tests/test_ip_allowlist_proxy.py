@@ -7,7 +7,7 @@ from app.main import app
 
 
 def _signup(client: TestClient, username: str, password: str):
-    return client.post("/signup", json={"username": username, "password": password})
+    return client.post("/signup", json={"username": username, "password": password, "note": "테스트 신청", "contact": "test@example.com"})
 
 
 class _FakeUpstreamResponse:

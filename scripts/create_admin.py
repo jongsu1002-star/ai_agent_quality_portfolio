@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import getpass
+import os
 import sys
 from pathlib import Path
 
@@ -18,15 +19,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from qa_agent.users import UserStore  # noqa: E402
 
 
+def _password_min_length() -> int:
+    """app/main.py::_password_min_length과 동일한 규칙 - 운영에서 PASSWORD_MIN_LENGTH를
+    12로 설정해두면 이 CLI로 만드는 관리자 계정에도 동일하게 적용된다."""
+    value = os.environ.get("PASSWORD_MIN_LENGTH")
+    if value is None:
+        return 4
+    try:
+        parsed = int(value.strip())
+    except (TypeError, ValueError):
+        return 4
+    return parsed if parsed > 0 else 4
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         print("사용법: python scripts/create_admin.py <아이디>")
         return
     username = sys.argv[1]
 
-    password = getpass.getpass("설정할 비밀번호를 입력하세요: ")
-    if not password:
-        print("비밀번호가 비어 있습니다.")
+    min_length = _password_min_length()
+    password = getpass.getpass(f"설정할 비밀번호를 입력하세요({min_length}자 이상): ")
+    if len(password) < min_length:
+        print(f"비밀번호는 {min_length}자 이상이어야 합니다.")
         return
     confirm = getpass.getpass("확인을 위해 한 번 더 입력하세요: ")
     if password != confirm:

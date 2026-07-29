@@ -33,7 +33,7 @@ for _stream in (sys.stdout, sys.stderr):
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
 load_dotenv()  # 로컬 실행 시 .env를 읽어 os.environ에 반영 (Docker는 env_file로 동일한 역할을 함)
 
@@ -68,6 +68,7 @@ from qa_agent.jira_notifier import JiraNotifier
 from qa_agent.models import GoldenCase
 from qa_agent.pipeline import ALL_TECHNIQUES, PipelineOrchestrator
 from qa_agent.reporter import list_run_history, write_defect_report_doc, write_reports
+from qa_agent.sessions import SessionStore
 from qa_agent.slack_notifier import DiscordNotifier, SlackNotifier, TeamsNotifier
 from qa_agent.users import UserStore
 
@@ -191,6 +192,7 @@ EXTERNAL_MONITOR = ExternalMonitorRegistry(path=str(Path("reports") / "monitorin
 USER_STORE = UserStore(path=str(Path("data") / "users.db"))  # 계정(가입/승인/역할) 저장소 - monitoring_addon과 같은 SQLite 패턴
 BOARD_STORE = BoardStore(path=str(Path("data") / "board.db"))  # 게시판(일반/FAQ/VOC) + 댓글 저장소
 IP_ALLOWLIST_STORE = IpAllowlistStore(path=str(Path("data") / "ip_allowlist.db"))  # Grafana/Prometheus 프록시 접근 허용 IP 목록
+DESKTOP_APP_EXE_PATH = Path("desktop_app") / "dist" / "AI_Agent_품질관리.exe"  # 게시판 탭의 데스크톱 앱 다운로드 카드가 받는 파일 - 별도 버전 관리 없이 이 파일을 새로 빌드해 덮어쓰면 그대로 "최신"이 됨(mtime 기준)
 
 MONITORING_ADDON_DB = None  # 모니터링 애드온 전용 SQLite (기존 어떤 저장소도 대체하지 않음)
 if MONITORING_ADDON_ENABLED and MONITORING_ADDON_DB_ENABLED:
@@ -202,6 +204,9 @@ if MONITORING_ADDON_ENABLED and MONITORING_ADDON_DB_ENABLED:
         print(f"[monitoring-addon] DB init skipped: {e}")
 
 
+_METRICS_EXCLUDED_PATHS = {"/health", "/metrics-addon"}  # Prometheus가 15초마다 스크레이프하는 자동화 헬스체크/지표 경로 - 실제 사용자 트래픽과 섞이면 응답시간 지표(평균/p95)가 왜곡됨(짧은 헬스체크가 통계를 실제보다 빠르게 보이게 함)
+
+
 @app.middleware("http")
 async def _record_request_metrics(request: Request, call_next):
     """모든 HTTP 요청 1건의 소요시간/상태코드를 METRICS에 기록.
@@ -209,19 +214,111 @@ async def _record_request_metrics(request: Request, call_next):
     기존 QA 파이프라인/리포트 기능과는 완전히 별개인 부가 관측 기능이므로, 기록 자체가
     실패하더라도(예: 예상 밖 예외) 실제 응답에는 절대 영향을 주면 안 됨 - 그래서 기록
     실패는 조용히 무시하고 원래 응답을 그대로 돌려줍니다.
+
+    try/finally로 감싼 이유: 이전에는 `response = await call_next(request)`가 예외를 던지면
+    (핸들러에서 처리되지 않은 예외 - Starlette가 결국 500으로 변환) 그 아래 기록 코드 자체가
+    실행되지 않아 실제로는 500 응답이 나갔는데도 METRICS에는 전혀 안 잡히는 공백이 있었음.
+    finally 블록은 예외가 나든 안 나든 항상 실행되므로, 이 경우에도 상태코드 500으로 정확히
+    기록한 뒤 원래 예외를 그대로 다시 던져(원래 500 응답/디버깅 흐름에 영향 없음).
     """
     started = time.perf_counter()
-    response = await call_next(request)
+    status_code = 500  # call_next가 예외로 끝나면 실제로 500이 나갈 것이므로 기본값을 500으로 둠
     try:
-        duration_ms = (time.perf_counter() - started) * 1000
-        METRICS.record(request.method, request.url.path, response.status_code, duration_ms)
-    except Exception:
-        pass
-    return response
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        if request.url.path not in _METRICS_EXCLUDED_PATHS:
+            try:
+                duration_ms = (time.perf_counter() - started) * 1000
+                METRICS.record(request.method, request.url.path, status_code, duration_ms)
+            except Exception:
+                pass
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    """환경변수를 불리언으로 해석 - monitoring_addon/config.py의 동일한 패턴(값이 아예
+    없으면 default, 있으면 "true/1/yes/on"만 참)."""
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+COOKIE_SECURE = _env_flag("COOKIE_SECURE", default=False)  # 운영(HTTPS 뒤)에서는 docker-compose.prod.yml이 true로 설정. 로컬 개발(평문 HTTP)에서 true로 두면 브라우저가 쿠키 저장 자체를 거부해 로그인이 깨지므로 기본값은 false.
+TRUST_PROXY_HEADERS = _env_flag("TRUST_PROXY_HEADERS", default=False)  # true면 X-Forwarded-Proto 등 리버스 프록시 헤더를 신뢰(Nginx/ALB처럼 실제로 신뢰할 수 있는 프록시가 앞에 있을 때만 켤 것 - 그렇지 않으면 누구나 헤더를 위조해 HTTPS인 척할 수 있음)
+SECURITY_HEADERS_ENABLED = _env_flag("SECURITY_HEADERS_ENABLED", default=False)  # 운영 배포에서는 docker-compose.prod.yml이 true로 설정 - 로컬 개발 기본값은 false(기존 동작 그대로)
+
+
+def _password_min_length() -> int:
+    """PASSWORD_MIN_LENGTH 환경변수 - 신규 가입/관리자 생성에만 적용(기존 사용자 로그인은
+    비밀번호 길이를 다시 검사하지 않으므로 영향 없음). 운영에서는 docker-compose.prod.yml이
+    12로 설정 - 값이 없거나 잘못돼도 로컬 개발 기존 동작(4자)이 깨지지 않도록 안전한
+    기본값으로 되돌아간다."""
+    value = os.environ.get("PASSWORD_MIN_LENGTH")
+    if value is None:
+        return 4
+    try:
+        parsed = int(value.strip())
+    except (TypeError, ValueError):
+        return 4
+    return parsed if parsed > 0 else 4
+
+
+PASSWORD_MIN_LENGTH = _password_min_length()
+
+# 기존 템플릿이 인라인 <script>와 style="..." 속성을 광범위하게 쓰고 있어(nonce/hash 기반으로
+# 다시 쓰는 건 UI를 바꾸는 큰 변경이라 범위 밖), 그 부분만 허용하고 외부 출처 스크립트/스타일
+# 주입은 막는 현실적인 절충안 CSP. frame-src/connect-src는 'self'만 있으면 되는데, Grafana도
+# /grafana-proxy 리버스 프록시를 거쳐 같은 오리진으로 서빙되기 때문(설계서 참고 - 별도 외부
+# 오리진을 CSP에 추가할 필요가 없어진 것 자체가 이 프록시 설계의 부수적인 이점).
+_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self' data:; "
+    "connect-src 'self'; "
+    "frame-src 'self'; "
+    "frame-ancestors 'self'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
+
+
+def _is_https_request(request: Request) -> bool:
+    """실제 연결이 HTTPS인지 판단 - TRUST_PROXY_HEADERS가 꺼져 있으면(기본값) 리버스 프록시
+    헤더를 아예 보지 않고 request.url.scheme만 신뢰한다."""
+    if request.url.scheme == "https":
+        return True
+    if TRUST_PROXY_HEADERS:
+        return request.headers.get("x-forwarded-proto", "").lower() == "https"
+    return False
 
 
 SESSION_COOKIE_NAME = "qa_session"
-_ACTIVE_SESSIONS: Dict[str, str] = {}  # 세션 토큰 -> username. 메모리 저장이라 서버 재시작 시 전부 무효화(재로그인 필요)
+_DEFAULT_SESSION_TTL_SECONDS = 60 * 60 * 24 * 30  # 30일 - 쿠키 max_age와 동일
+
+
+def _session_ttl_seconds() -> int:
+    """SESSION_TTL_SECONDS 환경변수(선택) - 서버 측에서 세션이 강제로 만료되는 시간.
+
+    이전에는 서버 쪽에 만료 개념이 전혀 없어서(쿠키의 max_age만 클라이언트 쪽에서 지켜짐)
+    한 번 발급된 토큰은 서버가 재시작되기 전까지 무한정 유효했음 - 이 값으로 그 공백을
+    메운다. 값이 없거나 잘못돼도 로컬 개발 기존 동작(30일)이 깨지지 않게 안전한 기본값으로
+    되돌아간다."""
+    value = os.environ.get("SESSION_TTL_SECONDS")
+    if value is None:
+        return _DEFAULT_SESSION_TTL_SECONDS
+    try:
+        parsed = int(value.strip())
+    except (TypeError, ValueError):
+        return _DEFAULT_SESSION_TTL_SECONDS
+    return parsed if parsed > 0 else _DEFAULT_SESSION_TTL_SECONDS
+
+
+SESSION_TTL_SECONDS = _session_ttl_seconds()
+SESSION_STORE = SessionStore(path=str(Path("data") / "sessions.db"))  # 로그인 세션 - SQLite에 영속화해 재배포(컨테이너 재시작)에도 로그인이 풀리지 않게 함(qa_agent/sessions.py 참고)
 _SHARED_BUCKET = "shared"  # 계정이 하나도 없는(=로그인이 꺼진) 상태에서 모두가 공유하는 고정 버킷 - 기존 단일사용자 동작과 완전히 동일한 경로를 그대로 씀
 _AUTH_EXEMPT_PATHS = {"/login", "/logout", "/signup", "/health", "/metrics-addon", "/api/auth/status", "/api/signup/requires-setup-code"}  # 로그인 없이 항상 허용
 _SAFE_NEXT_PATTERN = re.compile(r"^/[A-Za-z0-9/_\-]*$")
@@ -230,6 +327,8 @@ _PUBLIC_IP_CACHE: Dict[str, Any] = {"value": None, "fetched_at": 0.0}  # 이 서
 _PUBLIC_IP_CACHE_TTL_SECONDS = 300  # 5분 - 매 /api/auth/status 호출마다 외부 API를 부르지 않기 위함
 _PUBLIC_IP_LOCK = Lock()
 _SAFE_USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_\-]{3,32}$")
+SIGNUP_NOTE_MAX_LENGTH = 300  # 가입 신청 시 "본인 소개/신청 사유" - 관리자가 승인 여부를 판단할 근거
+SIGNUP_CONTACT_MAX_LENGTH = 100  # 이메일/전화번호 등 연락처 - 승인 관련 문의를 위해
 
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_LOCKOUT_SECONDS = 300  # 5분
@@ -274,14 +373,16 @@ def _record_login_success(request: Request) -> None:
 def _current_username(request: Request) -> str:
     """로그인 세션에 매인 아이디, 없으면(또는 계정 시스템 자체가 꺼져있으면) 공용 버킷."""
     token = request.cookies.get(SESSION_COOKIE_NAME)
-    if token and token in _ACTIVE_SESSIONS:
-        return _ACTIVE_SESSIONS[token]
+    if token:
+        username = SESSION_STORE.get_username(token)
+        if username:
+            return username
     return _SHARED_BUCKET
 
 
 def _is_authenticated(request: Request) -> bool:
     token = request.cookies.get(SESSION_COOKIE_NAME)
-    return bool(token) and token in _ACTIVE_SESSIONS
+    return bool(token) and SESSION_STORE.get_username(token) is not None
 
 
 def _is_admin(request: Request) -> bool:
@@ -386,6 +487,24 @@ async def _require_login(request: Request, call_next):
         return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)
     next_path = _safe_next_path(path + (f"?{request.url.query}" if request.url.query else ""))
     return RedirectResponse(url=f"/login?next={next_path}")
+
+
+@app.middleware("http")
+async def _add_security_headers(request: Request, call_next):
+    """운영 배포(SECURITY_HEADERS_ENABLED=true)에서만 보안 헤더를 추가 - 로컬 개발
+    기본값(false)에서는 기존 응답과 완전히 동일하다."""
+    response = await call_next(request)
+    if not SECURITY_HEADERS_ENABLED:
+        return response
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Content-Security-Policy"] = _CONTENT_SECURITY_POLICY
+    if _is_https_request(request):
+        # HSTS는 HTTPS 연결에서만 의미가 있음(평문 HTTP 응답에 실어도 브라우저가 무시함) -
+        # 그래도 굳이 안 보내는 게 더 명확하므로 실제로 HTTPS일 때만 붙인다.
+        response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
+    return response
 
 
 RUN_REGISTRY: Dict[str, Dict[str, Dict[str, Any]]] = {}  # username -> run_id -> {status, progress, result, error, jira_tickets}
@@ -575,9 +694,13 @@ def signup_page() -> HTMLResponse:
 @app.get("/api/signup/requires-setup-code")
 def signup_requires_setup_code() -> JSONResponse:
     """가입 화면이 '관리자 설정 코드' 입력란을 보여줘야 하는지 - ADMIN_SETUP_CODE가 설정돼
-    있고 아직 계정이 하나도 없을 때(=지금 가입하면 자동 관리자가 될 때)만 true."""
+    있고 아직 계정이 하나도 없을 때(=지금 가입하면 자동 관리자가 될 때)만 true.
+
+    password_min_length도 함께 내려줘서, 가입 화면이 서버와 동일한 최소 길이 안내/검증을
+    보여줄 수 있게 한다(운영에서 PASSWORD_MIN_LENGTH를 12로 바꿔도 화면 문구가 하드코딩된
+    "4자"로 남는 불일치를 막기 위함)."""
     required = bool(_admin_setup_code()) and not USER_STORE.has_any_users()
-    return JSONResponse({"required": required})
+    return JSONResponse({"required": required, "password_min_length": PASSWORD_MIN_LENGTH})
 
 
 @app.post("/signup")
@@ -589,24 +712,34 @@ def signup_submit(payload: Dict[str, Any]) -> JSONResponse:
     나머지(두 번째 가입자부터)는 원래대로 대기 상태로 시작하므로 코드가 필요 없음."""
     username = str(payload.get("username", "")).strip()
     password = str(payload.get("password", ""))
+    note = str(payload.get("note", "")).strip()
+    contact = str(payload.get("contact", "")).strip()
     if not _SAFE_USERNAME_PATTERN.match(username):
         return JSONResponse({"error": "아이디는 영문/숫자/_/- 3~32자여야 합니다"}, status_code=400)
-    if len(password) < 4:
-        return JSONResponse({"error": "비밀번호는 4자 이상이어야 합니다"}, status_code=400)
+    if len(password) < PASSWORD_MIN_LENGTH:
+        return JSONResponse({"error": f"비밀번호는 {PASSWORD_MIN_LENGTH}자 이상이어야 합니다"}, status_code=400)
+    if not note:
+        return JSONResponse({"error": "가입 사유/소개를 입력해주세요"}, status_code=400)
+    if len(note) > SIGNUP_NOTE_MAX_LENGTH:
+        return JSONResponse({"error": f"가입 사유/소개는 {SIGNUP_NOTE_MAX_LENGTH}자 이내로 입력해주세요"}, status_code=400)
+    if not contact:
+        return JSONResponse({"error": "연락처를 입력해주세요"}, status_code=400)
+    if len(contact) > SIGNUP_CONTACT_MAX_LENGTH:
+        return JSONResponse({"error": f"연락처는 {SIGNUP_CONTACT_MAX_LENGTH}자 이내로 입력해주세요"}, status_code=400)
     setup_code = _admin_setup_code()
     if setup_code and not USER_STORE.has_any_users():
         submitted_code = str(payload.get("setup_code", ""))
         if not secrets.compare_digest(submitted_code, setup_code):
             return JSONResponse({"error": "관리자 설정 코드가 올바르지 않습니다"}, status_code=403)
-    user = USER_STORE.create_user(username, password)
+    user = USER_STORE.create_user(username, password, note=note, contact=contact)
     if not user:
         return JSONResponse({"error": "이미 사용 중인 아이디입니다"}, status_code=409)
     if user["status"] != "approved":
         return JSONResponse({"ok": True, "status": "pending"})
     token = secrets.token_urlsafe(32)
-    _ACTIVE_SESSIONS[token] = username
+    SESSION_STORE.create_session(token, username, ttl_seconds=SESSION_TTL_SECONDS)
     response = JSONResponse({"ok": True, "status": "approved"})
-    response.set_cookie(SESSION_COOKIE_NAME, token, httponly=True, samesite="lax", max_age=60 * 60 * 24 * 30)
+    response.set_cookie(SESSION_COOKIE_NAME, token, httponly=True, samesite="lax", secure=COOKIE_SECURE, max_age=SESSION_TTL_SECONDS, path="/")
     return response
 
 
@@ -634,14 +767,16 @@ def login_submit(payload: Dict[str, Any], request: Request) -> JSONResponse:
         return JSONResponse({"error": "존재하지 않는 아이디입니다"}, status_code=401)
     if user["status"] == "pending":
         return JSONResponse({"error": "아직 관리자 승인 대기 중입니다"}, status_code=403)
+    if user["status"] == "disabled":
+        return JSONResponse({"error": "사용이 중지된 계정입니다. 관리자에게 문의하세요"}, status_code=403)
     if not USER_STORE.verify_login(username, password):
         _record_login_failure(request)
         return JSONResponse({"error": "비밀번호가 올바르지 않습니다"}, status_code=401)
     _record_login_success(request)
     token = secrets.token_urlsafe(32)
-    _ACTIVE_SESSIONS[token] = username
+    SESSION_STORE.create_session(token, username, ttl_seconds=SESSION_TTL_SECONDS)
     response = JSONResponse({"ok": True})
-    response.set_cookie(SESSION_COOKIE_NAME, token, httponly=True, samesite="lax", max_age=60 * 60 * 24 * 30)
+    response.set_cookie(SESSION_COOKIE_NAME, token, httponly=True, samesite="lax", secure=COOKIE_SECURE, max_age=SESSION_TTL_SECONDS, path="/")
     return response
 
 
@@ -649,9 +784,9 @@ def login_submit(payload: Dict[str, Any], request: Request) -> JSONResponse:
 def logout(request: Request) -> JSONResponse:
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if token:
-        _ACTIVE_SESSIONS.pop(token, None)
+        SESSION_STORE.delete_session(token)
     response = JSONResponse({"ok": True})
-    response.delete_cookie(SESSION_COOKIE_NAME)
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/", samesite="lax", secure=COOKIE_SECURE)
     return response
 
 
@@ -771,6 +906,31 @@ def reject_user(username: str, request: Request) -> JSONResponse:
     return JSONResponse({"rejected": True})
 
 
+@app.post("/api/users/{username}/disable")
+def disable_user_endpoint(username: str, request: Request) -> JSONResponse:
+    """계정 사용 중지 - 삭제와 달리 데이터/이력은 남기고 로그인만 막는다. 마지막 남은
+    관리자는 중지할 수 없다(락아웃 방지, delete_user와 동일한 규칙)."""
+    error = _require_admin(request)
+    if error:
+        return error
+    if not USER_STORE.disable_user(username):
+        return JSONResponse({"error": "사용 중지할 수 없습니다(마지막 관리자는 중지 불가, 또는 활성 계정이 아님)"}, status_code=400)
+    # 중지 후에도 이미 로그인된 세션으로 계속 활동하는 것을 막기 위해 즉시 로그아웃 처리
+    SESSION_STORE.delete_sessions_for_user(username)
+    return JSONResponse({"disabled": True})
+
+
+@app.post("/api/users/{username}/enable")
+def enable_user_endpoint(username: str, request: Request) -> JSONResponse:
+    """사용 중지된 계정을 다시 활성화."""
+    error = _require_admin(request)
+    if error:
+        return error
+    if not USER_STORE.enable_user(username):
+        return JSONResponse({"error": "활성화할 수 없습니다(사용 중지 상태가 아닙니다)"}, status_code=400)
+    return JSONResponse({"enabled": True})
+
+
 @app.post("/api/users/{username}/role")
 def set_user_role(username: str, payload: Dict[str, Any], request: Request) -> JSONResponse:
     """관리자 권한 부여/회수(양도) - 마지막 남은 관리자는 스스로도 강등할 수 없음(락아웃 방지)."""
@@ -815,6 +975,46 @@ def voc_quality_chart_page() -> HTMLResponse:
     html = html_path.read_text(encoding="utf-8")
     html = html.replace("__GRAFANA_LINK_ENABLED__", "true" if GRAFANA_LINK_ENABLED else "false")
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+
+def _format_file_size(num_bytes: int) -> str:
+    size = float(num_bytes)
+    for unit in ("B", "KB", "MB"):
+        if size < 1024:
+            return f"{int(size)}{unit}" if unit == "B" else f"{size:.1f}{unit}"
+        size /= 1024
+    return f"{size:.1f}GB"
+
+
+@app.get("/api/desktop-app/info")
+def desktop_app_info() -> JSONResponse:
+    """게시판 탭의 데스크톱 앱 다운로드 카드가 파일 존재 여부/크기/최종 수정일을 보여주는 용도.
+
+    별도 버전 관리 체계 없이, desktop_app/dist의 exe를 새로 빌드해 덮어쓰기만 하면 파일
+    mtime 기준으로 그대로 "최신"이 반영된다 - PyInstaller 빌드 산출물이라 애초에 버전
+    번호를 자체적으로 관리하지 않으므로 과한 설계를 피함."""
+    if not DESKTOP_APP_EXE_PATH.exists():
+        return JSONResponse({"available": False})
+    stat = DESKTOP_APP_EXE_PATH.stat()
+    return JSONResponse({
+        "available": True,
+        "filename": DESKTOP_APP_EXE_PATH.name,
+        "size_bytes": stat.st_size,
+        "size_display": _format_file_size(stat.st_size),
+        "modified_at": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d"),
+    })
+
+
+@app.get("/api/desktop-app/download")
+def desktop_app_download() -> Response:
+    """윈도우 데스크톱 앱(.exe, pywebview 래퍼) 다운로드 - 게시판 탭에서 링크."""
+    if not DESKTOP_APP_EXE_PATH.exists():
+        return JSONResponse({"error": "다운로드 가능한 파일이 없습니다"}, status_code=404)
+    return FileResponse(
+        DESKTOP_APP_EXE_PATH,
+        media_type="application/vnd.microsoft.portable-executable",
+        filename=DESKTOP_APP_EXE_PATH.name,
+    )
 
 
 @app.get("/health")

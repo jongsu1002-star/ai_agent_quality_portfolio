@@ -109,6 +109,21 @@ def _isolate_user_store(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_session_store(tmp_path, monkeypatch):
+    """app.main.SESSION_STORE도 같은 이유로 격리 - 실서비스 data/sessions.db에 테스트용
+    로그인 토큰이 쌓이는 것을 막고, 이전 테스트의 세션이 다음 테스트로 새어나가지 않게 함."""
+    try:
+        import app.main as main_module
+        from qa_agent.sessions import SessionStore
+    except Exception:
+        return
+    isolated_store = SessionStore(path=str(tmp_path / "sessions.db"))
+    monkeypatch.setattr(main_module, "SESSION_STORE", isolated_store)
+    yield
+    isolated_store.close_thread_connection()
+
+
+@pytest.fixture(autouse=True)
 def _isolate_shared_reports_and_settings(tmp_path, monkeypatch):
     """SETTINGS_PATH/SHARED_REPORTS_ROOT/USER_DATA_ROOT/EXTERNAL_MONITOR/결함보고서 출력 위치를
     tmp_path로 격리.

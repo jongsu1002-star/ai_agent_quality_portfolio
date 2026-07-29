@@ -1,0 +1,424 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  AI Agent Quality Platform - docs/AWS_배포_운영_매뉴얼.md에 문서화된 아키텍처를 그대로
+  코드화한 CloudFormation 스택. VPC(퍼블릭/프라이빗 서브넷 2개 AZ) + ALB(HTTPS 종료) +
+  ACM 인증서(Route 53 DNS 검증 자동화) + 프라이빗 서브넷의 EC2(SSM 전용 접속, SSH 포트 없음)
+  + ECR 리포지토리 + Secrets Manager 자리표시자(placeholder) 시크릿을 생성한다.
+  이 템플릿은 네트워크/컴퓨트/보안 경계까지만 만들고, 애플리케이션 배포 자체(이미지 빌드·
+  ECR 푸시·docker compose 기동·.env 작성)는 매뉴얼의 4~10장을 그대로 따른다 - IaC로
+  대체하기보다 사람이 직접 확인해야 하는 단계(시크릿 값 입력, 이미지 태그 결정)를 남겨둔다.
+
+# ============================================================================
+# Parameters
+# ============================================================================
+Parameters:
+  DomainName:
+    Type: String
+    Description: "서비스 도메인 (예: qa.example.com) - ACM 인증서와 Route 53 레코드에 사용"
+
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: "DomainName을 관리하는 기존 Route 53 Hosted Zone ID"
+
+  VpcCidr:
+    Type: String
+    Default: "10.20.0.0/16"
+    Description: "이 스택 전용 VPC의 CIDR"
+
+  InstanceType:
+    Type: String
+    Default: "t3.medium"
+    AllowedValues: ["t3.small", "t3.medium", "t3.large", "t3.xlarge"]
+    Description: "docs/AWS_배포_운영_매뉴얼.md 2장 권장값은 t3.medium 이상"
+
+  RootVolumeSizeGiB:
+    Type: Number
+    Default: 40
+    MinValue: 30
+    MaxValue: 200
+    Description: "EC2 루트 EBS(gp3, 암호화) 크기 - data/reports/backups가 모두 이 볼륨에 쌓이므로 매뉴얼 권장값(30~50GiB)보다 여유를 둠"
+
+  EcrRepositoryName:
+    Type: String
+    Default: "ai-agent-quality-platform"
+
+  SecretsManagerSecretName:
+    Type: String
+    Default: "qa-platform/prod"
+    Description: "docs/AWS_배포_운영_매뉴얼.md 9장과 동일한 이름 - 스택이 빈 자리표시자로 생성하며, 배포 담당자가 실제 값(OPENAI_API_KEY 등)을 콘솔/CLI로 채워 넣어야 함(이 템플릿/Git에는 절대 실제 값을 넣지 않음)"
+
+# ============================================================================
+# Mappings - 2개 AZ에 걸친 퍼블릭/프라이빗 서브넷 CIDR (VpcCidr=10.20.0.0/16 기준 /24)
+# ============================================================================
+Mappings: {}
+
+# ============================================================================
+# Resources
+# ============================================================================
+Resources:
+
+  # -------------------- 네트워킹 (7.1 권장 네트워크) --------------------
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: {"Ref": "VpcCidr"}
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - {Key: Name, Value: "qa-platform-vpc"}
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - {Key: Name, Value: "qa-platform-igw"}
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: {"Ref": "Vpc"}
+      InternetGatewayId: {"Ref": "InternetGateway"}
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: {"Ref": "Vpc"}
+      CidrBlock: "10.20.0.0/24"
+      AvailabilityZone: {"Fn::Select": [0, {"Fn::GetAZs": ""}]}
+      MapPublicIpOnLaunch: true
+      Tags:
+        - {Key: Name, Value: "qa-platform-public-a"}
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: {"Ref": "Vpc"}
+      CidrBlock: "10.20.1.0/24"
+      AvailabilityZone: {"Fn::Select": [1, {"Fn::GetAZs": ""}]}
+      MapPublicIpOnLaunch: true
+      Tags:
+        - {Key: Name, Value: "qa-platform-public-b"}
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: {"Ref": "Vpc"}
+      CidrBlock: "10.20.10.0/24"
+      AvailabilityZone: {"Fn::Select": [0, {"Fn::GetAZs": ""}]}
+      MapPublicIpOnLaunch: false
+      Tags:
+        - {Key: Name, Value: "qa-platform-private-a"}
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: {"Ref": "Vpc"}
+      CidrBlock: "10.20.11.0/24"
+      AvailabilityZone: {"Fn::Select": [1, {"Fn::GetAZs": ""}]}
+      MapPublicIpOnLaunch: false
+      Tags:
+        - {Key: Name, Value: "qa-platform-private-b"}
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: {"Ref": "Vpc"}
+      Tags:
+        - {Key: Name, Value: "qa-platform-public-rt"}
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: {"Ref": "PublicRouteTable"}
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: {"Ref": "InternetGateway"}
+
+  PublicSubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: {"Ref": "PublicSubnetA"}
+      RouteTableId: {"Ref": "PublicRouteTable"}
+
+  PublicSubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: {"Ref": "PublicSubnetB"}
+      RouteTableId: {"Ref": "PublicRouteTable"}
+
+  # NAT Gateway 1개(AZ 하나)만 둔다 - 이 앱의 아웃바운드 트래픽(LLM API/Jira/Webhook 호출,
+  # ECR pull)은 반드시 인터넷/AWS 서비스로 나가야 하므로 VPC 엔드포인트만으로는 부족하고
+  # NAT Gateway가 필요하다(매뉴얼 7.1절 참고). 2개 AZ 각각에 NAT를 두면 가용성은 더 높아지지만
+  # 비용이 2배가 되므로, 단일 인스턴스 규모에 맞춰 우선 1개로 시작 - 필요시 이중화 가능.
+  NatEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: {"Fn::GetAtt": ["NatEip", "AllocationId"]}
+      SubnetId: {"Ref": "PublicSubnetA"}
+      Tags:
+        - {Key: Name, Value: "qa-platform-nat"}
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: {"Ref": "Vpc"}
+      Tags:
+        - {Key: Name, Value: "qa-platform-private-rt"}
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: {"Ref": "PrivateRouteTable"}
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: {"Ref": "NatGateway"}
+
+  PrivateSubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: {"Ref": "PrivateSubnetA"}
+      RouteTableId: {"Ref": "PrivateRouteTable"}
+
+  PrivateSubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: {"Ref": "PrivateSubnetB"}
+      RouteTableId: {"Ref": "PrivateRouteTable"}
+
+  # -------------------- 보안 그룹 (7.2절과 동일) --------------------
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "ALB - 인터넷에서 80/443만 허용"
+      VpcId: {"Ref": "Vpc"}
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: "0.0.0.0/0", Description: "HTTPS"}
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: "0.0.0.0/0", Description: "HTTP - 443으로 리다이렉트만 함"}
+      Tags:
+        - {Key: Name, Value: "sg-alb"}
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "EC2 앱 서버 - ALB에서만 8000 인바운드 허용, SSH 없음(SSM 전용)"
+      VpcId: {"Ref": "Vpc"}
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 8000, ToPort: 8000, SourceSecurityGroupId: {"Ref": "AlbSecurityGroup"}, Description: "ALB -> qa-platform"}
+      Tags:
+        - {Key: Name, Value: "sg-app"}
+
+  AlbEgressToApp:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: {"Ref": "AlbSecurityGroup"}
+      IpProtocol: tcp
+      FromPort: 8000
+      ToPort: 8000
+      DestinationSecurityGroupId: {"Ref": "AppSecurityGroup"}
+      Description: "ALB -> 앱 서버 8000만 허용(기본 전체 아웃바운드 규칙을 좁힘)"
+
+  AppEgressHttps:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: {"Ref": "AppSecurityGroup"}
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: "0.0.0.0/0"
+      Description: "ECR/Secrets Manager/LLM API/Jira/Webhook 등 아웃바운드 HTTPS - 외부 서비스라 SG로 좁힐 수 없어 CIDR 사용"
+
+  # -------------------- IAM (6장) --------------------
+  Ec2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: "ec2.amazonaws.com"}
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Policies:
+        - PolicyName: "ecr-pull"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "ecr:GetAuthorizationToken"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "ecr:BatchGetImage"
+                  - "ecr:GetDownloadUrlForLayer"
+                  - "ecr:BatchCheckLayerAvailability"
+                Resource: {"Fn::GetAtt": ["EcrRepository", "Arn"]}
+        - PolicyName: "secrets-read"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "secretsmanager:GetSecretValue"
+                Resource: {"Ref": "AppSecret"}
+        - PolicyName: "cloudwatch-logs"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: {"Fn::GetAtt": ["AppLogGroup", "Arn"]}
+      Tags:
+        - {Key: Name, Value: "qa-platform-ec2-role"}
+
+  Ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [{"Ref": "Ec2Role"}]
+
+  # -------------------- ECR / Secrets Manager / Logs --------------------
+  EcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: {"Ref": "EcrRepositoryName"}
+      ImageScanningConfiguration: {ScanOnPush: true}
+      EncryptionConfiguration: {EncryptionType: "AES256"}
+
+  AppSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: {"Ref": "SecretsManagerSecretName"}
+      Description: "docs/AWS_배포_운영_매뉴얼.md 9장 참고 - 스택 생성 후 실제 값을 채워 넣을 것(이 템플릿은 빈 자리표시자만 생성, 실제 키/토큰은 절대 여기 넣지 않음)"
+      SecretString: >-
+        {"ADMIN_SETUP_CODE":"","OPENAI_API_KEY":"","ANTHROPIC_API_KEY":"","SLACK_WEBHOOK_URL":"","DISCORD_WEBHOOK_URL":"","TEAMS_WEBHOOK_URL":"","JIRA_BASE_URL":"","JIRA_EMAIL":"","JIRA_TOKEN":"","JIRA_PROJECT":""}
+
+  AppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: "/qa-platform/app"
+      RetentionInDays: 30
+
+  # -------------------- EC2 (8장) --------------------
+  # Amazon Linux 2023 최신 AMI를 리전에 상관없이 자동으로 조회 - AMI ID를 하드코딩하면
+  # 리전이 다르거나 시간이 지나 만료될 수 있어 SSM Public Parameter로 항상 최신값을 받는다.
+  Ec2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
+      InstanceType: {"Ref": "InstanceType"}
+      SubnetId: {"Ref": "PrivateSubnetA"}
+      SecurityGroupIds: [{"Ref": "AppSecurityGroup"}]
+      IamInstanceProfile: {"Ref": "Ec2InstanceProfile"}
+      BlockDeviceMappings:
+        - DeviceName: "/dev/xvda"
+          Ebs:
+            VolumeType: "gp3"
+            VolumeSize: {"Ref": "RootVolumeSizeGiB"}
+            Encrypted: true
+            DeleteOnTermination: true
+      # docs/AWS_배포_운영_매뉴얼.md 8장과 동일한 최소 부트스트랩만 수행 - 실제 애플리케이션
+      # 배포(이미지 pull, compose 기동, .env 작성)는 이미지 태그·시크릿 값 확인이 필요한
+      # 사람의 판단이 들어가는 단계라 User Data로 자동화하지 않고 매뉴얼의 수동 절차를 따른다.
+      UserData:
+        "Fn::Base64":
+          "Fn::Sub": |
+            #!/bin/bash
+            set -eux
+            dnf update -y
+            dnf install -y docker git
+            systemctl enable --now docker
+            usermod -aG docker ec2-user
+            mkdir -p /opt/qa-platform
+      Tags:
+        - {Key: Name, Value: "qa-platform-app"}
+
+  # -------------------- ALB / ACM / Route 53 (11장) --------------------
+  Alb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: "qa-platform-alb"
+      Scheme: "internet-facing"
+      Type: "application"
+      SecurityGroups: [{"Ref": "AlbSecurityGroup"}]
+      Subnets: [{"Ref": "PublicSubnetA"}, {"Ref": "PublicSubnetB"}]
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: "qa-platform-tg"
+      VpcId: {"Ref": "Vpc"}
+      Protocol: "HTTP"
+      Port: 8000
+      TargetType: "instance"
+      Targets:
+        - {Id: {"Ref": "Ec2Instance"}, Port: 8000}
+      HealthCheckPath: "/health"
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher: {HttpCode: "200"}
+
+  AcmCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: {"Ref": "DomainName"}
+      ValidationMethod: "DNS"
+      DomainValidationOptions:
+        - DomainName: {"Ref": "DomainName"}
+          HostedZoneId: {"Ref": "HostedZoneId"}
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: {"Ref": "Alb"}
+      Protocol: "HTTPS"
+      Port: 443
+      Certificates: [{CertificateArn: {"Ref": "AcmCertificate"}}]
+      DefaultActions:
+        - {Type: "forward", TargetGroupArn: {"Ref": "TargetGroup"}}
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: {"Ref": "Alb"}
+      Protocol: "HTTP"
+      Port: 80
+      DefaultActions:
+        - Type: "redirect"
+          RedirectConfig:
+            Protocol: "HTTPS"
+            Port: "443"
+            StatusCode: "HTTP_301"
+
+  DnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: {"Ref": "HostedZoneId"}
+      Name: {"Ref": "DomainName"}
+      Type: "A"
+      AliasTarget:
+        DNSName: {"Fn::GetAtt": ["Alb", "DNSName"]}
+        HostedZoneId: {"Fn::GetAtt": ["Alb", "CanonicalHostedZoneID"]}
+
+# ============================================================================
+# Outputs
+# ============================================================================
+Outputs:
+  ServiceUrl:
+    Value: {"Fn::Sub": "https://${DomainName}"}
+  AlbDnsName:
+    Value: {"Fn::GetAtt": ["Alb", "DNSName"]}
+  Ec2InstanceId:
+    Value: {"Ref": "Ec2Instance"}
+  EcrRepositoryUri:
+    Value: {"Fn::GetAtt": ["EcrRepository", "RepositoryUri"]}
+  SecretsManagerSecretArn:
+    Value: {"Ref": "AppSecret"}
+  SsmSessionCommand:
+    Value: {"Fn::Sub": "aws ssm start-session --target ${Ec2Instance}"}
+    Description: "SSH 대신 이 명령으로 EC2에 접속(포트 22 자체가 없음)"

@@ -417,14 +417,24 @@ def _require_admin(request: Request) -> Optional[JSONResponse]:
 
 
 def _client_ip(request: Request) -> str:
-    """실제 접속 IP - Nginx 등 리버스 프록시 뒤에서는 request.client.host가 프록시 자신의
-    주소이므로, X-Forwarded-For 헤더(가장 앞의 IP)를 우선 사용한다. 이 헤더는 신뢰할 수
-    있는 리버스 프록시가 설정해준다는 전제(AWS 배포 가이드의 Nginx 설정 참고)이며, 그런
-    프록시가 없는 로컬/LAN 환경에서는 클라이언트가 헤더를 위조해도 자기 자신의 접근
-    판단에만 영향을 주므로 위험이 크지 않다."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    """실제 접속 IP - TRUST_PROXY_HEADERS가 켜져 있을 때만(신뢰할 수 있는 리버스 프록시가
+    실제로 앞에 있다는 뜻, _is_https_request와 동일한 원칙) X-Forwarded-For 헤더를 신뢰한다.
+
+    이 값은 IP 허용목록(_is_ip_allowed)이 Grafana/Prometheus 프록시 접근을 판단하는 유일한
+    근거이기도 하므로, 신뢰할 수 있는 프록시가 없는데 이 헤더를 믿으면 누구나 헤더를 위조해
+    허용된 IP인 척 접근 제어 자체를 우회할 수 있다 - 그래서 기본값(꺼짐)에서는 헤더를 아예
+    보지 않고 request.client.host만 신뢰한다.
+
+    신뢰하는 경우에도 맨 앞 값이 아니라 맨 뒤 값을 쓴다 - AWS ALB/Nginx 같은 신뢰할 수 있는
+    프록시는 자신이 실제로 확인한 접속 IP를 기존 값 뒤에 그대로 이어 붙이므로(맨 앞 값은
+    클라이언트가 스스로 실어 보낸 것이라 위조 가능), 프록시가 한 홉만 있는 이 아키텍처에서는
+    맨 뒤 값이 프록시가 검증한 실제 접속 IP다."""
+    if TRUST_PROXY_HEADERS:
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+            if parts:
+                return parts[-1]
     return request.client.host if request.client else ""
 
 

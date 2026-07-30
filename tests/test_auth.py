@@ -311,16 +311,29 @@ def test_fetch_public_ip_refetches_after_ttl_expires(monkeypatch):
     assert _real_fetch_public_ip() == "203.0.113.99"
 
 
-def test_auth_status_reports_client_ip_for_ip_allowlist_registration():
-    """화면 상단(로그아웃 버튼 왼쪽)에 보여주는 "내 접속 IP"가 실제 IP 허용목록 판정에
-    쓰이는 값(X-Forwarded-For 우선)과 정확히 일치해야, 사용자가 그 값을 그대로 등록했을 때
-    실제로 통과된다."""
+def test_auth_status_ignores_forwarded_for_header_by_default():
+    """TRUST_PROXY_HEADERS가 꺼져 있으면(기본값) X-Forwarded-For를 무조건 신뢰하지 않아야
+    함 - 신뢰할 수 있는 리버스 프록시가 없는 한 누구나 이 헤더를 위조해 IP 허용목록을
+    우회할 수 있기 때문(_is_https_request와 동일한 원칙)."""
     client = TestClient(app)
     status = client.get("/api/auth/status", headers={"X-Forwarded-For": "203.0.113.42, 10.0.0.1"}).json()
-    assert status["client_ip"] == "203.0.113.42"
+    assert status["client_ip"] != "203.0.113.42"
+    assert status["client_ip"] != "10.0.0.1"
 
     status_no_header = client.get("/api/auth/status").json()
     assert status_no_header["client_ip"]  # 헤더 없으면 request.client.host로 폴백, 빈 값은 아님
+
+
+def test_auth_status_reports_client_ip_for_ip_allowlist_registration_when_proxy_trusted(monkeypatch):
+    """화면 상단(로그아웃 버튼 왼쪽)에 보여주는 "내 접속 IP"가 실제 IP 허용목록 판정에
+    쓰이는 값과 정확히 일치해야, 사용자가 그 값을 그대로 등록했을 때 실제로 통과된다.
+    TRUST_PROXY_HEADERS가 켜진 경우에만 X-Forwarded-For를 신뢰하며, 그 중에서도 신뢰할 수
+    있는 프록시(ALB/Nginx)가 실제로 덧붙인 맨 뒤 값을 쓴다(맨 앞 값은 클라이언트가 스스로
+    위조할 수 있음)."""
+    monkeypatch.setattr(main_module, "TRUST_PROXY_HEADERS", True)
+    client = TestClient(app)
+    status = client.get("/api/auth/status", headers={"X-Forwarded-For": "203.0.113.42, 10.0.0.1"}).json()
+    assert status["client_ip"] == "10.0.0.1"
 
 
 def test_first_signup_is_auto_approved_admin_and_logs_in_immediately():

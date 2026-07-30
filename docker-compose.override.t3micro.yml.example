@@ -1,0 +1,21 @@
+# t3.micro/t2.micro(916MB RAM, infra/cloudformation/ec2-freetier-stack.yaml)처럼 메모리가
+# 작은 인스턴스에서 qa-platform+Prometheus+Grafana 3개를 모두 함께 띄울 때 쓰는 참고용
+# 오버라이드 파일. 파일명이 `docker-compose.override.yml`이 아니라 `.example`이 붙어 있어
+# docker compose가 자동으로 읽지 않는다(로컬 개발 PC는 메모리가 넉넉해 이렇게 좁힐 필요가
+# 없으므로 기본 동작에 영향을 주지 않기 위함) - 실제로 쓰려면 이 파일을 EC2 인스턴스의
+# /opt/qa-platform/docker-compose.override.yml로 복사(또는 이름 변경)한 뒤 그대로 두면
+# `docker compose up -d`가 자동으로 함께 읽는다.
+#
+# 아래 값은 실제 t3.micro에 3개 서비스를 함께 띄워 실측 검증한 값이다(2GB 스왑 추가 후
+# 실사용량: qa-platform 77MB/prometheus 40MB/grafana 199MB, 스왑은 거의 안 씀 - 아래 제한은
+# 그보다 넉넉하게 잡은 안전 마진).
+services:
+  qa-platform:
+    mem_limit: 400m
+    cpus: 1.0
+  prometheus:
+    mem_limit: 150m
+    cpus: 0.5
+  grafana:
+    mem_limit: 250m
+    cpus: 0.5

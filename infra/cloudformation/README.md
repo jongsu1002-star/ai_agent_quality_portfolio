@@ -42,9 +42,17 @@ aws cloudformation execute-change-set --stack-name qa-platform-freetier --change
 2. `git clone` 또는 파일 업로드로 소스를 `/opt/qa-platform`에 올리고, 실제 `.env`(API 키 등)를
    직접 작성 - Secrets Manager를 안 쓰므로(비용 절감) 이 파일이 유일한 비밀값 저장소이며
    `chmod 600`으로 권한을 제한할 것.
-3. `docker compose up -d` (기존 `docker-compose.yml` 그대로 - 3000/9090은 여전히
-   `127.0.0.1`에만 바인딩되므로 `/grafana-proxy`, `/prometheus-proxy`로만 접근)
-4. `python scripts/verify_deployment.py --base-url http://<Outputs.PublicIp>:8000`으로 확인
+3. **(t2.micro/t3.micro만 해당)** Prometheus/Grafana까지 함께 띄우려면 저장소 루트의
+   `docker-compose.override.t3micro.yml.example`을 `docker-compose.override.yml`로 복사할 것 -
+   916MB RAM에서 qa-platform+Prometheus+Grafana 3개를 제한 없이 띄우면 메모리가 부족하다
+   (UserData가 이미 2GB 스왑을 자동 생성해두므로 안전 마진은 있지만, 이 오버라이드로 각
+   서비스 메모리 상한을 낮춰 서로 자원을 침범하지 않게 하는 것을 권장). qa-platform만
+   쓴다면 이 단계는 건너뛰어도 됨(`docker-compose.yml`의 기본 `mem_limit: 1g`가 자동
+   설치된 2GB 스왑 안에서도 충분히 동작).
+4. `docker compose up -d` (Prometheus/Grafana를 뺀 qa-platform만 쓰려면
+   `docker compose up -d qa-platform`) - 3000/9090은 여전히 `127.0.0.1`에만 바인딩되므로
+   `/grafana-proxy`, `/prometheus-proxy`로만 접근
+5. `python scripts/verify_deployment.py --base-url http://<Outputs.PublicIp>:8000`으로 확인
 
 **비용 관련 주의사항**:
 - `AWS::Budgets::Budget`이 월 비용이 `BudgetLimitUsd`(기본 $5)의 80%/100%를 넘으면

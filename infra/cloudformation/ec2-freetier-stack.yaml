@@ -107,6 +107,14 @@ Resources:
             DeleteOnTermination: true
       UserData:
         # 치환 변수 없는 순수 문자열 - Fn::Sub 불필요(cfn-lint W1020 방지).
+        #
+        # 실제 t3.micro(916MB RAM)에 qa-platform+Prometheus+Grafana 3개를 함께 띄워본 결과,
+        # 스왑 없이는 여유가 빠듯했지만(qa-platform 단독 실행 시 available 444MB) 2GB 스왑을
+        # 추가하고 각 서비스 mem_limit을 보수적으로 낮추니(qa-platform 400m/prometheus 150m/
+        # grafana 250m) 3개 모두 healthy로 안정 기동됨을 실측 확인(실제 사용량은 각각
+        # 77MB/40MB/199MB 수준으로 더 낮았음, 스왑은 거의 안 씀) - 그래서 스왑 생성을
+        # 부트스트랩에 포함해 매번 수동으로 안 해도 되게 함. docker-compose.override.yml은
+        # 앱 배포 시(README 참고) 별도로 생성.
         "Fn::Base64": |
             #!/bin/bash
             set -eux
@@ -115,6 +123,16 @@ Resources:
             systemctl enable --now docker
             usermod -aG docker ec2-user
             mkdir -p /opt/qa-platform
+            mkdir -p /usr/local/lib/docker/cli-plugins
+            curl -SL https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose
+            chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+            if [ ! -f /swapfile ]; then
+              fallocate -l 2G /swapfile
+              chmod 600 /swapfile
+              mkswap /swapfile
+              swapon /swapfile
+              echo '/swapfile none swap sw 0 0' >> /etc/fstab
+            fi
       Tags:
         - {Key: Name, Value: "qa-platform-freetier"}
 

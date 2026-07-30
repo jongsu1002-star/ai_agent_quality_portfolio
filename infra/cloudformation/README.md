@@ -1,10 +1,65 @@
-# CloudFormation - `ec2-alb-stack.yaml`
+# CloudFormation 템플릿 2종 - 비용 vs 기능으로 선택
+
+| | `ec2-freetier-stack.yaml` | `ec2-alb-stack.yaml` |
+|---|---|---|
+| 예상 월 비용 | 사실상 $0(프리티어/프로모션 크레딧 소진 전까지) | $50 이상(NAT Gateway+ALB만으로) |
+| 구성 | 기본 VPC + EC2 1대(퍼블릭 IP 직접 노출) | 신규 VPC(2 AZ) + ALB + NAT Gateway + Route 53 + ACM |
+| HTTPS | 없음(직접 `:8000` 접속, 필요시 수동으로 Nginx+Let's Encrypt 추가 가능) | ALB가 관리형으로 종료 |
+| 도메인 | 불필요(IP로 접속) | Route 53 Hosted Zone 필수 |
+| 비용 안전장치 | AWS Budgets 이메일 알림 내장 | 없음 |
+| 권장 대상 | 개인/소규모 검증, 비용 최소화가 우선 | 실서비스, 커스텀 도메인·HTTPS·다중 AZ가 필요할 때 |
+
+둘 다 **네트워크/컴퓨트/보안 경계까지만** 만들고, 애플리케이션 자체의 배포(이미지
+빌드·`.env` 값 입력·`docker compose up`)는 사람이 직접 확인해야 하는 단계라 자동화하지
+않습니다.
+
+## `ec2-freetier-stack.yaml` (비용 최소화 - 기본 권장)
+
+```bash
+aws cloudformation validate-template \
+  --template-body file://infra/cloudformation/ec2-freetier-stack.yaml \
+  --region ap-northeast-2
+
+aws cloudformation create-change-set \
+  --stack-name qa-platform-freetier \
+  --change-set-name initial-create \
+  --change-set-type CREATE \
+  --template-body file://infra/cloudformation/ec2-freetier-stack.yaml \
+  --capabilities CAPABILITY_IAM \
+  --region ap-northeast-2 \
+  --parameters \
+    ParameterKey=VpcId,ParameterValue=<기본 VPC ID> \
+    ParameterKey=PublicSubnetId,ParameterValue=<퍼블릭 서브넷 ID> \
+    ParameterKey=BudgetAlertEmail,ParameterValue=<알림받을 이메일>
+
+# change set 내용(추가/변경/삭제될 리소스)을 반드시 검토한 뒤에만 실행
+aws cloudformation describe-change-set --stack-name qa-platform-freetier --change-set-name initial-create --region ap-northeast-2
+aws cloudformation execute-change-set --stack-name qa-platform-freetier --change-set-name initial-create --region ap-northeast-2
+```
+
+배포 후:
+1. `aws ssm start-session --target <Ec2InstanceId 출력값>`으로 접속(SSH 없음)
+2. `git clone` 또는 파일 업로드로 소스를 `/opt/qa-platform`에 올리고, 실제 `.env`(API 키 등)를
+   직접 작성 - Secrets Manager를 안 쓰므로(비용 절감) 이 파일이 유일한 비밀값 저장소이며
+   `chmod 600`으로 권한을 제한할 것.
+3. `docker compose up -d` (기존 `docker-compose.yml` 그대로 - 3000/9090은 여전히
+   `127.0.0.1`에만 바인딩되므로 `/grafana-proxy`, `/prometheus-proxy`로만 접근)
+4. `python scripts/verify_deployment.py --base-url http://<Outputs.PublicIp>:8000`으로 확인
+
+**비용 관련 주의사항**:
+- `AWS::Budgets::Budget`이 월 비용이 `BudgetLimitUsd`(기본 $5)의 80%/100%를 넘으면
+  이메일로 알려주지만, 이는 사후 알림이지 사전 차단이 아닙니다.
+- EIP는 "실행 중인 인스턴스에 연결된 상태"에서만 무료 - 인스턴스를 **중지(stop)**한 채로
+  두면 그 순간부터 EIP 자체에 과금되니, 안 쓸 때는 스택을 통째로 삭제(`aws cloudformation
+  delete-stack`)하거나 EIP를 명시적으로 해제할 것.
+- 2024년 7월 이후 생성된 신규 계정은 "12개월 상시무료"가 아니라 "6개월 $200 크레딧"
+  방식일 수 있음 - 크레딧 소진 후에는 t2.micro/t3.micro도 실비용이 청구됨.
+
+## `ec2-alb-stack.yaml` (실서비스용, 비용 발생)
 
 `docs/AWS_배포_운영_매뉴얼.md`에 문서화된 아키텍처(VPC 2개 AZ + ALB/ACM/Route 53 +
 프라이빗 서브넷 EC2 + ECR + Secrets Manager + SSM 전용 접속)를 그대로 코드화한
-CloudFormation 템플릿입니다. **네트워크/컴퓨트/보안 경계까지만** 이 템플릿이 만들고,
-애플리케이션 자체의 배포(이미지 빌드·ECR 푸시·`.env`/Secrets 값 입력·`docker compose up`)는
-사람이 직접 확인해야 하는 단계라 매뉴얼의 4~10장 수동 절차를 그대로 따릅니다.
+CloudFormation 템플릿입니다.
 
 ## 사전 준비
 

@@ -1,0 +1,166 @@
+# AWS CloudFormation의 최상위 Description 필드는 1024자 제한이 있음(aws cloudformation
+# validate-template으로 실측 확인됨 - cfn-lint는 이 제약을 검사하지 않음) - 상세 설명은
+# Description 필드 대신 이 주석에 담는다.
+#
+# AI Agent Quality Platform - 비용을 사실상 $0로 유지하는 것을 최우선으로 한 단일 EC2
+# 직접노출 구성. ec2-alb-stack.yaml(ALB+NAT Gateway+Route 53, 월 $50+ 예상)과 달리
+# 이 템플릿은 계정의 기본 VPC/퍼블릭 서브넷을 그대로 쓰고, NAT Gateway/ALB/Route 53/
+# Secrets Manager를 전혀 만들지 않는다 - EC2 인스턴스 1대(프리티어 대상 타입)에 퍼블릭
+# IP를 직접 붙여 그 위에서 기존 docker-compose.yml 스택을 그대로 띄우는 방식.
+# 대신 관리형 HTTPS 종료·다중 AZ 이중화는 없다(단일 인스턴스 전제와 원래 일치).
+#
+# 비용 참고: 2024년 7월 이후 생성된 신규 AWS 계정은 예전의 "12개월 상시무료(t2.micro
+# 750시간 등)" 대신 "6개월간 $200 크레딧" 방식이 적용된다 - 즉 이 스택도 "영구 무료"가
+# 아니라 "크레딧이 남아있는 동안 사실상 무료"에 가깝다. AWS::Budgets::Budget 리소스로
+# 월 비용이 지정한 한도를 넘으면 이메일 알림을 받도록 안전장치를 함께 둔다.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "AI Agent Quality Platform - free-tier-friendly single EC2 stack (no ALB/NAT/Route53/Secrets Manager, cost safeguarded via AWS Budgets)"
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: "이 계정의 기본(default) VPC를 선택하세요 - 새 VPC를 따로 만들지 않음(비용 없음)"
+
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: "위 VPC 안의 퍼블릭 서브넷(인터넷 게이트웨이로 라우팅되는 서브넷) - 기본 VPC의 서브넷은 보통 전부 퍼블릭"
+
+  InstanceType:
+    Type: String
+    Default: "t3.micro"
+    AllowedValues: ["t2.micro", "t3.micro"]
+    Description: "프리티어(또는 프로모션 크레딧) 대상의 가장 작은 타입만 허용 - 실수로 비싼 타입을 고르는 사고 방지"
+
+  RootVolumeSizeGiB:
+    Type: Number
+    Default: 20
+    MinValue: 8
+    MaxValue: 30
+    Description: "EBS(gp3) 크기 - 프리티어 총 허용치(30GiB)를 넘지 않도록 상한을 30으로 강제"
+
+  BudgetAlertEmail:
+    Type: String
+    Description: "월 비용이 BudgetLimitUsd를 넘으면 알림 받을 이메일 주소"
+
+  BudgetLimitUsd:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    Description: "이 금액(USD)의 80%/100%를 넘으면 이메일 알림 - 예상치 못한 과금을 조기에 발견하기 위한 안전장치"
+
+Resources:
+  # -------------------- 보안 그룹 --------------------
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "qa-platform single EC2 - inbound 80/443/8000 from internet, no SSH (SSM only)"
+      VpcId: {"Ref": "VpcId"}
+      SecurityGroupIngress:
+        - {IpProtocol: tcp, FromPort: 8000, ToPort: 8000, CidrIp: "0.0.0.0/0", Description: "qa-platform 직접 접근"}
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: "0.0.0.0/0", Description: "선택: 나중에 Nginx+Let's Encrypt 붙일 때 대비(지금은 미사용)"}
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: "0.0.0.0/0", Description: "선택: 나중에 Nginx+Let's Encrypt 붙일 때 대비(지금은 미사용)"}
+      # 3000/9090(Grafana/Prometheus)은 절대 여기 열지 않음 - app/main.py의 IP 허용목록
+      # 리버스 프록시(/grafana-proxy, /prometheus-proxy)로만 접근(기존 하드닝과 동일 원칙).
+      Tags:
+        - {Key: Name, Value: "qa-platform-freetier-sg"}
+
+  # -------------------- IAM (SSM 전용, ECR/Secrets Manager 불필요) --------------------
+  Ec2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: "ec2.amazonaws.com"}
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Tags:
+        - {Key: Name, Value: "qa-platform-freetier-role"}
+
+  Ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [{"Ref": "Ec2Role"}]
+
+  # -------------------- EC2 --------------------
+  Ec2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}"
+      InstanceType: {"Ref": "InstanceType"}
+      SubnetId: {"Ref": "PublicSubnetId"}
+      SecurityGroupIds: [{"Ref": "AppSecurityGroup"}]
+      IamInstanceProfile: {"Ref": "Ec2InstanceProfile"}
+      # 퍼블릭 서브넷에 직접 배치하되, 아래 별도 EIP로 고정 IP를 붙인다(인스턴스 자체
+      # 시작 시 자동 할당되는 퍼블릭 IP는 재시작마다 바뀔 수 있음).
+      BlockDeviceMappings:
+        - DeviceName: "/dev/xvda"
+          Ebs:
+            VolumeType: "gp3"
+            VolumeSize: {"Ref": "RootVolumeSizeGiB"}
+            Encrypted: true
+            DeleteOnTermination: true
+      UserData:
+        # 치환 변수 없는 순수 문자열 - Fn::Sub 불필요(cfn-lint W1020 방지).
+        "Fn::Base64": |
+            #!/bin/bash
+            set -eux
+            dnf update -y
+            dnf install -y docker git
+            systemctl enable --now docker
+            usermod -aG docker ec2-user
+            mkdir -p /opt/qa-platform
+      Tags:
+        - {Key: Name, Value: "qa-platform-freetier"}
+
+  # EIP는 "실행 중인 인스턴스에 연결된 상태"에서는 무료 - 인스턴스를 중지(stop)한 채로
+  # EIP만 떠 있으면 그때부터 과금되므로, 쓰지 않을 때는 인스턴스를 중지하지 말고
+  # 아예 스택을 삭제하거나(재생성 비용은 없음) EIP를 릴리스할 것.
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: {"Ref": "Ec2Instance"}
+      Tags:
+        - {Key: Name, Value: "qa-platform-freetier-eip"}
+
+  # -------------------- 비용 안전장치 --------------------
+  # AWS::Budgets::Budget 자체는 무료 - 실제 비용이 한도를 넘거나 넘을 것으로 예측되면
+  # 이메일로 즉시 알려줘서, "설정을 잘못해서 몇 주 뒤에 큰 청구서를 받는" 사고를 조기에 막는다.
+  CostBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: "qa-platform-freetier-monthly"
+        BudgetType: "COST"
+        TimeUnit: "MONTHLY"
+        BudgetLimit:
+          Amount: {"Ref": "BudgetLimitUsd"}
+          Unit: "USD"
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: "ACTUAL"
+            ComparisonOperator: "GREATER_THAN"
+            Threshold: 80
+            ThresholdType: "PERCENTAGE"
+          Subscribers:
+            - {SubscriptionType: "EMAIL", Address: {"Ref": "BudgetAlertEmail"}}
+        - Notification:
+            NotificationType: "ACTUAL"
+            ComparisonOperator: "GREATER_THAN"
+            Threshold: 100
+            ThresholdType: "PERCENTAGE"
+          Subscribers:
+            - {SubscriptionType: "EMAIL", Address: {"Ref": "BudgetAlertEmail"}}
+
+Outputs:
+  PublicIp:
+    Value: {"Ref": "ElasticIp"}
+    Description: "이 IP로 http://<IP>:8000 접속 - app/main.py::_fetch_public_ip 및 접근 허용 IP 등록에도 이 값을 사용"
+  Ec2InstanceId:
+    Value: {"Ref": "Ec2Instance"}
+  SsmSessionCommand:
+    Value: {"Fn::Sub": "aws ssm start-session --target ${Ec2Instance}"}
+    Description: "SSH 대신 이 명령으로 EC2에 접속(포트 22 자체가 없음)"

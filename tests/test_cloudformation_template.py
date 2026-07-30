@@ -149,3 +149,27 @@ def test_app_secret_placeholder_contains_no_real_looking_secret_values(template)
 def test_ec2_role_has_ssm_managed_policy_for_sshless_access(template):
     role = template["Resources"]["Ec2Role"]["Properties"]
     assert "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" in role["ManagedPolicyArns"]
+
+
+def test_security_group_descriptions_are_ascii_only(template):
+    """EC2 API는 보안그룹의 GroupDescription뿐 아니라 개별 인바운드/아웃바운드 규칙의
+    Description도 ASCII 문자만 허용한다 - 실제 스택 생성 시도에서 "Invalid rule
+    description" 오류로 실측 확인됨(cfn-lint/validate-template 둘 다 이 런타임 제약은
+    잡아내지 못함). 회귀 방지용 - 이 파일들의 Parameters/Outputs Description은 이 제약
+    대상이 아니므로 검사하지 않는다."""
+    problems = []
+    for logical_id, res in template["Resources"].items():
+        rtype = res.get("Type", "")
+        props = res.get("Properties", {})
+        if rtype == "AWS::EC2::SecurityGroup":
+            group_desc = props.get("GroupDescription", "")
+            if any(ord(c) > 127 for c in group_desc):
+                problems.append(f"{logical_id}.GroupDescription")
+            for kind in ("SecurityGroupIngress", "SecurityGroupEgress"):
+                for rule in props.get(kind, []):
+                    if any(ord(c) > 127 for c in rule.get("Description", "")):
+                        problems.append(f"{logical_id}.{kind}[].Description")
+        elif rtype in ("AWS::EC2::SecurityGroupIngress", "AWS::EC2::SecurityGroupEgress"):
+            if any(ord(c) > 127 for c in props.get("Description", "")):
+                problems.append(f"{logical_id}.Description")
+    assert problems == []

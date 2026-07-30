@@ -55,10 +55,13 @@ Resources:
     Properties:
       GroupDescription: "qa-platform single EC2 - inbound 80/443/8000 from internet, no SSH (SSM only)"
       VpcId: {"Ref": "VpcId"}
+      # 보안그룹 규칙의 Description도 EC2 API 자체가 ASCII만 허용(GroupDescription과 동일한
+      # 제약, 실제 스택 생성 시도에서 "Invalid rule description" 오류로 실측 확인 - cfn-lint와
+      # validate-template 둘 다 이 런타임 제약은 잡아내지 못했음) - 전부 영문으로 작성.
       SecurityGroupIngress:
-        - {IpProtocol: tcp, FromPort: 8000, ToPort: 8000, CidrIp: "0.0.0.0/0", Description: "qa-platform 직접 접근"}
-        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: "0.0.0.0/0", Description: "선택: 나중에 Nginx+Let's Encrypt 붙일 때 대비(지금은 미사용)"}
-        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: "0.0.0.0/0", Description: "선택: 나중에 Nginx+Let's Encrypt 붙일 때 대비(지금은 미사용)"}
+        - {IpProtocol: tcp, FromPort: 8000, ToPort: 8000, CidrIp: "0.0.0.0/0", Description: "qa-platform direct access"}
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: "0.0.0.0/0", Description: "reserved for future Nginx plus Lets Encrypt, unused for now"}
+        - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: "0.0.0.0/0", Description: "reserved for future Nginx plus Lets Encrypt, unused for now"}
       # 3000/9090(Grafana/Prometheus)은 절대 여기 열지 않음 - app/main.py의 IP 허용목록
       # 리버스 프록시(/grafana-proxy, /prometheus-proxy)로만 접근(기존 하드닝과 동일 원칙).
       Tags:

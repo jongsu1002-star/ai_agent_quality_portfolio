@@ -198,9 +198,12 @@ Resources:
       # 주석으로만 남기고 이 필드는 영문으로 채운다.
       GroupDescription: "ALB - allow inbound 80/443 from internet only"
       VpcId: {"Ref": "Vpc"}
+      # 보안그룹 규칙 Description도 EC2 API가 ASCII만 허용(GroupDescription과 동일한 제약 -
+      # ec2-freetier-stack.yaml 배포 시도에서 "Invalid rule description" 오류로 실측 확인,
+      # cfn-lint/validate-template 둘 다 이 런타임 제약은 잡지 못함) - 전부 영문으로 작성.
       SecurityGroupIngress:
         - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: "0.0.0.0/0", Description: "HTTPS"}
-        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: "0.0.0.0/0", Description: "HTTP - 443으로 리다이렉트만 함"}
+        - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: "0.0.0.0/0", Description: "HTTP, redirects to 443 only"}
       # 인라인으로 명시해야 CloudFormation이 기본 "전체 허용" 아웃바운드 규칙을 만들지
       # 않는다 - 아래처럼 별도 AWS::EC2::SecurityGroupEgress 리소스(AlbEgressToApp)를
       # 추가하는 것만으로는 그 기본 규칙이 대체되지 않고 나란히 남는다(잘 알려진
@@ -208,7 +211,7 @@ Resources:
       # 전체 차단"을 표현해 기본 규칙 생성만 억제하고, 실제로 필요한 허용 규칙은
       # AlbEgressToApp에서 별도로 추가한다.
       SecurityGroupEgress:
-        - {IpProtocol: "-1", CidrIp: "127.0.0.1/32", Description: "기본 전체 허용 아웃바운드 억제용 자리표시자 - 실제 허용 규칙은 AlbEgressToApp 리소스 참고"}
+        - {IpProtocol: "-1", CidrIp: "127.0.0.1/32", Description: "placeholder to suppress default allow-all egress, see AlbEgressToApp for the real rule"}
       Tags:
         - {Key: Name, Value: "sg-alb"}
 
@@ -219,10 +222,10 @@ Resources:
       GroupDescription: "App server - allow inbound 8000 from ALB only, no SSH (SSM only)"
       VpcId: {"Ref": "Vpc"}
       SecurityGroupIngress:
-        - {IpProtocol: tcp, FromPort: 8000, ToPort: 8000, SourceSecurityGroupId: {"Ref": "AlbSecurityGroup"}, Description: "ALB -> qa-platform"}
+        - {IpProtocol: tcp, FromPort: 8000, ToPort: 8000, SourceSecurityGroupId: {"Ref": "AlbSecurityGroup"}, Description: "ALB to qa-platform"}
       # 위 AlbSecurityGroup과 동일한 이유 - 실제 허용 규칙은 AppEgressHttps 리소스 참고.
       SecurityGroupEgress:
-        - {IpProtocol: "-1", CidrIp: "127.0.0.1/32", Description: "기본 전체 허용 아웃바운드 억제용 자리표시자 - 실제 허용 규칙은 AppEgressHttps 리소스 참고"}
+        - {IpProtocol: "-1", CidrIp: "127.0.0.1/32", Description: "placeholder to suppress default allow-all egress, see AppEgressHttps for the real rule"}
       Tags:
         - {Key: Name, Value: "sg-app"}
 
@@ -234,7 +237,7 @@ Resources:
       FromPort: 8000
       ToPort: 8000
       DestinationSecurityGroupId: {"Ref": "AppSecurityGroup"}
-      Description: "ALB -> 앱 서버 8000만 허용(기본 전체 아웃바운드 규칙을 좁힘)"
+      Description: "ALB to app server port 8000 only"
 
   AppEgressHttps:
     Type: AWS::EC2::SecurityGroupEgress
@@ -244,7 +247,7 @@ Resources:
       FromPort: 443
       ToPort: 443
       CidrIp: "0.0.0.0/0"
-      Description: "ECR/Secrets Manager/LLM API/Jira/Webhook 등 아웃바운드 HTTPS - 외부 서비스라 SG로 좁힐 수 없어 CIDR 사용"
+      Description: "Outbound HTTPS for ECR/Secrets Manager/LLM API/Jira/Webhook - external services, cannot scope by SG so CIDR is used"
 
   # -------------------- IAM (6장) --------------------
   Ec2Role:

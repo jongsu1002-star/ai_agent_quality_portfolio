@@ -69,6 +69,30 @@ def test_ec2_role_has_ssm_managed_policy_for_sshless_access(template):
     assert "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore" in role["ManagedPolicyArns"]
 
 
+def test_security_group_descriptions_are_ascii_only(template):
+    """EC2 API는 보안그룹의 GroupDescription뿐 아니라 개별 인바운드/아웃바운드 규칙의
+    Description도 ASCII 문자만 허용한다 - 실제 이 스택을 AWS에 생성하려던 시도에서
+    "Invalid rule description" 오류로 직접 실패를 겪고 발견함(cfn-lint/validate-template
+    둘 다 이 런타임 제약은 잡아내지 못했음). 회귀 방지용 - Parameters/Outputs Description은
+    이 제약 대상이 아니므로 검사하지 않는다."""
+    problems = []
+    for logical_id, res in template["Resources"].items():
+        rtype = res.get("Type", "")
+        props = res.get("Properties", {})
+        if rtype == "AWS::EC2::SecurityGroup":
+            group_desc = props.get("GroupDescription", "")
+            if any(ord(c) > 127 for c in group_desc):
+                problems.append(f"{logical_id}.GroupDescription")
+            for kind in ("SecurityGroupIngress", "SecurityGroupEgress"):
+                for rule in props.get(kind, []):
+                    if any(ord(c) > 127 for c in rule.get("Description", "")):
+                        problems.append(f"{logical_id}.{kind}[].Description")
+        elif rtype in ("AWS::EC2::SecurityGroupIngress", "AWS::EC2::SecurityGroupEgress"):
+            if any(ord(c) > 127 for c in props.get("Description", "")):
+                problems.append(f"{logical_id}.Description")
+    assert problems == []
+
+
 def test_budget_alert_configured_with_email_subscriber(template):
     """비용 안전장치 - 예산 초과 시 실제로 이메일 알림이 가도록 구독자가 반드시 있어야 함."""
     budget = template["Resources"]["CostBudget"]["Properties"]["Budget"]

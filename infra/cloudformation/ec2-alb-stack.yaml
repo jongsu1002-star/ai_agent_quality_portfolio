@@ -193,21 +193,36 @@ Resources:
   AlbSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: "ALB - 인터넷에서 80/443만 허용"
+      # GroupDescription은 AWS API 자체가 ASCII만 허용(비ASCII 문자는 CreateSecurityGroup
+      # 호출 자체를 실패시킴 - cfn-lint E3031로 실측 확인) - 한글 설명은 위/아래 YAML
+      # 주석으로만 남기고 이 필드는 영문으로 채운다.
+      GroupDescription: "ALB - allow inbound 80/443 from internet only"
       VpcId: {"Ref": "Vpc"}
       SecurityGroupIngress:
         - {IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: "0.0.0.0/0", Description: "HTTPS"}
         - {IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: "0.0.0.0/0", Description: "HTTP - 443으로 리다이렉트만 함"}
+      # 인라인으로 명시해야 CloudFormation이 기본 "전체 허용" 아웃바운드 규칙을 만들지
+      # 않는다 - 아래처럼 별도 AWS::EC2::SecurityGroupEgress 리소스(AlbEgressToApp)를
+      # 추가하는 것만으로는 그 기본 규칙이 대체되지 않고 나란히 남는다(잘 알려진
+      # CloudFormation 함정). 127.0.0.1/32(루프백, 실제로 도달 불가능한 대상)로 "사실상
+      # 전체 차단"을 표현해 기본 규칙 생성만 억제하고, 실제로 필요한 허용 규칙은
+      # AlbEgressToApp에서 별도로 추가한다.
+      SecurityGroupEgress:
+        - {IpProtocol: "-1", CidrIp: "127.0.0.1/32", Description: "기본 전체 허용 아웃바운드 억제용 자리표시자 - 실제 허용 규칙은 AlbEgressToApp 리소스 참고"}
       Tags:
         - {Key: Name, Value: "sg-alb"}
 
   AppSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: "EC2 앱 서버 - ALB에서만 8000 인바운드 허용, SSH 없음(SSM 전용)"
+      # 위 AlbSecurityGroup과 동일한 이유(ASCII만 허용)로 영문 사용.
+      GroupDescription: "App server - allow inbound 8000 from ALB only, no SSH (SSM only)"
       VpcId: {"Ref": "Vpc"}
       SecurityGroupIngress:
         - {IpProtocol: tcp, FromPort: 8000, ToPort: 8000, SourceSecurityGroupId: {"Ref": "AlbSecurityGroup"}, Description: "ALB -> qa-platform"}
+      # 위 AlbSecurityGroup과 동일한 이유 - 실제 허용 규칙은 AppEgressHttps 리소스 참고.
+      SecurityGroupEgress:
+        - {IpProtocol: "-1", CidrIp: "127.0.0.1/32", Description: "기본 전체 허용 아웃바운드 억제용 자리표시자 - 실제 허용 규칙은 AppEgressHttps 리소스 참고"}
       Tags:
         - {Key: Name, Value: "sg-app"}
 
@@ -325,8 +340,10 @@ Resources:
       # 배포(이미지 pull, compose 기동, .env 작성)는 이미지 태그·시크릿 값 확인이 필요한
       # 사람의 판단이 들어가는 단계라 User Data로 자동화하지 않고 매뉴얼의 수동 절차를 따른다.
       UserData:
-        "Fn::Base64":
-          "Fn::Sub": |
+        # Fn::Sub이 아니라 순수 문자열 - 이 스크립트 안에는 ${...} 치환 변수가 없음(cfn-lint
+        # W1020으로 실측 확인 - 쓸데없는 Fn::Sub는 오히려 스크립트 안의 리터럴 "$"를
+        # CloudFormation이 변수로 잘못 해석하려 시도할 위험만 늘림).
+        "Fn::Base64": |
             #!/bin/bash
             set -eux
             dnf update -y

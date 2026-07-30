@@ -102,6 +102,19 @@ def test_app_security_group_only_allows_ingress_from_alb_security_group(template
     assert ingress_rules[0]["SourceSecurityGroupId"] == {"Ref": "AlbSecurityGroup"}
 
 
+@pytest.mark.parametrize("logical_id", ["AlbSecurityGroup", "AppSecurityGroup"])
+def test_security_groups_suppress_default_allow_all_egress(template, logical_id):
+    """CloudFormation의 잘 알려진 함정 회귀 테스트 - AWS::EC2::SecurityGroup 리소스 자신의
+    Properties에 SecurityGroupEgress를 인라인으로 넣지 않으면, 별도 AWS::EC2::SecurityGroupEgress
+    리소스(AlbEgressToApp/AppEgressHttps)를 아무리 추가해도 AWS가 자동으로 붙이는 기본
+    "전체 허용" 아웃바운드 규칙이 사라지지 않고 그대로 남는다(별도 리소스는 추가만 될 뿐
+    대체하지 못함). 인라인 SecurityGroupEgress가 있어야만 그 기본 규칙 생성 자체가
+    억제된다."""
+    sg_props = template["Resources"][logical_id]["Properties"]
+    assert "SecurityGroupEgress" in sg_props
+    assert len(sg_props["SecurityGroupEgress"]) > 0
+
+
 def test_alb_security_group_allows_public_http_and_https_only(template):
     alb_sg = template["Resources"]["AlbSecurityGroup"]["Properties"]
     ports = sorted(rule["FromPort"] for rule in alb_sg["SecurityGroupIngress"])

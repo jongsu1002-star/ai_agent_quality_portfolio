@@ -12,8 +12,15 @@ __pycache__
 # 패턴으로 넓게 잡아 앞으로 생길 변형에도 계속 대응하게 함.
 .qa_runtime_*
 .qa_monitor_*
+.qa_live_monitor_*
 data
 reports
+# scripts/backup_data.py의 산출물(backups/) - data/reports와 동일한 이유로 제외. 이게
+# 없으면 로컬에서 백업을 한 번이라도 실행해둔 상태로 빌드할 때 실제 계정/세션 DB 스냅샷이
+# 그대로 이미지 레이어에 구워질 위험이 있음.
+backups
+# AWS_배포_운영_매뉴얼.md 검증용으로 생성했던 PPT/점검 산출물 - 소스 아님.
+outputs
 *.env
 .env
 .env.local
@@ -22,3 +29,8 @@ build
 *.spec
 node_modules
 .claude
+# 이 저장소 밖의 다른 도구/에이전트가 저장소 루트에 우발적으로 남기는, 권한이 제한된
+# 임시 디렉터리(Python tempfile.mkdtemp() 기본 접두사 "tmp" + 임의 문자 8개) - 위
+# .qa_runtime_*/.qa_monitor_* 항목과 동일한 이유(그대로 두면 docker build 컨텍스트
+# 전송 단계 자체가 Permission denied로 실패함, 실측으로 확인됨)로 제외.
+tmp????????

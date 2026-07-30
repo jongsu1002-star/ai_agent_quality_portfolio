@@ -3,6 +3,10 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.pytest_runtime/
+.qa_runtime_*
+.qa_monitor_*
+tmp????????
 data/*.db
 data/*.db-wal
 data/*.db-shm
@@ -14,3 +18,11 @@ reports/
 
 # scripts/backup_data.py 산출물 - 계정/세션 DB 스냅샷이라 커밋하면 안 됨(민감정보 포함 가능)
 backups/
+
+# 다른 도구/에이전트가 이 저장소에서 테스트를 돌리며 남긴 leftover 산출물(소스 아님) -
+# .dockerignore의 동일 항목과 같은 이유. 삭제하지 않고 추적 대상에서만 제외한다.
+.qa_live_monitor_*
+outputs/
+
+# 배포 가이드 PPT 산출물 - 커밋 여부는 사용자 재량(초안 성격이라 기본은 추적 제외)
+docs/AWS_배포_가이드.pptx

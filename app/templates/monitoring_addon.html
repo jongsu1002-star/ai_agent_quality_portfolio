@@ -82,10 +82,11 @@
       body { margin: 0.5rem; }
     }
     #prometheus-link, #grafana-link { overflow-wrap: anywhere; }
+    #app-header { position: sticky; top: 0; z-index: 60; }
   </style>
 </head>
 <body>
-  <div class="card">
+  <div class="card" id="app-header">
     <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
       <h1 class="title" style="margin:0;">모니터링 애드온 - 성능테스트(k6) · Prometheus/Grafana</h1>
       <div style="display:flex; align-items:center; gap:0.7rem;">

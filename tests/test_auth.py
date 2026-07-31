@@ -16,6 +16,19 @@ def _upload_dataset(client: TestClient, filename: str = "cases.json"):
     return client.post("/api/dataset/upload", files={"file": (filename, payload, "application/json")})
 
 
+def test_shared_ui_stylesheet_is_public_when_login_is_required():
+    """로그인 화면 자체가 사용하는 공통 CSS는 인증 전에 접근할 수 있어야 한다."""
+    owner = TestClient(app)
+    _signup(owner, "alice", "secret12345")
+
+    anonymous = TestClient(app)
+    response = anonymous.get("/static/ui-system.css")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/css")
+    assert "--ui-brand" in response.text
+
+
 def test_session_cookie_defaults_to_not_secure_for_local_dev():
     """COOKIE_SECURE 기본값(false)에서는 Secure 속성이 없어야 함 - 평문 HTTP로 돌아가는
     로컬 개발 환경에서 Secure 쿠키를 강제하면 브라우저가 쿠키 저장 자체를 거부해

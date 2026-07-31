@@ -34,6 +34,7 @@ for _stream in (sys.stdout, sys.stderr):
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 load_dotenv()  # 로컬 실행 시 .env를 읽어 os.environ에 반영 (Docker는 env_file로 동일한 역할을 함)
 
@@ -187,6 +188,7 @@ GIT_SHA = _detect_git_sha()  # 이 프로세스가 구동 중인 소스의 커�
                               # 나온 것인지 사후에 추적하기 위함(reports/voc_analysis/*.json에도 함께 기록)
 
 app = FastAPI(title="AI Agent Quality Platform", lifespan=_lifespan)
+app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
 METRICS = MetricsCollector()  # 모니터링 탭이 조회하는 서버 운영 지표(요청수/응답시간/에러율) 싱글턴
 EXTERNAL_MONITOR = ExternalMonitorRegistry(path=str(Path("reports") / "monitoring_targets.json"))  # 외부 URL 합성 모니터링 대상 저장소
 USER_STORE = UserStore(path=str(Path("data") / "users.db"))  # 계정(가입/승인/역할) 저장소 - monitoring_addon과 같은 SQLite 패턴
@@ -491,7 +493,7 @@ async def _require_login(request: Request, call_next):
     if not USER_STORE.has_any_users():
         return await call_next(request)
     path = request.url.path
-    if path in _AUTH_EXEMPT_PATHS or _is_authenticated(request):
+    if path in _AUTH_EXEMPT_PATHS or path.startswith("/static/") or _is_authenticated(request):
         return await call_next(request)
     if path.startswith("/api/"):
         return JSONResponse({"error": "로그인이 필요합니다"}, status_code=401)

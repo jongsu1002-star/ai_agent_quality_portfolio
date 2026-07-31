@@ -157,6 +157,10 @@
     .tab-panel.active { display: block; }
     .grafana-embed-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
     #voc-prometheus-link, #voc-grafana-link { overflow-wrap: anywhere; }
+    /* 제목/탭 메뉴가 있는 맨 위 카드는 스크롤해도 화면에 계속 고정되도록(스크롤 위치와
+       무관하게 항상 탭에 바로 접근 가능하게) sticky 처리 - fixed와 달리 자기 자리를
+       그대로 차지해 아래 컨텐츠에 별도 여백 보정이 필요 없다. */
+    #app-header { position: sticky; top: 0; z-index: 60; }
 
     /* ===== 모바일 반응형 - 좁은 화면에서 그리드/탭/여백이 잘리거나 겹치지 않도록 재배치 ===== */
     @media (max-width: 768px) {
@@ -179,7 +183,7 @@
   </style>
 </head>
 <body>
-  <div class="card">
+  <div class="card" id="app-header">
     <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
       <h1 class="title" style="margin:0;">AI Agent 품질관리·운영 모니터링 플랫폼</h1>
       <div style="display:flex; align-items:center; gap:0.7rem;">

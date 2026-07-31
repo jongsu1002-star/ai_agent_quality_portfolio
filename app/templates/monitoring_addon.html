@@ -89,7 +89,10 @@
 <body class="app-page">
   <div class="card" id="app-header">
     <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
-      <h1 class="title" style="margin:0;">모니터링 애드온 - 성능테스트(k6) · Prometheus/Grafana</h1>
+      <div class="header-title-group">
+        <h1 class="title" style="margin:0;">성능·인프라 모니터링</h1>
+        <p class="header-subtitle">k6 성능 테스트와 Prometheus·Grafana 운영 지표를 함께 확인합니다.</p>
+      </div>
       <div style="display:flex; align-items:center; gap:0.7rem;">
         <span id="my-ip-display" class="muted" style="display:none;" title="접근 허용 IP 등록 시: 같은 LAN/사무실에서 접속하면 내부 IP를, 인터넷을 통해 공개 배포된 곳에 접속하면 공인 IP를 등록하세요"></span>
         <button type="button" id="logout-btn" class="logout-btn" onclick="logout()" style="display:none;">로그아웃</button>
@@ -99,7 +102,7 @@
       이 페이지는 기존 QA 품질관리·운영 모니터링 화면(<a href="/">메인 대시보드</a>)과 완전히 별도로
       동작합니다 - 여기서 무엇을 하든 기존 화면/API에는 영향을 주지 않습니다.
     </p>
-    <div class="tabs">
+    <div class="tabs" role="navigation" aria-label="주요 메뉴">
       <button type="button" class="tab-btn" onclick="window.location.href='/#settings'">설정</button>
       <button type="button" class="tab-btn" onclick="window.location.href='/#run'">실행</button>
       <button type="button" class="tab-btn" onclick="window.location.href='/#dashboard'">대시보드</button>

@@ -50,6 +50,13 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   font-size: clamp(1.25rem, 2vw, 1.75rem);
   letter-spacing: -.03em;
 }
+.header-title-group { min-width: 0; flex: 1 1 420px; }
+.header-subtitle {
+  margin: 4px 0 0;
+  color: var(--ui-text-soft);
+  font-size: .84rem;
+  line-height: 1.45;
+}
 .app-page h2, .app-page h3 { color: var(--ui-text); letter-spacing: -.02em; }
 .app-page .muted, .app-page .chart-hint { color: var(--ui-text-soft) !important; }
 
@@ -70,10 +77,13 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   letter-spacing: .12em;
 }
 .tabs {
+  position: relative;
   gap: 4px !important;
   margin-top: 14px !important;
   border-bottom: 0 !important;
   scrollbar-width: thin;
+  scroll-snap-type: x proximity;
+  overscroll-behavior-inline: contain;
 }
 .tab-btn {
   min-height: 42px;
@@ -81,12 +91,18 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   border-radius: 10px 10px 0 0 !important;
   color: var(--ui-text-soft) !important;
   white-space: nowrap;
+  scroll-snap-align: start;
 }
 .tab-btn:hover { background: var(--ui-surface-soft) !important; color: var(--ui-brand-dark) !important; }
 .tab-btn.active {
   background: var(--ui-brand-soft) !important;
   color: var(--ui-brand-dark) !important;
   box-shadow: inset 0 -3px 0 var(--ui-brand) !important;
+}
+.tabs .tab-btn:nth-child(5),
+.tabs .tab-btn:nth-child(9) {
+  margin-left: 8px;
+  box-shadow: -9px 0 0 -8px var(--ui-line);
 }
 
 .app-page button:not(.tab-btn):not(.logout-btn),
@@ -152,6 +168,119 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   border: 1px solid #dbe8fb;
   border-radius: 14px !important;
 }
+.app-page .status-good,
+.app-page .status-ok {
+  color: var(--ui-success) !important;
+}
+.app-page a { color: var(--ui-brand-dark); text-underline-offset: 3px; }
+.app-page a:hover { color: #1e40af; }
+
+/* 실행 프로세스: 평상시 UI보다 강한 대비와 움직임으로 현재 상태를 즉시 인지시킨다. */
+#pipeline-run-card {
+  position: relative;
+  overflow: hidden;
+  border-width: 1px;
+}
+#pipeline-run-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0;
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, .65), 0 0 38px rgba(37, 99, 235, .18);
+  transition: opacity .25s ease, box-shadow .25s ease;
+}
+#pipeline-run-card.is-running {
+  background:
+    radial-gradient(circle at 85% 0, rgba(59, 130, 246, .16), transparent 24rem),
+    var(--ui-surface) !important;
+}
+#pipeline-run-card.is-running::after { opacity: 1; animation: run-card-glow 1.8s ease-in-out infinite; }
+#pipeline-run-card.run-success::after {
+  opacity: 1;
+  box-shadow: inset 0 0 0 2px rgba(22, 163, 74, .58), 0 0 34px rgba(22, 163, 74, .13);
+}
+#pipeline-run-card.run-error::after {
+  opacity: 1;
+  box-shadow: inset 0 0 0 2px rgba(220, 38, 38, .58), 0 0 34px rgba(220, 38, 38, .13);
+}
+.run-progress-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 18px;
+  color: var(--ui-text-soft);
+  font-size: .84rem;
+  font-weight: 700;
+}
+#progress-percent {
+  color: var(--ui-brand-dark);
+  font-size: 1.12rem;
+  font-variant-numeric: tabular-nums;
+}
+.progress-track {
+  position: relative;
+  height: 16px !important;
+  margin-top: 7px !important;
+  overflow: hidden;
+  border: 1px solid #d8e3f4;
+  background: #e8eef7 !important;
+  box-shadow: inset 0 2px 5px rgba(15, 23, 42, .08);
+}
+.progress-fill {
+  position: relative;
+  min-width: 0;
+  background: linear-gradient(90deg, #2563eb 0%, #06b6d4 55%, #8b5cf6 100%) !important;
+  background-size: 200% 100% !important;
+  box-shadow: 0 0 18px rgba(37, 99, 235, .5);
+  transition: width .45s cubic-bezier(.2, .8, .2, 1) !important;
+}
+.progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(115deg, transparent 0 10px, rgba(255,255,255,.32) 10px 18px);
+  animation: progress-stripes .8s linear infinite;
+}
+#pipeline-run-card .step-list {
+  margin-top: 14px;
+  padding: 14px !important;
+  border: 1px solid #dce6f5 !important;
+  background: linear-gradient(145deg, #f8fbff, #f1f6fd) !important;
+}
+#pipeline-run-card .step-item { position: relative; }
+#pipeline-run-card .step-item.step-active {
+  color: #fff !important;
+  background: linear-gradient(100deg, #2563eb, #7c3aed) !important;
+  box-shadow: 0 7px 20px rgba(79, 70, 229, .28);
+}
+#pipeline-run-card .step-item.step-active .step-icon {
+  color: #4f46e5 !important;
+  box-shadow: 0 0 0 5px rgba(255,255,255,.18);
+}
+#pipeline-run-card .step-item.step-done .step-icon {
+  box-shadow: 0 0 0 4px rgba(22,163,74,.1);
+}
+#pipeline-run-card .status-pill {
+  margin-top: 12px;
+  padding: 7px 12px;
+  font-weight: 800;
+}
+#pipeline-run-card.is-running .status-pill {
+  background: #e0e7ff;
+  color: #4338ca;
+  animation: status-pulse 1.4s ease-in-out infinite;
+}
+#pipeline-run-card.run-success .status-pill { background: #dcfce7; color: #166534; }
+#pipeline-run-card.run-error .status-pill { background: #fee2e2; color: #991b1b; }
+@keyframes progress-stripes { to { transform: translateX(18px); } }
+@keyframes run-card-glow {
+  0%, 100% { box-shadow: inset 0 0 0 2px rgba(37, 99, 235, .48), 0 0 22px rgba(37, 99, 235, .11); }
+  50% { box-shadow: inset 0 0 0 2px rgba(124, 58, 237, .72), 0 0 42px rgba(79, 70, 229, .22); }
+}
+@keyframes status-pulse { 50% { transform: scale(1.025); } }
 
 .auth-page {
   min-height: 100vh;
@@ -216,7 +345,21 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   #app-header { top: 0 !important; padding: 14px 14px 0 !important; }
   #app-header::before { font-size: .62rem; }
   .tabs { margin-inline: -14px; padding-inline: 10px; }
+  .tabs::after {
+    content: "";
+    position: sticky;
+    right: -1px;
+    flex: 0 0 22px;
+    min-height: 44px;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .96));
+  }
   .tab-btn { min-height: 44px; padding-inline: 11px !important; }
+  .tabs .tab-btn:nth-child(5),
+  .tabs .tab-btn:nth-child(9) {
+    margin-left: 0;
+    box-shadow: none;
+  }
   .app-page button, .app-page input, .app-page select { min-height: 44px; }
   .auth-page { padding: 16px 12px; align-items: flex-start !important; }
 }
@@ -238,6 +381,9 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
 @media (max-width: 768px) {
   #app-header > div:first-of-type { align-items: center !important; }
   #app-header .title { flex: 1 1 220px; }
+  .header-title-group { flex-basis: 100%; }
+  #app-header .header-subtitle,
+  #app-header #my-ip-display { display: none !important; }
   .app-page .grid,
   .app-page .chart-grid,
   .app-page .grafana-embed-grid,

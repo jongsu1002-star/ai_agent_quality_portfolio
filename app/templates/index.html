@@ -59,7 +59,7 @@
     .password-field .password-toggle svg { width: 17px; height: 17px; }
     .doc-tab-btn { background: #eef2f7; color: #1f2937; box-shadow: none; }
     .doc-tab-btn.active { background: linear-gradient(90deg, #2563eb, #3b82f6); color: white; }
-    .doc-viewer { margin-top: 0.75rem; max-height: 600px; overflow-y: auto; padding: 1rem 1.25rem; border: 1px solid #e2e8f0; border-radius: 10px; line-height: 1.65; }
+    .doc-viewer { margin-top: 0.75rem; max-height: 600px; overflow-y: auto; overflow-x: auto; padding: 1rem 1.25rem; border: 1px solid #e2e8f0; border-radius: 10px; line-height: 1.65; }
     .doc-viewer h1, .doc-viewer h2, .doc-viewer h3, .doc-viewer h4 { color: #1d4ed8; margin: 1.1rem 0 0.5rem; }
     .doc-viewer h1:first-child, .doc-viewer h2:first-child { margin-top: 0; }
     .doc-viewer p { margin: 0.5rem 0; }
@@ -150,11 +150,32 @@
     .category-filter-checks input { width: auto; margin: 0; }
     .progress-track { background: #e2e8f0; border-radius: 999px; height: 10px; margin-top: 0.6rem; overflow: hidden; }
     .progress-fill { background: linear-gradient(90deg, #2563eb, #3b82f6); height: 100%; width: 0%; transition: width 0.3s ease; }
-    .tabs { display: flex; gap: 0.5rem; margin-top: 1rem; border-bottom: 2px solid #e2e8f0; }
-    .tab-btn { background: none; color: #64748b; font-weight: 600; padding: 0.7rem 1.1rem; border-radius: 8px 8px 0 0; box-shadow: none; }
+    .tabs { display: flex; gap: 0.5rem; margin-top: 1rem; border-bottom: 2px solid #e2e8f0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .tab-btn { background: none; color: #64748b; font-weight: 600; padding: 0.7rem 1.1rem; border-radius: 8px 8px 0 0; box-shadow: none; flex-shrink: 0; }
     .tab-btn.active { background: white; color: #1d4ed8; box-shadow: 0 -2px 0 0 #2563eb inset; }
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
+    .grafana-embed-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
+    #voc-prometheus-link, #voc-grafana-link { overflow-wrap: anywhere; }
+
+    /* ===== 모바일 반응형 - 좁은 화면에서 그리드/탭/여백이 잘리거나 겹치지 않도록 재배치 ===== */
+    @media (max-width: 768px) {
+      body { margin: 0.75rem; }
+      .card { padding: 1rem; }
+      .title { font-size: 1.3rem; }
+      .tab-btn { padding: 0.6rem 0.85rem; font-size: 0.85rem; }
+      .grid, .chart-grid, .grafana-embed-grid { grid-template-columns: 1fr; }
+      .category-filter-checks { grid-template-columns: 1fr; }
+      .category-filter-checks label { white-space: normal; }
+      .voc-bar-row { grid-template-columns: 6rem 1fr 2.4rem; gap: 0.4rem; font-size: 0.78rem; }
+      .chart-modal-overlay { padding: 0.75rem; }
+      .chart-modal-content { padding: 1.1rem; }
+    }
+    @media (max-width: 480px) {
+      body { margin: 0.5rem; }
+      .title { font-size: 1.1rem; }
+      .voc-bar-row { grid-template-columns: 5rem 1fr 2.2rem; gap: 0.3rem; font-size: 0.74rem; }
+    }
   </style>
 </head>
 <body>
@@ -722,7 +743,7 @@
       <p id="voc-prometheus-embed-error" class="chart-hint" style="display:none; color: var(--status-critical);">Prometheus 데이터를 불러올 수 없습니다 (컨테이너가 안 떠 있거나 연결할 수 없음) - 아래 링크로 직접 접속해보세요.</p>
 
       <h3 style="margin-top:1.25rem;">Grafana 대시보드 (실시간 임베딩)</h3>
-      <div id="voc-grafana-embed-grid" style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem;"></div>
+      <div id="voc-grafana-embed-grid" class="grafana-embed-grid"></div>
       <p id="voc-grafana-embed-error" class="chart-hint" style="display:none; color: var(--status-critical);">Grafana 임베딩을 불러올 수 없습니다 (컨테이너가 안 떠 있거나 연결할 수 없음) - 아래 링크로 직접 접속해보세요.</p>
       <ul style="margin-top:0.75rem;">
         <li>Prometheus: <a id="voc-prometheus-link" href="#" target="_blank"></a></li>

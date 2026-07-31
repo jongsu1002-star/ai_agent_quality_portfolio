@@ -47,8 +47,9 @@
     .list-toolbar select { width: auto; }
     a { color: #2563eb; }
     code { background: #f1f5f9; padding: 0.1rem 0.3rem; border-radius: 4px; font-size: 0.9em; }
-    .tabs { display: flex; gap: 0.5rem; margin-top: 1rem; border-bottom: 2px solid #e2e8f0; }
-    .tab-btn { background: none; color: #64748b; font-weight: 600; padding: 0.7rem 1.1rem; border-radius: 8px 8px 0 0; box-shadow: none; border: none; cursor: pointer; }
+    .tabs { display: flex; gap: 0.5rem; margin-top: 1rem; border-bottom: 2px solid #e2e8f0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .tab-btn { background: none; color: #64748b; font-weight: 600; padding: 0.7rem 1.1rem; border-radius: 8px 8px 0 0; box-shadow: none; border: none; cursor: pointer; flex-shrink: 0; }
+    .grafana-embed-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
     .tab-btn.active { background: white; color: #1d4ed8; box-shadow: 0 -2px 0 0 #2563eb inset; cursor: default; }
     /* k6 실행 진행률 바 + 단계 체크리스트 - app/templates/index.html의 실행 버튼들이
        쓰는 것과 동일한 시각 언어(진행중=파랑/완료=초록/실패=빨강)를 이 페이지에도
@@ -67,6 +68,20 @@
     .step-item.step-error .step-icon { background: white; color: var(--status-critical); animation: none; }
     @keyframes step-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .step-item.step-active .step-icon { animation: none; } }
+
+    @media (max-width: 768px) {
+      body { margin: 0.75rem; }
+      .card { padding: 1rem; }
+      .grid, .grafana-embed-grid { grid-template-columns: 1fr; }
+      .tab-btn { padding: 0.6rem 0.85rem; font-size: 0.85rem; }
+      /* 이 페이지의 표(k6 실행 이력 등)는 별도 스크롤 래퍼가 없어, 좁은 화면에서 글자가
+         안 보일 만큼 눌리는 대신 표 자체를 가로 스크롤 가능한 블록으로 만든다. */
+      table { display: block; overflow-x: auto; white-space: nowrap; }
+    }
+    @media (max-width: 480px) {
+      body { margin: 0.5rem; }
+    }
+    #prometheus-link, #grafana-link { overflow-wrap: anywhere; }
   </style>
 </head>
 <body>
@@ -226,7 +241,7 @@
     <p id="prometheus-embed-error" class="error-note" style="display:none;">Prometheus 데이터를 불러올 수 없습니다 (컨테이너가 안 떠 있거나 연결할 수 없음) - 아래 링크로 직접 접속해보세요.</p>
 
     <h3 style="margin-top:1.25rem;">Grafana 대시보드 (실시간 임베딩)</h3>
-    <div id="grafana-embed-grid" style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem;"></div>
+    <div id="grafana-embed-grid" class="grafana-embed-grid"></div>
     <p id="grafana-embed-error" class="error-note" style="display:none;">Grafana 임베딩을 불러올 수 없습니다 (컨테이너가 안 떠 있거나 연결할 수 없음) - 아래 링크로 직접 접속해보세요.</p>
     <ul style="margin-top:0.75rem;">
       <li>Prometheus: <a id="prometheus-link" href="#" target="_blank"></a></li>

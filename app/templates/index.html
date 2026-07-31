@@ -181,7 +181,7 @@
       .voc-bar-row { grid-template-columns: 5rem 1fr 2.2rem; gap: 0.3rem; font-size: 0.74rem; }
     }
   </style>
-  <link rel="stylesheet" href="/static/ui-system.css?v=14" />
+  <link rel="stylesheet" href="/static/ui-system.css?v=23" />
   <script src="/static/ui-theme.js?v=3" defer></script>
 </head>
 <body class="app-page workspace-page">
@@ -298,18 +298,36 @@
       </div>
 
       <label style="margin-top:0.75rem; display:block;">알림 웹훅 (선택)</label>
-      <div class="grid">
+      <div class="grid notification-webhook-grid">
         <input id="slack-webhook" placeholder="Slack 웹훅 URL" />
         <input id="discord-webhook" placeholder="Discord 웹훅 URL" />
         <input id="teams-webhook" placeholder="Teams 웹훅 URL" />
-        <input id="jira-base-url" placeholder="Jira 기본 URL" />
-        <input id="jira-email" placeholder="Jira 이메일" />
-        <div class="password-field">
-          <input id="jira-token" type="password" placeholder="Jira API 토큰" />
-          <button type="button" class="password-toggle" onclick="togglePasswordVisibility('jira-token', this)"></button>
-        </div>
-        <input id="jira-project" placeholder="Jira 프로젝트 키" />
       </div>
+
+      <section class="jira-settings-panel" aria-labelledby="jira-settings-title">
+        <h3 id="jira-settings-title">Jira 연동</h3>
+        <div class="jira-settings-grid">
+          <div class="jira-base-field">
+            <label for="jira-base-url">Jira 기본 URL</label>
+            <input id="jira-base-url" placeholder="https://company.atlassian.net" />
+          </div>
+          <div class="jira-email-field">
+            <label for="jira-email">Jira 이메일</label>
+            <input id="jira-email" placeholder="name@company.com" />
+          </div>
+          <div class="jira-token-field">
+            <label for="jira-token">Jira API 토큰</label>
+            <div class="password-field">
+              <input id="jira-token" type="password" placeholder="Jira API 토큰" />
+              <button type="button" class="password-toggle" onclick="togglePasswordVisibility('jira-token', this)"></button>
+            </div>
+          </div>
+          <div class="jira-project-field">
+            <label for="jira-project">프로젝트 키</label>
+            <input id="jira-project" placeholder="예: QA" />
+          </div>
+        </div>
+      </section>
 
       <div style="margin-top: 0.75rem;">
         <button onclick="saveSettings()">설정 저장</button>
@@ -325,7 +343,7 @@
       <div style="margin-top: 0.75rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
         <button onclick="uploadDataset()">데이터셋 업로드</button>
         <button type="button" onclick="resetDataset()">데이터셋 초기화</button>
-        <button type="button" onclick="downloadDatasetTemplate()">엑셀 양식 다운로드</button>
+        <button type="button" class="download-action" onclick="downloadDatasetTemplate()">엑셀 양식 다운로드</button>
       </div>
       <div id="dataset-upload-steps"></div>
 
@@ -342,11 +360,11 @@
       <h2>문서 (항상 최신 내용)</h2>
       <p style="color: var(--text-secondary); font-size: 0.9rem;">아래 문서는 서버의 <code>docs/</code> 파일을 매번 새로 읽어와 보여줍니다 — 코드가 바뀌어도 여기서 항상 현재 내용을 확인할 수 있습니다.</p>
       <div class="doc-tabs">
-        <button type="button" class="doc-tab-btn active" data-doc="user_manual" onclick="viewDoc('user_manual')">사용자 매뉴얼</button>
-        <button type="button" class="doc-tab-btn" data-doc="design_spec" onclick="viewDoc('design_spec')">설계서</button>
-        <button type="button" class="doc-tab-btn" data-doc="process_spec" onclick="viewDoc('process_spec')">프로세스 명세서</button>
-        <button type="button" class="doc-tab-btn" data-doc="network_guide" onclick="viewDoc('network_guide')">네트워크 접속 가이드</button>
-        <button type="button" onclick="downloadCurrentDoc('doc-viewer')">다운로드</button>
+        <button type="button" class="settings-doc-tab-btn doc-tab-btn active" data-doc="user_manual" aria-pressed="true" onclick="viewDoc('user_manual')">사용자 매뉴얼</button>
+        <button type="button" class="settings-doc-tab-btn doc-tab-btn" data-doc="design_spec" aria-pressed="false" onclick="viewDoc('design_spec')">설계서</button>
+        <button type="button" class="settings-doc-tab-btn doc-tab-btn" data-doc="process_spec" aria-pressed="false" onclick="viewDoc('process_spec')">프로세스 명세서</button>
+        <button type="button" class="settings-doc-tab-btn doc-tab-btn" data-doc="network_guide" aria-pressed="false" onclick="viewDoc('network_guide')">네트워크 접속 가이드</button>
+        <button type="button" class="download-action" onclick="downloadCurrentDoc('doc-viewer')">다운로드</button>
       </div>
       <div id="doc-viewer" class="doc-viewer">불러오는 중...</div>
     </div>
@@ -363,7 +381,7 @@
       </p>
       <p>현재 테스트 케이스: <strong id="current-testcase-info-run">없음</strong></p>
       <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
-        <button type="button" onclick="downloadTestcaseTemplate()">엑셀 양식 다운로드</button>
+        <button type="button" class="download-action" onclick="downloadTestcaseTemplate()">엑셀 양식 다운로드</button>
         <button type="button" onclick="resetTestcase()">테스트 케이스 초기화</button>
       </div>
       <input id="file-testcase" type="file" accept=".json,.xlsx,.xls" />
@@ -399,8 +417,8 @@
       </div>
       <div style="margin-top: 0.75rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
         <button id="pipeline-run-btn" onclick="runPipeline()">QA 파이프라인 실행</button>
-        <button onclick="downloadLatestReport('csv')">CSV 다운로드</button>
-        <button onclick="downloadLatestReport('md')">마크다운 다운로드</button>
+        <button class="download-action" onclick="downloadLatestReport('csv')">CSV 다운로드</button>
+        <button class="download-action" onclick="downloadLatestReport('md')">마크다운 다운로드</button>
       </div>
       <div class="run-progress-heading">
         <span class="run-progress-label">실행 진행률</span>
@@ -447,7 +465,7 @@
         실행을 다시 볼 때는 정상입니다.)</p>
     </div>
 
-    <div class="chart-grid">
+    <div class="chart-grid dashboard-chart-grid">
       <div class="card">
         <h2>통과율 추이 (시계열)</h2>
         <svg id="chart-timeseries" class="viz-svg chart-clickable" viewBox="0 0 600 220" onclick="openChartModal('chart-timeseries', '통과율 추이 (시계열)')"></svg>
@@ -495,10 +513,10 @@
       <h2>테스트 결과 · 결함보고서 (자동 생성, 항상 최신)</h2>
       <p style="color: var(--text-secondary); font-size: 0.9rem;"><code>테스트_결과.md</code>는 <code>pytest</code> 실행 시마다, <code>결함보고서.md</code>는 QA 파이프라인 실행 완료 시마다 자동으로 재생성됩니다.</p>
       <div class="doc-tabs">
-        <button type="button" class="dashboard-doc-tab-btn doc-tab-btn active" data-doc="test_results" onclick="viewDoc('test_results', 'dashboard-doc-viewer', 'dashboard-doc-tab-btn')">테스트 결과</button>
-        <button type="button" class="dashboard-doc-tab-btn doc-tab-btn" data-doc="scenario_test_report" onclick="viewDoc('scenario_test_report', 'dashboard-doc-viewer', 'dashboard-doc-tab-btn')">테스트결과보고서</button>
-        <button type="button" class="dashboard-doc-tab-btn doc-tab-btn" data-doc="defect_report" onclick="viewDoc('defect_report', 'dashboard-doc-viewer', 'dashboard-doc-tab-btn')">결함보고서</button>
-        <button type="button" onclick="downloadCurrentDoc('dashboard-doc-viewer')">다운로드</button>
+        <button type="button" class="dashboard-doc-tab-btn doc-tab-btn active" data-doc="test_results" aria-pressed="true" onclick="viewDoc('test_results', 'dashboard-doc-viewer', 'dashboard-doc-tab-btn')">테스트 결과</button>
+        <button type="button" class="dashboard-doc-tab-btn doc-tab-btn" data-doc="scenario_test_report" aria-pressed="false" onclick="viewDoc('scenario_test_report', 'dashboard-doc-viewer', 'dashboard-doc-tab-btn')">테스트결과보고서</button>
+        <button type="button" class="dashboard-doc-tab-btn doc-tab-btn" data-doc="defect_report" aria-pressed="false" onclick="viewDoc('defect_report', 'dashboard-doc-viewer', 'dashboard-doc-tab-btn')">결함보고서</button>
+        <button type="button" class="download-action" onclick="downloadCurrentDoc('dashboard-doc-viewer')">다운로드</button>
       </div>
       <div id="dashboard-doc-viewer" class="doc-viewer">불러오는 중...</div>
     </div>
@@ -629,9 +647,9 @@
       <p style="color: var(--text-secondary); font-size: 0.9rem;">일반(잡담)/FAQ/VOC(불만 및 요구사항) 게시판입니다. 삭제는 관리자만, 글 수정·노출/비노출 전환은 작성자 본인 또는 관리자가 할 수 있습니다.</p>
       <div class="board-toolbar">
         <div class="board-filter-group" aria-label="게시판 분류">
-          <button type="button" class="board-cat-btn doc-tab-btn active" data-cat="general" onclick="showBoardCategory('general')">일반</button>
-          <button type="button" class="board-cat-btn doc-tab-btn" data-cat="faq" onclick="showBoardCategory('faq')">FAQ</button>
-          <button type="button" class="board-cat-btn doc-tab-btn" data-cat="voc" onclick="showBoardCategory('voc')">VOC</button>
+          <button type="button" class="board-cat-btn doc-tab-btn active" data-cat="general" aria-pressed="true" onclick="showBoardCategory('general')">일반</button>
+          <button type="button" class="board-cat-btn doc-tab-btn" data-cat="faq" aria-pressed="false" onclick="showBoardCategory('faq')">FAQ</button>
+          <button type="button" class="board-cat-btn doc-tab-btn" data-cat="voc" aria-pressed="false" onclick="showBoardCategory('voc')">VOC</button>
         </div>
         <div class="board-toolbar-actions">
           <button type="button" onclick="toggleBoardWriteForm()">글쓰기</button>
@@ -652,7 +670,7 @@
       <h2>데스크톱 앱 다운로드</h2>
       <p class="chart-hint">브라우저 없이 바로 실행하는 윈도우 설치형 앱입니다(내부적으로는 이 서버에 접속하는 얇은 래퍼입니다).</p>
       <p class="chart-hint" id="desktop-app-download-hint">확인 중...</p>
-      <button type="button" id="desktop-app-download-btn" onclick="downloadDesktopApp()" disabled>다운로드 (Windows .exe)</button>
+      <button type="button" id="desktop-app-download-btn" class="download-action" onclick="downloadDesktopApp()" disabled>다운로드 (Windows .exe)</button>
     </div>
   </div>
 
@@ -698,8 +716,8 @@
         <div class="voc-source-card">
           <label class="voc-source-toggle"><input type="checkbox" id="voc-use-excel" style="width:auto; display:inline-block;" /> 파일 업로드</label>
           <div class="voc-template-actions">
-            <a href="/api/voc-analysis/template"><button type="button" class="btn-secondary">엑셀 템플릿</button></a>
-            <a href="/api/voc-analysis/template.json"><button type="button" class="btn-secondary">JSON 템플릿</button></a>
+            <a href="/api/voc-analysis/template"><button type="button" class="download-action">엑셀 템플릿</button></a>
+            <a href="/api/voc-analysis/template.json"><button type="button" class="download-action">JSON 템플릿</button></a>
           </div>
           <div class="voc-file-upload">
             <input type="file" id="voc-excel-file" accept=".xlsx,.json" style="width:auto; margin-top:0;" />
@@ -944,7 +962,11 @@
 
     function showBoardCategory(type) {
       _currentBoardType = type;
-      document.querySelectorAll('.board-cat-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.cat === type));
+      document.querySelectorAll('.board-cat-btn').forEach(btn => {
+        const selected = btn.dataset.cat === type;
+        btn.classList.toggle('active', selected);
+        btn.setAttribute('aria-pressed', String(selected));
+      });
       document.getElementById('board-write-form').style.display = 'none';
       loadBoardPosts();
     }
@@ -2216,6 +2238,21 @@ let _vocActiveRunId = null;
       input.type = showing ? 'password' : 'text';
       button.innerHTML = showing ? ICON_EYE : ICON_EYE_OFF;
       button.setAttribute('aria-label', showing ? '값 보기' : '값 숨기기');
+      const previewId = `${inputId}-visible-preview`;
+      document.getElementById(previewId)?.remove();
+      if (!showing) {
+        const preview = document.createElement('div');
+        preview.id = previewId;
+        preview.className = 'secret-value-preview';
+        preview.setAttribute('role', 'status');
+        preview.setAttribute('aria-label', `${inputId} 전체 값`);
+        const label = document.createElement('strong');
+        label.textContent = '전체 값';
+        const value = document.createElement('code');
+        value.textContent = input.value || '입력된 값이 없습니다.';
+        preview.append(label, value);
+        input.closest('.password-field').insertAdjacentElement('afterend', preview);
+      }
     }
 
     // ---------- chart helpers (shared across the dashboard visualizations) ----------
@@ -2715,8 +2752,12 @@ let _vocActiveRunId = null;
 
     const _docViewerState = {}; // viewerId -> { key, content } - 다운로드 버튼이 "지금 보고 있는 문서"를 알 수 있도록
 
-    async function viewDoc(key, viewerId = 'doc-viewer', tabBtnClass = 'doc-tab-btn') {
-      document.querySelectorAll(`.${tabBtnClass}`).forEach(btn => btn.classList.toggle('active', btn.dataset.doc === key));
+    async function viewDoc(key, viewerId = 'doc-viewer', tabBtnClass = 'settings-doc-tab-btn') {
+      document.querySelectorAll(`.${tabBtnClass}`).forEach(btn => {
+        const selected = btn.dataset.doc === key;
+        btn.classList.toggle('active', selected);
+        btn.setAttribute('aria-pressed', String(selected));
+      });
       const viewer = document.getElementById(viewerId);
       viewer.innerHTML = '<p>불러오는 중...</p>';
       const response = await fetch(`/api/docs/${key}`);
@@ -2784,9 +2825,14 @@ let _vocActiveRunId = null;
 
     function showTab(name) {
       document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        btn.removeAttribute('aria-current');
+      });
       document.getElementById(`tab-${name}`).classList.add('active');
-      document.querySelector(`.tab-btn[data-tab="${name}"]`).classList.add('active');
+      const activeTabButton = document.querySelector(`.tab-btn[data-tab="${name}"]`);
+      activeTabButton.classList.add('active');
+      activeTabButton.setAttribute('aria-current', 'page');
       // 설정/실행 탭은 다른 탭(또는 다른 사용자)이 그 사이에 데이터셋을 바꿨을 수도 있으므로,
       // 탭을 열 때마다 서버의 현재 활성 데이터셋을 다시 조회해 화면에 보이는 값이 항상 최신이게 함
       if (name === 'settings' || name === 'run') {
@@ -2984,7 +3030,7 @@ let _vocActiveRunId = null;
           <td>${status}</td>
           <td>${actionBtn}</td>
           <td><button type="button" class="dataset-preview-btn" data-path="${escapeHtml(item.path)}">미리보기</button></td>
-          <td><button type="button" class="dataset-download-btn" data-path="${escapeHtml(item.path)}">다운로드</button></td>
+          <td><button type="button" class="dataset-download-btn download-action" data-path="${escapeHtml(item.path)}">다운로드</button></td>
         </tr>`;
       });
     }
@@ -3142,7 +3188,7 @@ let _vocActiveRunId = null;
           <td>${status}</td>
           <td>${actionBtn}</td>
           <td><button type="button" class="testcase-preview-btn" data-path="${escapeHtml(item.path)}">미리보기</button></td>
-          <td><button type="button" class="testcase-download-btn" data-path="${escapeHtml(item.path)}">다운로드</button></td>
+          <td><button type="button" class="testcase-download-btn download-action" data-path="${escapeHtml(item.path)}">다운로드</button></td>
         </tr>`;
       });
     }

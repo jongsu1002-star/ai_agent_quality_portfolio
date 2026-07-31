@@ -84,7 +84,7 @@
     #prometheus-link, #grafana-link { overflow-wrap: anywhere; }
     #app-header { position: sticky; top: 0; z-index: 60; }
   </style>
-  <link rel="stylesheet" href="/static/ui-system.css?v=14" />
+  <link rel="stylesheet" href="/static/ui-system.css?v=23" />
   <script src="/static/ui-theme.js?v=3" defer></script>
 </head>
 <body class="app-page workspace-page addon-page">
@@ -130,6 +130,7 @@
     </div>
   </div>
 
+  <main class="addon-content">
   <div class="card">
     <h2>k6 성능테스트 실행</h2>
     <p class="muted">
@@ -267,6 +268,7 @@
       <li>이 앱이 노출하는 지표: <a href="/metrics-addon" target="_blank">/metrics-addon</a></li>
     </ul>
   </div>
+  </main>
 
   <script>
     // 메인 대시보드(index.html)와 같은 이유로 여기도 401을 한 번에 가로채서 로그인 화면으로 보냄 -

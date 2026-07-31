@@ -28,6 +28,11 @@ def test_shared_ui_stylesheet_is_public_when_login_is_required():
     assert response.headers["content-type"].startswith("text/css")
     assert "--ui-brand" in response.text
 
+    script_response = anonymous.get("/static/ui-theme.js")
+    assert script_response.status_code == 200
+    assert "javascript" in script_response.headers["content-type"]
+    assert "qa-ui-theme" in script_response.text
+
 
 def test_session_cookie_defaults_to_not_secure_for_local_dev():
     """COOKIE_SECURE 기본값(false)에서는 Secure 속성이 없어야 함 - 평문 HTTP로 돌아가는

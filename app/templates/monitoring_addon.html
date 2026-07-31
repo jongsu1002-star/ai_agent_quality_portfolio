@@ -85,6 +85,7 @@
     #app-header { position: sticky; top: 0; z-index: 60; }
   </style>
   <link rel="stylesheet" href="/static/ui-system.css" />
+  <script src="/static/ui-theme.js" defer></script>
 </head>
 <body class="app-page">
   <div class="card" id="app-header">
@@ -94,6 +95,14 @@
         <p class="header-subtitle">k6 성능 테스트와 Prometheus·Grafana 운영 지표를 함께 확인합니다.</p>
       </div>
       <div style="display:flex; align-items:center; gap:0.7rem;">
+        <label class="ui-theme-control"><span>색상</span>
+          <select data-ui-theme-select aria-label="화면 색상 선택">
+            <option value="ocean">오션 블루</option>
+            <option value="forest">포레스트</option>
+            <option value="violet">바이올렛</option>
+            <option value="sunset">선셋</option>
+          </select>
+        </label>
         <span id="my-ip-display" class="muted" style="display:none;" title="접근 허용 IP 등록 시: 같은 LAN/사무실에서 접속하면 내부 IP를, 인터넷을 통해 공개 배포된 곳에 접속하면 공인 IP를 등록하세요"></span>
         <button type="button" id="logout-btn" class="logout-btn" onclick="logout()" style="display:none;">로그아웃</button>
       </div>

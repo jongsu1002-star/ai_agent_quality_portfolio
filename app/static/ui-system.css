@@ -9,6 +9,8 @@
   --ui-brand: #2563eb;
   --ui-brand-dark: #1d4ed8;
   --ui-brand-soft: #eaf2ff;
+  --ui-brand-rgb: 37 99 235;
+  --ui-accent: #3b82f6;
   --ui-success: #15803d;
   --ui-danger: #dc2626;
   --ui-radius-sm: 10px;
@@ -17,21 +19,44 @@
   --ui-shadow: 0 8px 30px rgba(30, 64, 175, 0.07);
   --ui-shadow-hover: 0 14px 36px rgba(30, 64, 175, 0.12);
 }
+[data-ui-theme="forest"] {
+  --ui-brand: #0f8a65;
+  --ui-brand-dark: #087052;
+  --ui-brand-soft: #e6f7f1;
+  --ui-brand-rgb: 15 138 101;
+  --ui-accent: #22b88a;
+}
+[data-ui-theme="violet"] {
+  --ui-brand: #7c3aed;
+  --ui-brand-dark: #6425d0;
+  --ui-brand-soft: #f1eafe;
+  --ui-brand-rgb: 124 58 237;
+  --ui-accent: #a855f7;
+}
+[data-ui-theme="sunset"] {
+  --ui-brand: #e85d3f;
+  --ui-brand-dark: #c7432b;
+  --ui-brand-soft: #fff0eb;
+  --ui-brand-rgb: 232 93 63;
+  --ui-accent: #f59e42;
+}
 
 html { color-scheme: light; scroll-behavior: smooth; }
 body {
   background:
-    radial-gradient(circle at 0 0, rgba(37, 99, 235, 0.08), transparent 28rem),
+    radial-gradient(circle at 0 0, rgb(var(--ui-brand-rgb) / .08), transparent 28rem),
     var(--ui-bg) !important;
   color: var(--ui-text) !important;
-  font-family: "Pretendard Variable", Pretendard, "Segoe UI", "Malgun Gothic", sans-serif !important;
+  font-family: "Pretendard Variable", Pretendard, SUIT, "Noto Sans KR", Inter, "Segoe UI", "Malgun Gothic", sans-serif !important;
+  font-size: 15px;
+  letter-spacing: -.012em;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
 
 button, input, select, textarea { font: inherit; }
 button, a, input, select, textarea { transition: border-color .18s ease, box-shadow .18s ease, background-color .18s ease, color .18s ease, transform .18s ease; }
-:focus-visible { outline: 3px solid rgba(37, 99, 235, .28) !important; outline-offset: 2px; }
+:focus-visible { outline: 3px solid rgb(var(--ui-brand-rgb) / .28) !important; outline-offset: 2px; }
 
 .app-page {
   max-width: 1540px;
@@ -85,13 +110,34 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   scroll-snap-type: x proximity;
   overscroll-behavior-inline: contain;
 }
+.ui-theme-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ui-text-soft);
+  font-size: .76rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.ui-theme-control select {
+  width: auto !important;
+  min-width: 88px;
+  min-height: 34px !important;
+  margin: 0 !important;
+  padding: 5px 26px 5px 8px !important;
+  border-radius: 8px !important;
+  background-color: var(--ui-surface) !important;
+}
 .tab-btn {
-  min-height: 42px;
-  padding: 9px 13px !important;
-  border-radius: 10px 10px 0 0 !important;
+  min-height: 37px;
+  padding: 7px 11px !important;
+  border-radius: 8px 8px 0 0 !important;
   color: var(--ui-text-soft) !important;
   white-space: nowrap;
   scroll-snap-align: start;
+  font-size: .84rem !important;
+  font-weight: 620 !important;
+  letter-spacing: -.012em;
 }
 .tab-btn:hover { background: var(--ui-surface-soft) !important; color: var(--ui-brand-dark) !important; }
 .tab-btn.active {
@@ -99,23 +145,106 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   color: var(--ui-brand-dark) !important;
   box-shadow: inset 0 -3px 0 var(--ui-brand) !important;
 }
-.tabs .tab-btn:nth-child(5),
-.tabs .tab-btn:nth-child(9) {
-  margin-left: 8px;
-  box-shadow: -9px 0 0 -8px var(--ui-line);
+.nav-section-label { display: none; }
+
+/* 넓은 화면은 좌측 업무 내비게이션 + 우측 작업 공간으로 구성한다. */
+@media (min-width: 1101px) {
+  .workspace-page {
+    display: grid;
+    grid-template-columns: 230px minmax(0, 1fr);
+    align-items: start;
+    gap: 20px;
+    max-width: 1600px;
+    padding: 20px clamp(18px, 2vw, 32px) 44px !important;
+  }
+  .workspace-page #app-header {
+    grid-column: 1;
+    position: sticky;
+    top: 20px !important;
+    max-height: calc(100vh - 40px);
+    margin: 0 !important;
+    padding: 20px 14px 14px !important;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: 18px !important;
+  }
+  .workspace-page #app-header > div:first-of-type {
+    display: block !important;
+  }
+  .workspace-page .header-title-group { display: block; }
+  .workspace-page #app-header .title {
+    font-size: 1.08rem;
+    line-height: 1.35;
+  }
+  .workspace-page #app-header .header-subtitle {
+    margin-top: 7px;
+    font-size: .75rem;
+  }
+  .workspace-page #app-header > div:first-of-type > div:last-child {
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+  .workspace-page .ui-theme-control {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .workspace-page .tabs {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 3px !important;
+    margin: 18px 0 0 !important;
+    overflow: visible;
+  }
+  .workspace-page .nav-section-label {
+    display: block;
+    margin: 13px 8px 4px;
+    color: var(--ui-text-muted);
+    font-size: .64rem;
+    font-weight: 800;
+    letter-spacing: .1em;
+  }
+  .workspace-page .nav-section-label:first-child { margin-top: 0; }
+  .workspace-page .tab-btn {
+    width: 100%;
+    min-height: 38px;
+    padding: 8px 10px !important;
+    border-radius: 9px !important;
+    text-align: left;
+  }
+  .workspace-page .tab-btn:hover { transform: translateX(2px); }
+  .workspace-page .tab-btn.active {
+    background: linear-gradient(100deg, #e9f1ff, #f3efff) !important;
+    box-shadow: inset 3px 0 0 var(--ui-brand) !important;
+  }
+  .workspace-page .tab-panel {
+    grid-column: 2;
+    min-width: 0;
+  }
+  .workspace-page #tab-run.active {
+    display: grid;
+    grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr);
+    align-items: start;
+    gap: 16px;
+  }
+  .workspace-page #tab-run > .card { margin-bottom: 0; }
 }
 
 .app-page button:not(.tab-btn):not(.logout-btn),
 .app-page .primary {
-  min-height: 42px;
-  border-radius: var(--ui-radius-sm) !important;
-  background: var(--ui-brand) !important;
-  box-shadow: 0 4px 12px rgba(37, 99, 235, .16);
+  min-height: 36px;
+  padding: 7px 12px !important;
+  border-radius: 8px !important;
+  background: linear-gradient(135deg, var(--ui-brand), var(--ui-accent)) !important;
+  box-shadow: 0 2px 7px rgb(var(--ui-brand-rgb) / .14);
+  font-size: .86rem;
+  font-weight: 650 !important;
+  letter-spacing: -.01em;
 }
 .app-page button:not(.tab-btn):not(.logout-btn):hover,
 .app-page .primary:hover {
   background: var(--ui-brand-dark) !important;
-  box-shadow: 0 7px 18px rgba(37, 99, 235, .22);
+  box-shadow: 0 4px 11px rgb(var(--ui-brand-rgb) / .2);
   transform: translateY(-1px);
 }
 .app-page .btn-secondary,
@@ -127,18 +256,21 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
 }
 .app-page .btn-danger { background: var(--ui-danger) !important; }
 .logout-btn {
-  min-height: 40px;
+  min-height: 34px;
+  padding: 6px 10px !important;
   border-color: var(--ui-line) !important;
-  border-radius: var(--ui-radius-sm) !important;
+  border-radius: 8px !important;
   color: var(--ui-text-soft) !important;
+  font-size: .82rem;
+  font-weight: 600 !important;
 }
 .logout-btn:hover { color: var(--ui-text) !important; border-color: #cbd5e1 !important; }
 
 .app-page input:not([type="checkbox"]):not([type="radio"]),
 .app-page textarea,
 .app-page select {
-  min-height: 42px;
-  padding: 9px 12px !important;
+  min-height: 39px;
+  padding: 7px 10px !important;
   border: 1px solid #d7dee8 !important;
   border-radius: var(--ui-radius-sm) !important;
   background: var(--ui-surface) !important;
@@ -147,7 +279,7 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
 .app-page input:hover, .app-page textarea:hover, .app-page select:hover { border-color: #b9c6d8 !important; }
 .app-page input:focus, .app-page textarea:focus, .app-page select:focus {
   border-color: var(--ui-brand) !important;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+  box-shadow: 0 0 0 3px rgb(var(--ui-brand-rgb) / .12);
 }
 .app-page table {
   border: 1px solid var(--ui-line);
@@ -234,7 +366,7 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   min-width: 0;
   background: linear-gradient(90deg, #2563eb 0%, #06b6d4 55%, #8b5cf6 100%) !important;
   background-size: 200% 100% !important;
-  box-shadow: 0 0 18px rgba(37, 99, 235, .5);
+  box-shadow: 0 0 18px rgb(var(--ui-brand-rgb) / .5);
   transition: width .45s cubic-bezier(.2, .8, .2, 1) !important;
 }
 .progress-fill::after {
@@ -286,7 +418,7 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   min-height: 100vh;
   padding: 28px 16px;
   background:
-    radial-gradient(circle at 15% 15%, rgba(37, 99, 235, .16), transparent 24rem),
+    radial-gradient(circle at 15% 15%, rgb(var(--ui-brand-rgb) / .16), transparent 24rem),
     radial-gradient(circle at 90% 85%, rgba(14, 165, 233, .1), transparent 28rem),
     #f5f8fc !important;
 }
@@ -307,8 +439,8 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   margin-bottom: 20px;
   place-items: center;
   border-radius: 14px;
-  background: linear-gradient(145deg, var(--ui-brand), #3b82f6);
-  box-shadow: 0 8px 22px rgba(37, 99, 235, .25);
+  background: linear-gradient(145deg, var(--ui-brand), var(--ui-accent));
+  box-shadow: 0 8px 22px rgb(var(--ui-brand-rgb) / .25);
   color: white;
   font-size: .9rem;
   font-weight: 800;
@@ -327,14 +459,16 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
 .auth-page input:focus, .auth-page textarea:focus {
   border-color: var(--ui-brand) !important;
   outline: none !important;
-  box-shadow: 0 0 0 4px rgba(37, 99, 235, .12);
+  box-shadow: 0 0 0 4px rgb(var(--ui-brand-rgb) / .12);
   background: white;
 }
 .auth-page button {
-  min-height: 48px;
-  border-radius: var(--ui-radius-sm) !important;
-  background: var(--ui-brand) !important;
-  box-shadow: 0 7px 18px rgba(37, 99, 235, .2);
+  min-height: 44px;
+  border-radius: 9px !important;
+  background: linear-gradient(135deg, var(--ui-brand), var(--ui-accent)) !important;
+  box-shadow: 0 4px 12px rgb(var(--ui-brand-rgb) / .18);
+  font-size: .9rem;
+  font-weight: 650;
 }
 .auth-page button:hover { background: var(--ui-brand-dark) !important; transform: translateY(-1px); }
 .auth-page a { color: var(--ui-brand-dark) !important; font-weight: 650; }
@@ -354,13 +488,10 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
     pointer-events: none;
     background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .96));
   }
-  .tab-btn { min-height: 44px; padding-inline: 11px !important; }
-  .tabs .tab-btn:nth-child(5),
-  .tabs .tab-btn:nth-child(9) {
-    margin-left: 0;
-    box-shadow: none;
-  }
-  .app-page button, .app-page input, .app-page select { min-height: 44px; }
+  .tab-btn { min-height: 40px; padding-inline: 10px !important; }
+  .app-page button:not(.tab-btn):not(.logout-btn),
+  .app-page input,
+  .app-page select { min-height: 40px !important; }
   .auth-page { padding: 16px 12px; align-items: flex-start !important; }
 }
 
@@ -384,6 +515,8 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   .header-title-group { flex-basis: 100%; }
   #app-header .header-subtitle,
   #app-header #my-ip-display { display: none !important; }
+  .ui-theme-control > span { display: none; }
+  .ui-theme-control select { min-width: 82px; }
   .app-page .grid,
   .app-page .chart-grid,
   .app-page .grafana-embed-grid,
@@ -413,6 +546,35 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   .tabs { margin-inline: -12px; padding-inline: 8px; }
   .tab-btn { font-size: .82rem !important; }
   .auth-page .card { padding: 24px 20px !important; }
+}
+
+/* API 키·토큰 표시/숨김은 일반 액션 버튼과 분리한 순수 눈 아이콘으로 유지한다. */
+body.app-page .password-field button.password-toggle {
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 50% !important;
+  background: transparent !important;
+  color: #64748b !important;
+  box-shadow: none !important;
+  transform: translateY(-50%) !important;
+}
+body.app-page .password-field button.password-toggle:hover {
+  background: var(--ui-brand-soft) !important;
+  color: var(--ui-brand-dark) !important;
+  box-shadow: none !important;
+  transform: translateY(-50%) !important;
+}
+body.app-page .password-field button.password-toggle:active {
+  background: color-mix(in srgb, var(--ui-brand-soft) 75%, var(--ui-line)) !important;
+}
+body.app-page .password-field button.password-toggle svg {
+  width: 18px;
+  height: 18px;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,6 +1,6 @@
 (() => {
   const storageKey = "qa-ui-theme";
-  const allowedThemes = new Set(["ocean", "forest", "violet", "sunset"]);
+  const allowedThemes = new Set(["ocean", "forest", "violet", "sunset", "pink"]);
 
   function readTheme() {
     try {

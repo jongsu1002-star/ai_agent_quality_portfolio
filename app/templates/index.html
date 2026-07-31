@@ -181,8 +181,8 @@
       .voc-bar-row { grid-template-columns: 5rem 1fr 2.2rem; gap: 0.3rem; font-size: 0.74rem; }
     }
   </style>
-  <link rel="stylesheet" href="/static/ui-system.css" />
-  <script src="/static/ui-theme.js" defer></script>
+  <link rel="stylesheet" href="/static/ui-system.css?v=5" />
+  <script src="/static/ui-theme.js?v=2" defer></script>
 </head>
 <body class="app-page workspace-page">
   <div class="card" id="app-header">
@@ -198,6 +198,7 @@
             <option value="forest">포레스트</option>
             <option value="violet">바이올렛</option>
             <option value="sunset">선셋</option>
+            <option value="pink">로즈 핑크</option>
           </select>
         </label>
         <span id="my-ip-display" class="chart-hint" style="display:none;" title="접근 허용 IP 등록 시: 같은 LAN/사무실에서 접속하면 내부 IP를, 인터넷을 통해 공개 배포된 곳에 접속하면 공인 IP를 등록하세요"></span>
@@ -215,7 +216,7 @@
       <button type="button" class="tab-btn" data-tab="board" onclick="showTab('board')">게시판</button>
       <button type="button" class="tab-btn" data-tab="voc-analysis" onclick="showTab('voc-analysis')">VOC 분석</button>
       <button type="button" class="tab-btn" data-tab="voc-results" onclick="showTab('voc-results')">VOC 분석 결과</button>
-      <span class="nav-section-label admin-nav-label">관리</span>
+      <span class="nav-section-label admin-nav-label" id="admin-nav-label-main">관리</span>
       <button type="button" class="tab-btn" id="users-tab-btn" data-tab="users" onclick="showTab('users')" style="display:none;">사용자 관리</button>
       <button type="button" class="tab-btn" id="error-log-tab-btn" data-tab="error-log" onclick="showTab('error-log')" style="display:none;">오류 로그</button>
       <button type="button" class="tab-btn" id="ip-allowlist-tab-btn" data-tab="ip-allowlist" onclick="showTab('ip-allowlist')" style="display:none;">접근 허용 IP</button>
@@ -307,7 +308,10 @@
           <input id="jira-token" type="password" placeholder="Jira API 토큰" />
           <button type="button" class="password-toggle" onclick="togglePasswordVisibility('jira-token', this)"></button>
         </div>
-        <input id="jira-project" placeholder="Jira 프로젝트 키" />
+        <div class="password-field">
+          <input id="jira-project" type="password" placeholder="Jira 프로젝트 키" />
+          <button type="button" class="password-toggle" onclick="togglePasswordVisibility('jira-project', this)"></button>
+        </div>
       </div>
 
       <div style="margin-top: 0.75rem;">
@@ -626,14 +630,16 @@
     <div class="card">
       <h2>게시판</h2>
       <p style="color: var(--text-secondary); font-size: 0.9rem;">일반(잡담)/FAQ/VOC(불만 및 요구사항) 게시판입니다. 삭제는 관리자만, 글 수정·노출/비노출 전환은 작성자 본인 또는 관리자가 할 수 있습니다.</p>
-      <div class="doc-tabs">
-        <button type="button" class="board-cat-btn doc-tab-btn active" data-cat="general" onclick="showBoardCategory('general')">일반</button>
-        <button type="button" class="board-cat-btn doc-tab-btn" data-cat="faq" onclick="showBoardCategory('faq')">FAQ</button>
-        <button type="button" class="board-cat-btn doc-tab-btn" data-cat="voc" onclick="showBoardCategory('voc')">VOC</button>
-      </div>
-      <div class="board-actions">
-        <button type="button" onclick="toggleBoardWriteForm()">글쓰기</button>
-        <button type="button" id="board-bulk-delete-btn" class="btn-danger" style="display:none;" onclick="bulkDeleteSelectedPosts()">선택 삭제</button>
+      <div class="board-toolbar">
+        <div class="board-filter-group" aria-label="게시판 분류">
+          <button type="button" class="board-cat-btn doc-tab-btn active" data-cat="general" onclick="showBoardCategory('general')">일반</button>
+          <button type="button" class="board-cat-btn doc-tab-btn" data-cat="faq" onclick="showBoardCategory('faq')">FAQ</button>
+          <button type="button" class="board-cat-btn doc-tab-btn" data-cat="voc" onclick="showBoardCategory('voc')">VOC</button>
+        </div>
+        <div class="board-toolbar-actions">
+          <button type="button" onclick="toggleBoardWriteForm()">글쓰기</button>
+          <button type="button" id="board-bulk-delete-btn" class="btn-danger" style="display:none;" onclick="bulkDeleteSelectedPosts()">선택 삭제</button>
+        </div>
       </div>
       <div id="board-write-form" style="display:none; margin-top:0.75rem;">
         <input id="board-write-title" placeholder="제목" />
@@ -680,8 +686,10 @@
         </div>
         <div>
           <label><input type="checkbox" id="voc-use-jira" style="width:auto; display:inline-block; margin-right:0.4rem;" /> Jira 백로그 포함</label>
-          <input id="voc-jira-jql" placeholder="JQL (선택, 비우면 설정된 프로젝트 기본값 사용)" style="margin-top:0.4rem;" />
-          <button type="button" class="btn-secondary" style="margin-top:0.4rem;" onclick="previewJiraIssues()">Jira 미리보기</button>
+          <div class="inline-field-action">
+            <input id="voc-jira-jql" placeholder="JQL (선택, 비우면 설정된 프로젝트 기본값 사용)" />
+            <button type="button" class="btn-secondary" onclick="previewJiraIssues()">미리보기</button>
+          </div>
           <div id="voc-jira-preview" class="chart-hint"></div>
         </div>
         <div>
@@ -878,6 +886,7 @@
         document.getElementById('users-tab-btn').style.display = _isAdmin ? '' : 'none';
         document.getElementById('error-log-tab-btn').style.display = _isAdmin ? '' : 'none';
         document.getElementById('ip-allowlist-tab-btn').style.display = _isAdmin ? '' : 'none';
+        document.getElementById('admin-nav-label-main').style.display = _isAdmin ? '' : 'none';
         document.getElementById('connection-settings-card').style.display = canSeeSettings ? '' : 'none';
         if (canSeeSettings) {
           loadSettings();

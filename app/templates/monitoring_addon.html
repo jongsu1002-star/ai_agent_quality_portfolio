@@ -84,10 +84,10 @@
     #prometheus-link, #grafana-link { overflow-wrap: anywhere; }
     #app-header { position: sticky; top: 0; z-index: 60; }
   </style>
-  <link rel="stylesheet" href="/static/ui-system.css" />
-  <script src="/static/ui-theme.js" defer></script>
+  <link rel="stylesheet" href="/static/ui-system.css?v=5" />
+  <script src="/static/ui-theme.js?v=2" defer></script>
 </head>
-<body class="app-page">
+<body class="app-page workspace-page addon-page">
   <div class="card" id="app-header">
     <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
       <div class="header-title-group">
@@ -101,25 +101,29 @@
             <option value="forest">포레스트</option>
             <option value="violet">바이올렛</option>
             <option value="sunset">선셋</option>
+            <option value="pink">로즈 핑크</option>
           </select>
         </label>
         <span id="my-ip-display" class="muted" style="display:none;" title="접근 허용 IP 등록 시: 같은 LAN/사무실에서 접속하면 내부 IP를, 인터넷을 통해 공개 배포된 곳에 접속하면 공인 IP를 등록하세요"></span>
         <button type="button" id="logout-btn" class="logout-btn" onclick="logout()" style="display:none;">로그아웃</button>
       </div>
     </div>
-    <p>
+    <p class="addon-context">
       이 페이지는 기존 QA 품질관리·운영 모니터링 화면(<a href="/">메인 대시보드</a>)과 완전히 별도로
       동작합니다 - 여기서 무엇을 하든 기존 화면/API에는 영향을 주지 않습니다.
     </p>
     <div class="tabs" role="navigation" aria-label="주요 메뉴">
+      <span class="nav-section-label">핵심 업무</span>
       <button type="button" class="tab-btn" onclick="window.location.href='/#settings'">설정</button>
       <button type="button" class="tab-btn" onclick="window.location.href='/#run'">실행</button>
       <button type="button" class="tab-btn" onclick="window.location.href='/#dashboard'">대시보드</button>
       <button type="button" class="tab-btn" onclick="window.location.href='/#monitoring'">모니터링</button>
+      <span class="nav-section-label">품질·협업</span>
       <button type="button" class="tab-btn active">모니터링 애드온</button>
       <button type="button" class="tab-btn" onclick="window.location.href='/#board'">게시판</button>
       <button type="button" class="tab-btn" onclick="window.location.href='/#voc-analysis'">VOC 분석</button>
       <button type="button" class="tab-btn" onclick="window.location.href='/#voc-results'">VOC 분석 결과</button>
+      <span class="nav-section-label admin-nav-label" id="admin-nav-label-addon">관리</span>
       <button type="button" class="tab-btn" id="users-nav-btn" onclick="window.location.href='/#users'" style="display:none;">사용자 관리</button>
       <button type="button" class="tab-btn" id="error-log-nav-btn" onclick="window.location.href='/#error-log'" style="display:none;">오류 로그</button>
       <button type="button" class="tab-btn" id="ip-allowlist-nav-btn" onclick="window.location.href='/#ip-allowlist'" style="display:none;">접근 허용 IP</button>
@@ -299,6 +303,7 @@
         document.getElementById('users-nav-btn').style.display = data.is_admin ? '' : 'none';
         document.getElementById('error-log-nav-btn').style.display = data.is_admin ? '' : 'none';
         document.getElementById('ip-allowlist-nav-btn').style.display = data.is_admin ? '' : 'none';
+        document.getElementById('admin-nav-label-addon').style.display = data.is_admin ? '' : 'none';
       } catch (err) {
         // 조회 실패해도 화면 자체는 계속 써야 하므로 조용히 무시
       }

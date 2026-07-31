@@ -40,6 +40,13 @@
   --ui-brand-rgb: 232 93 63;
   --ui-accent: #f59e42;
 }
+[data-ui-theme="pink"] {
+  --ui-brand: #db2777;
+  --ui-brand-dark: #be185d;
+  --ui-brand-soft: #fce7f3;
+  --ui-brand-rgb: 219 39 119;
+  --ui-accent: #f472b6;
+}
 
 html { color-scheme: light; scroll-behavior: smooth; }
 body {
@@ -52,6 +59,7 @@ body {
   letter-spacing: -.012em;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
 }
 
 button, input, select, textarea { font: inherit; }
@@ -68,6 +76,8 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   border: 1px solid var(--ui-line);
   border-radius: var(--ui-radius) !important;
   box-shadow: var(--ui-shadow) !important;
+  min-width: 0;
+  max-width: 100%;
 }
 .app-page .card:hover { border-color: #d7e0ed; }
 .app-page .title {
@@ -221,6 +231,16 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
     grid-column: 2;
     min-width: 0;
   }
+  .addon-page > :not(#app-header):not(script) {
+    grid-column: 2;
+    min-width: 0;
+  }
+  .addon-page .addon-context {
+    margin: 12px 0 0;
+    color: var(--ui-text-soft);
+    font-size: .74rem;
+    line-height: 1.5;
+  }
   .workspace-page #tab-run.active {
     display: grid;
     grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr);
@@ -285,6 +305,87 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   border: 1px solid var(--ui-line);
   border-radius: 12px;
   background: var(--ui-surface);
+}
+.app-page .table-view {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.app-page .table-view table {
+  width: 100%;
+  min-width: max-content;
+}
+.app-page .table-view th,
+.app-page .table-view td {
+  padding-inline: clamp(.55rem, 1.2vw, .9rem) !important;
+}
+.app-page .table-view .table-view-wrap-cell {
+  min-width: 12rem;
+  max-width: 28rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.app-page .list-toolbar,
+.app-page .list-pagination,
+.app-page .board-actions,
+.app-page .doc-tabs {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.board-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px 16px;
+  margin-top: 12px;
+  max-width: 100%;
+}
+.board-filter-group,
+.board-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.board-toolbar-actions { margin-left: 4px; }
+.board-toolbar .board-cat-btn,
+.board-toolbar-actions button {
+  margin: 0 !important;
+}
+.inline-field-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  margin-top: 6px;
+}
+.inline-field-action input,
+.inline-field-action button {
+  margin: 0 !important;
+}
+.app-page .tab-panel,
+.app-page .tab-panel > *,
+.app-page .grid > *,
+.app-page .chart-grid > *,
+.app-page .field-row > * {
+  min-width: 0;
+}
+.app-page pre,
+.app-page .doc-viewer,
+.app-page .chart-grid,
+.app-page .grid,
+.app-page .field-row {
+  max-width: 100%;
+}
+.app-page pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .app-page th {
   background: var(--ui-surface-soft);
@@ -515,8 +616,13 @@ button, a, input, select, textarea { transition: border-color .18s ease, box-sha
   .header-title-group { flex-basis: 100%; }
   #app-header .header-subtitle,
   #app-header #my-ip-display { display: none !important; }
+  .addon-page .addon-context { display: none; }
   .ui-theme-control > span { display: none; }
   .ui-theme-control select { min-width: 82px; }
+  .board-toolbar { align-items: flex-start; }
+  .board-toolbar-actions { margin-left: 0; }
+  .inline-field-action { grid-template-columns: minmax(0, 1fr); }
+  .inline-field-action button { justify-self: start; }
   .app-page .grid,
   .app-page .chart-grid,
   .app-page .grafana-embed-grid,

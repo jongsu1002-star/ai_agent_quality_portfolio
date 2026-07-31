@@ -84,8 +84,8 @@
     #prometheus-link, #grafana-link { overflow-wrap: anywhere; }
     #app-header { position: sticky; top: 0; z-index: 60; }
   </style>
-  <link rel="stylesheet" href="/static/ui-system.css?v=5" />
-  <script src="/static/ui-theme.js?v=2" defer></script>
+  <link rel="stylesheet" href="/static/ui-system.css?v=14" />
+  <script src="/static/ui-theme.js?v=3" defer></script>
 </head>
 <body class="app-page workspace-page addon-page">
   <div class="card" id="app-header">
@@ -295,7 +295,11 @@
         const ipDisplay = document.getElementById('my-ip-display');
         if (data.client_ip) {
           const publicIpText = data.public_ip ? data.public_ip : '확인 불가';
-          ipDisplay.textContent = `내부 IP: ${data.client_ip} · 공인 IP: ${publicIpText}`;
+          ipDisplay.replaceChildren(
+            document.createTextNode(`내부 IP: ${data.client_ip}`),
+            document.createElement("br"),
+            document.createTextNode(`공인 IP: ${publicIpText}`),
+          );
           ipDisplay.style.display = '';
         } else {
           ipDisplay.style.display = 'none';

@@ -13,6 +13,7 @@
 
   function applyTheme(theme) {
     const next = allowedThemes.has(theme) ? theme : "ocean";
+    document.documentElement.classList.add("ui-theme-switching");
     document.documentElement.dataset.uiTheme = next;
     document.querySelectorAll("[data-ui-theme-select]").forEach((select) => {
       select.value = next;
@@ -20,6 +21,9 @@
     try {
       localStorage.setItem(storageKey, next);
     } catch (_) {}
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => document.documentElement.classList.remove("ui-theme-switching"));
+    });
   }
 
   applyTheme(readTheme());

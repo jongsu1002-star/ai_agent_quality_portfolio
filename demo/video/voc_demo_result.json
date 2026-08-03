@@ -1,0 +1,53 @@
+{
+  "id": "voc_demo_20260803_prepared",
+  "created_at": "2026-08-03T14:10:00",
+  "created_by": "shared",
+  "params": {
+    "use_board": false,
+    "use_jira": false,
+    "jira_jql": null,
+    "use_excel": true,
+    "excel_path": "demo/video/voc_samples.json",
+    "focus_instruction": "반복적으로 발생하는 불만 유형과 우선 개선 과제를 요약해 주세요.",
+    "item_limit": 4
+  },
+  "result": {
+    "summary": "사전 생성된 합성 데모 결과입니다. 네 건의 VOC에서는 상담 지연, 환불 안내 불일치, 제출 서류 누락, 답변 일관성 문제가 확인됐습니다. 우선 개선 과제는 안내 기준 통합과 답변 검증 강화입니다.",
+    "top_issues": [
+      {
+        "theme": "안내 정확성과 일관성",
+        "frequency": 3,
+        "severity": "high",
+        "suggestion": "환불 및 제출 서류 기준을 단일 지식 소스로 통합하고 배포 전 회귀 테스트를 수행합니다.",
+        "example_ids": ["excel-2", "excel-3", "excel-4"]
+      },
+      {
+        "theme": "상담 대기시간",
+        "frequency": 1,
+        "severity": "medium",
+        "suggestion": "시간대별 대기시간을 모니터링하고 혼잡 시간에 상담 인력을 탄력 배치합니다.",
+        "example_ids": ["excel-1"]
+      }
+    ],
+    "raw_source_counts": {
+      "board": 0,
+      "jira": 0,
+      "excel": 4,
+      "total_available": 4,
+      "total_considered": 4
+    },
+    "judge": {
+      "verdict": "SKIPPED",
+      "criteria": {
+        "relevance": true,
+        "root_cause_addressing": true,
+        "feasibility": true,
+        "measurability": false,
+        "example_ids_valid": true
+      },
+      "reasoning": "외부 LLM 크레딧 제한으로 독립 Judge를 실행하지 않은 사전 생성 합성 데모 결과입니다.",
+      "invalid_example_ids": [],
+      "cross_model": false
+    }
+  }
+}

@@ -22,6 +22,7 @@ MONITORING_ADDON_HTML = REPO_ROOT / "app" / "templates" / "monitoring_addon.html
 JS_REGRESSION_SCRIPT = REPO_ROOT / "tests" / "js" / "voc_polling_regression.js"
 JS_XVAL_REGRESSION_SCRIPT = REPO_ROOT / "tests" / "js" / "voc_cross_validation_regression.js"
 JS_STEP_CHECKLIST_SCRIPT = REPO_ROOT / "tests" / "js" / "step_checklist_regression.js"
+JS_DEMO_MODE_SCRIPT = REPO_ROOT / "tests" / "js" / "demo_mode_regression.js"
 
 
 def _node_available() -> bool:
@@ -77,6 +78,28 @@ def test_step_checklist_js_regression_suite_passes():
         f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
     )
     assert "0 failed" in result.stdout
+
+
+@pytest.mark.skipif(not _node_available(), reason="node 실행 파일을 찾을 수 없어 JS 회귀 테스트를 건너뜁니다")
+def test_demo_mode_js_regression_suite_passes():
+    """데모 모드의 opt-in 활성화, 안전 정지, 단계 이동, 마스킹, 페이지 복구를 검증."""
+    result = subprocess.run(
+        ["node", str(JS_DEMO_MODE_SCRIPT)],
+        cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    assert result.returncode == 0, (
+        f"demo_mode_regression.js 실패(exit={result.returncode})\n"
+        f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+    )
+    assert "0 failed" in result.stdout
+
+
+def test_demo_mode_assets_are_loaded_by_main_and_addon_pages():
+    """메인과 애드온 사이를 이동해도 같은 데모 스타일·동작이 이어져야 한다."""
+    for html_path in (INDEX_HTML, MONITORING_ADDON_HTML):
+        html = html_path.read_text(encoding="utf-8")
+        assert '/static/demo-mode.css?v=1' in html
+        assert '/static/demo-mode.js?v=1' in html
 
 
 def test_k6_trigger_button_wired_to_progress_and_step_checklist():

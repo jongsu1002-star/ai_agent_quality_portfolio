@@ -1,0 +1,89 @@
+body.qa-demo-active { padding-bottom: 10.5rem; }
+
+.qa-demo-highlight {
+  position: relative;
+  z-index: 10001 !important;
+  border-radius: 10px;
+  outline: 4px solid #ff4f87 !important;
+  outline-offset: 5px;
+  box-shadow: 0 0 0 9px rgba(255, 79, 135, 0.2), 0 0 28px rgba(255, 79, 135, 0.72) !important;
+  animation: qa-demo-pulse 1.25s ease-in-out infinite;
+}
+
+.qa-demo-caption {
+  position: fixed;
+  left: 50%;
+  bottom: 1rem;
+  z-index: 10003;
+  width: min(58rem, calc(100vw - 2rem));
+  transform: translateX(-50%);
+  padding: 1rem 14rem 1rem 1.2rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 14px;
+  background: rgba(9, 18, 32, 0.95);
+  color: #fff;
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(12px);
+}
+
+.qa-demo-caption strong { display: block; margin-bottom: 0.25rem; color: #ffb7cc; font-size: 1rem; }
+.qa-demo-caption p { margin: 0; line-height: 1.55; font-size: 0.94rem; }
+.qa-demo-missing { color: #ffd166; font-size: 0.8rem; margin-top: 0.3rem; }
+
+.qa-demo-controls {
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  transform: translateY(-50%);
+}
+
+.qa-demo-controls button {
+  min-width: 2.3rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.qa-demo-controls button:hover { background: rgba(255, 79, 135, 0.36); }
+.qa-demo-step-count { min-width: 3.8rem; text-align: center; font-variant-numeric: tabular-nums; }
+
+.qa-demo-mask {
+  filter: blur(11px) !important;
+  user-select: none !important;
+  pointer-events: none !important;
+}
+
+.qa-demo-ripple {
+  position: fixed;
+  z-index: 10005;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  border: 3px solid #ff4f87;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: qa-demo-ripple 0.65s ease-out forwards;
+}
+
+@keyframes qa-demo-pulse {
+  0%, 100% { box-shadow: 0 0 0 7px rgba(255, 79, 135, 0.16), 0 0 22px rgba(255, 79, 135, 0.55); }
+  50% { box-shadow: 0 0 0 13px rgba(255, 79, 135, 0.05), 0 0 36px rgba(255, 79, 135, 0.82); }
+}
+
+@keyframes qa-demo-ripple {
+  from { opacity: 1; transform: scale(0.5); }
+  to { opacity: 0; transform: scale(4); }
+}
+
+@media (max-width: 768px) {
+  .qa-demo-caption { padding: 0.85rem 1rem 4.2rem; }
+  .qa-demo-controls { top: auto; right: 1rem; bottom: 0.7rem; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qa-demo-highlight, .qa-demo-ripple { animation: none; }
+}

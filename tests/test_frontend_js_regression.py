@@ -102,6 +102,16 @@ def test_demo_mode_assets_are_loaded_by_main_and_addon_pages():
         assert '/static/demo-mode.js?v=1' in html
 
 
+def test_demo_mode_has_stable_ids_for_every_recorded_menu():
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    for target in (
+        "tab-settings", "tab-run", "tab-dashboard", "tab-monitoring",
+        "monitoring-addon-nav-btn", "tab-board", "tab-voc-analysis", "tab-voc-results",
+        "users-tab-btn", "error-log-tab-btn", "ip-allowlist-tab-btn",
+    ):
+        assert f'id="{target}"' in html
+
+
 def test_k6_trigger_button_wired_to_progress_and_step_checklist():
     """k6 성능테스트 실행도 다른 실행 버튼들과 동일하게 진행률 바 + 단계 체크리스트를
     보여줘야 함(monitoring_addon.html은 index.html과 별도 문서라 컴포넌트를 자체

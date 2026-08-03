@@ -10,18 +10,21 @@
     '#jira-email', '#jira-token', '#my-ip-display'
   ];
   const steps = [
-    { target: '.tabs', title: 'AI Agent 품질관리 플랫폼', description: '설정, 품질검증, 분석, 운영 모니터링을 하나의 흐름으로 통합했습니다.', duration: 9000 },
-    { target: '#connection-settings-card', title: '연결 설정', description: 'OpenAI·Anthropic·사내 모델과 Jira·협업 웹훅을 연결합니다. 민감정보는 데모 모드에서 자동으로 가립니다.', duration: 11000 },
-    { target: '#file', title: '정답 기준 데이터셋', description: '정답, 카테고리, 필수 키워드를 담은 합성 데이터셋을 업로드합니다.', duration: 9000, action: 'upload', pauseForAction: true },
-    { target: '#file-testcase', title: '사용자 발화 테스트 케이스', description: '기준값과 질문을 분리해 같은 기준으로 다양한 표현을 반복 검증합니다.', duration: 9000, action: 'upload', pauseForAction: true },
-    { target: '#pipeline-run-card', title: 'QA 파이프라인 실행', description: '검색품질, 근거성, LLM 판정을 실행하고 단계별 진행률을 확인합니다.', duration: 15000, action: 'execute', pauseForAction: true },
-    { target: '#tab-dashboard', title: '품질 대시보드', description: '통과율, 카테고리별 실패, 검색품질과 결함보고서를 차트와 표로 확인합니다.', duration: 17000 },
-    { target: '#run-history', title: '보고서와 실행 이력', description: 'CSV·마크다운 결과와 실행 조건을 남겨 회귀검증과 조치 추적에 활용합니다.', duration: 12000 },
-    { target: '#tab-voc-analysis', title: 'VOC 분석', description: '합성 VOC 파일을 입력해 반복 불만과 우선 개선 과제를 분석합니다.', duration: 15000, action: 'upload', pauseForAction: true },
-    { target: '#tab-voc-results', title: 'VOC 대체 결과', description: '외부 API 제한에 대비한 사전 생성 합성 데모 결과이며 독립 Judge는 SKIPPED로 표시합니다.', duration: 16000 },
-    { target: '#tab-monitoring', title: '운영 모니터링', description: '요청량, 오류율, 응답시간과 외부 서비스 Uptime을 함께 확인합니다.', duration: 15000 },
-    { target: '#k6-target-url', title: 'k6 성능시험', description: '로컬 /health를 1 VU·10초로 실행하고 p95 응답시간과 이력을 확인합니다.', duration: 15000, action: 'execute', pauseForAction: true },
-    { target: '.admin-nav-label', title: '운영 안전성과 마무리', description: '권한 관리, 오류 로그, 접근 허용 IP까지 실제 운영을 고려한 품질관리 시스템입니다.', duration: 11000 }
+    { target: '#tab-settings', title: '설정과 Docker 실행 환경', description: '연결 모드와 외부 연동을 설정하며 촬영 중 민감정보는 자동으로 가립니다.', duration: 12000 },
+    { target: '#tab-run', title: '합성 데이터 업로드', description: '정답 데이터셋과 사용자 발화 테스트 케이스를 실제로 업로드합니다.', duration: 18000, action: 'upload', pauseForAction: true },
+    { target: '#pipeline-run-card', title: 'QA 파이프라인 실행', description: '검색품질 중심 평가를 실행하고 단계별 진행률을 확인합니다.', duration: 25000, action: 'execute', pauseForAction: true },
+    { target: '#tab-dashboard', title: '품질 대시보드와 보고서', description: '통과율, 실패 분포, 검색품질, 실행 이력과 결함보고서를 확인합니다.', duration: 20000 },
+    { target: '#tab-monitoring', title: '운영 모니터링', description: '요청량, 오류율, 응답시간과 외부 서비스 Uptime을 확인합니다.', duration: 15000 },
+    { target: '#monitoring-addon-nav-btn', title: '모니터링 애드온', description: 'Docker의 Prometheus·Grafana와 k6 성능시험 화면으로 이동합니다.', duration: 10000 },
+    { target: '#k6-target-url', title: 'k6 성능시험', description: '로컬 /health를 1 VU·10초로 실제 실행하고 p95와 이력을 확인합니다.', duration: 25000, action: 'execute', pauseForAction: true },
+    { target: '#tab-board', title: '게시판', description: '목록, 검색, 작성 화면과 VOC 데이터 수집 지점을 확인합니다.', duration: 12000 },
+    { target: '#tab-voc-analysis', title: 'VOC 합성 데이터 업로드', description: '합성 VOC를 실제 업로드하고 분석 관점을 입력합니다.', duration: 18000, action: 'upload', pauseForAction: true },
+    { target: '#voc-run-btn', title: 'VOC Improved 5단계 테스트', description: '의도 분류부터 독립 Judge까지 단계별 진행을 재현하며 외부 LLM은 호출하지 않습니다.', duration: 30000, action: 'execute', pauseForAction: true },
+    { target: '#tab-voc-results', title: 'VOC 결과와 품질 대시보드', description: '사전 생성 합성 결과와 독립 Judge SKIPPED, 결과 이력을 확인합니다.', duration: 18000 },
+    { target: '#users-tab-btn', title: '사용자 관리', description: '승인, 역할, 사용 상태를 관리하며 촬영에서는 실제 상태를 변경하지 않습니다.', duration: 10000 },
+    { target: '#error-log-tab-btn', title: '오류 로그', description: '내부 오류 원인과 실행 실패를 관리자 화면에서 추적합니다.', duration: 10000 },
+    { target: '#ip-allowlist-tab-btn', title: '접근 허용 IP', description: 'LAN과 공개 배포 환경의 접근 범위를 안전하게 제어합니다.', duration: 10000 },
+    { target: '.tabs', title: '통합 품질 운영 플랫폼', description: 'QA, VOC, 보고서, 성능시험과 운영 안전성을 하나의 Docker 스택에서 관리합니다.', duration: 10000 }
   ];
 
   let currentIndex = Math.max(0, Math.min(steps.length - 1, Number(sessionStorage.getItem(STEP_KEY) || 0)));
@@ -40,6 +43,11 @@
   function clearHighlight() {
     if (highlighted) highlighted.classList.remove('qa-demo-highlight');
     highlighted = null;
+  }
+
+  function isTargetAvailable(target) {
+    if (!target) return false;
+    return target.offsetParent !== null || (typeof target.getClientRects === 'function' && target.getClientRects().length > 0);
   }
 
   function ensureOverlay() {
@@ -78,9 +86,12 @@
     caption.querySelector('[data-demo-count]').textContent = `${currentIndex + 1} / ${steps.length}`;
     caption.querySelector('[data-demo-play]').textContent = playing ? 'Ⅱ' : '▶';
     const missing = caption.querySelector('[data-demo-missing]');
-    const target = document.querySelector(step.target);
+    const candidate = document.querySelector(step.target);
+    const target = isTargetAvailable(candidate) ? candidate : null;
     missing.hidden = Boolean(target);
-    missing.textContent = target ? '' : '대상 화면으로 이동한 뒤 다음 버튼을 눌러주세요.';
+    missing.textContent = target ? '' : (step.target.includes('-tab-btn')
+      ? '관리자 세션이 필요합니다. 로그인 상태를 확인해 주세요.'
+      : '대상 화면으로 이동한 뒤 다음 버튼을 눌러주세요.');
     if (target) {
       target.classList.add('qa-demo-highlight');
       highlighted = target;
@@ -162,7 +173,7 @@
   }
 
   window.QADemoMode = {
-    enabled, steps, maskSelectors, start, stop, next, previous, togglePlayback, goTo, withDemoQuery,
+    enabled, steps, maskSelectors, start, stop, next, previous, togglePlayback, goTo, withDemoQuery, isTargetAvailable,
     get currentIndex() { return currentIndex; }
   };
 

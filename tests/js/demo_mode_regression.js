@@ -63,10 +63,16 @@ check('demo=1이 없으면 공개 API가 비활성 상태다', () => {
   assert.strictEqual(demo.enabled, false);
 });
 
-check('demo=1이면 12개 단계가 활성화된다', () => {
+check('demo=1이면 전체 메뉴 15개 단계가 활성화된다', () => {
   const demo = loadDemo('?demo=1');
   assert.strictEqual(demo.enabled, true);
-  assert.strictEqual(demo.steps.length, 12);
+  assert.strictEqual(demo.steps.length, 15);
+  const targets = demo.steps.map((step) => step.target);
+  for (const target of [
+    '#tab-settings', '#tab-run', '#tab-dashboard', '#tab-monitoring',
+    '#monitoring-addon-nav-btn', '#tab-board', '#tab-voc-analysis', '#tab-voc-results',
+    '#users-tab-btn', '#error-log-tab-btn', '#ip-allowlist-tab-btn',
+  ]) assert.ok(targets.includes(target), `${target} 단계가 필요합니다`);
 });
 
 check('외부 동작 단계는 자동 진행하지 않는다', () => {
@@ -89,9 +95,9 @@ check('이전과 다음은 단계 범위를 벗어나지 않는다', () => {
   demo.previous();
   assert.strictEqual(demo.currentIndex, 0);
   demo.goTo(99);
-  assert.strictEqual(demo.currentIndex, 11);
+  assert.strictEqual(demo.currentIndex, 14);
   demo.next();
-  assert.strictEqual(demo.currentIndex, 11);
+  assert.strictEqual(demo.currentIndex, 14);
 });
 
 check('저장된 단계가 새 페이지에서 복원된다', () => {
@@ -110,6 +116,13 @@ check('데모 이동은 실제 경로와 해시를 구분해 보존한다', () =
   const demo = loadDemo('?demo=1');
   assert.strictEqual(demo.withDemoQuery('/monitoring-addon'), '/monitoring-addon?demo=1');
   assert.strictEqual(demo.withDemoQuery('/#dashboard'), '/?demo=1#dashboard');
+});
+
+check('숨겨진 관리자 메뉴는 촬영 가능한 대상으로 취급하지 않는다', () => {
+  const demo = loadDemo('?demo=1');
+  assert.strictEqual(demo.isTargetAvailable(null), false);
+  assert.strictEqual(demo.isTargetAvailable({ offsetParent: null, getClientRects() { return []; } }), false);
+  assert.strictEqual(demo.isTargetAvailable({ offsetParent: {}, getClientRects() { return [{}]; } }), true);
 });
 
 console.log(`\n${passed} passed, ${failed} failed (demo_mode_regression.js)`);

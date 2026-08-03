@@ -69,6 +69,16 @@ body.qa-demo-active { padding-bottom: 10.5rem; }
   animation: qa-demo-ripple 0.65s ease-out forwards;
 }
 
+.qa-demo-fixture-banner {
+  margin-bottom: 0.75rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 0.9rem;
+}
+
 @keyframes qa-demo-pulse {
   0%, 100% { box-shadow: 0 0 0 7px rgba(255, 79, 135, 0.16), 0 0 22px rgba(255, 79, 135, 0.55); }
   50% { box-shadow: 0 0 0 13px rgba(255, 79, 135, 0.05), 0 0 36px rgba(255, 79, 135, 0.82); }

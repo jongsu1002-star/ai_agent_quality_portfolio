@@ -133,6 +133,15 @@ def test_voc_run_button_wired_to_run_function():
     assert 'onclick="runVocAnalysis()"' in html
 
 
+def test_voc_improved_demo_is_transparent_and_production_path_remains_wired():
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert "function runSyntheticVocImprovedDemo()" in html
+    assert "window.QADemoMode && window.QADemoMode.enabled" in html
+    assert "촬영용 합성 실행" in html
+    assert "LLM Judge: SKIPPED" in html
+    assert "fetch('/api/voc-analysis/run-async'" in html
+
+
 def test_voc_cancel_button_wired_to_cancel_function():
     html = INDEX_HTML.read_text(encoding="utf-8")
     assert 'id="voc-cancel-btn"' in html

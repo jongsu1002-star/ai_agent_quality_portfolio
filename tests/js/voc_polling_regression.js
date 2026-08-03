@@ -66,7 +66,7 @@ function makeElement() {
 }
 
 // 매 체크마다 완전히 새로운 sandbox를 만들어 이전 체크의 타이머/상태가 섞이지 않게 한다.
-function buildSandbox({ elementOverrides = {}, fetchImpl } = {}) {
+function buildSandbox({ elementOverrides = {}, fetchImpl, demoEnabled = false } = {}) {
   const elements = {};
   const ids = [
     'voc-run-btn', 'voc-cancel-btn', 'voc-result',
@@ -78,10 +78,11 @@ function buildSandbox({ elementOverrides = {}, fetchImpl } = {}) {
   const storage = {};
   const pendingTimers = []; // { id, fn, ms }
   let nextTimerId = 1;
-  const calls = { showToast: [], renderVocResult: [], loadVocHistory: 0, escapeHtmlCalls: 0 };
+  const calls = { showToast: [], renderVocResult: [], loadVocHistory: 0, escapeHtmlCalls: 0, stageLists: [] };
 
   const sandbox = {
     console,
+    window: { QADemoMode: { enabled: demoEnabled } },
     document: { getElementById: (id) => elements[id] || makeElement() },
     sessionStorage: {
       getItem: (k) => (Object.prototype.hasOwnProperty.call(storage, k) ? storage[k] : null),
@@ -96,7 +97,10 @@ function buildSandbox({ elementOverrides = {}, fetchImpl } = {}) {
     // renderStepChecklist는 START_MARK 이전(escapeHtml 근처)에 정의돼 있어 이 슬라이스
     // 밖이다 - 이 파일의 체크들은 단계 이름 자체가 아니라 폴링/재시도/버튼 상태를
     // 검증하므로, 스타일 없이 아무 문자열이나 반환하는 최소 스텁으로 충분하다.
-    renderStepChecklist: () => '',
+    renderStepChecklist: (steps, activeIndex) => {
+      calls.stageLists.push({ steps: Array.from(steps), activeIndex });
+      return `<div data-stage-index="${activeIndex}"></div>`;
+    },
     showToast: (msg, type) => { calls.showToast.push({ msg, type }); },
     _renderVocResult: (record) => { calls.renderVocResult.push(record); },
     loadVocHistory: () => { calls.loadVocHistory += 1; },
@@ -118,6 +122,23 @@ function buildSandbox({ elementOverrides = {}, fetchImpl } = {}) {
 
   return { context, elements, storage, pendingTimers, calls, flushTimers };
 }
+
+check('데모 모드 VOC Improved는 외부 API 없이 5단계와 SKIPPED 결과를 표시함', async () => {
+  let fetchCount = 0;
+  const { context, elements, calls, flushTimers } = buildSandbox({
+    demoEnabled: true,
+    fetchImpl: async () => { fetchCount += 1; throw new Error('데모 모드는 외부 API를 호출하면 안 됨'); },
+  });
+  await context.runVocAnalysis();
+  await flushTimers(10);
+  assert.strictEqual(fetchCount, 0);
+  assert.deepStrictEqual(Array.from(calls.stageLists[0].steps), [
+    '의도 분류 중', '개선안 생성 중', '자가 비평·교정 중', '내부 재점검 중', '독립 Judge 확인 중',
+  ]);
+  assert.strictEqual(calls.renderVocResult[0].result.judge.verdict, 'SKIPPED');
+  assert.match(elements['voc-result'].innerHTML, /촬영용 합성 실행/);
+  assert.match(elements['voc-result'].innerHTML, /LLM Judge: SKIPPED/);
+});
 
 // ── 1. 상태 API 500 처리: 백오프로 재시도하다가 버튼이 복구되는지 ──────────────
 check('상태 API가 500을 반환하면 지수 백오프로 재시도하다 최대 실패 횟수에서 버튼 복구', async () => {

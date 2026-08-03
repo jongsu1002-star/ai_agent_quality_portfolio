@@ -27,7 +27,7 @@
 - Create: `demo/video/voc_samples.json`
 
 **Interfaces:**
-- Consumes: dataset schema from `qa_agent/models.py::GoldenCase.from_dict`, testcase schema from `qa_agent/excel_io.py::load_testcase_file`, and VOC schema from `qa_agent/excel_io.py::load_voc_json_file`
+- Consumes: dataset schema from `qa_agent/excel_io.py::load_dataset`, testcase schema from `qa_agent/excel_io.py::load_testcase`, and VOC schema from `qa_agent/excel_io.py::load_voc_json`
 - Produces: three upload-ready JSON arrays used by the browser rehearsal
 
 - [ ] **Step 1: Create the QA reference dataset**
@@ -93,9 +93,9 @@ Create `demo/video/voc_samples.json` with exactly this content:
 Run:
 
 ```powershell
-Get-Content -Raw demo/video/qa_dataset.json | ConvertFrom-Json | Out-Null
-Get-Content -Raw demo/video/qa_testcases.json | ConvertFrom-Json | Out-Null
-Get-Content -Raw demo/video/voc_samples.json | ConvertFrom-Json | Out-Null
+Get-Content -Raw -Encoding UTF8 demo/video/qa_dataset.json | ConvertFrom-Json | Out-Null
+Get-Content -Raw -Encoding UTF8 demo/video/qa_testcases.json | ConvertFrom-Json | Out-Null
+Get-Content -Raw -Encoding UTF8 demo/video/voc_samples.json | ConvertFrom-Json | Out-Null
 python -m pytest tests/test_excel_io.py tests/test_voc_analysis_api.py -q
 ```
 

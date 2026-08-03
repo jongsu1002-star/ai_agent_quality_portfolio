@@ -1,0 +1,26 @@
+[
+  {
+    "id": "TC-001",
+    "category": "ACC",
+    "question": "수강료는 얼마인가요?",
+    "golden_answer": "수강료는 월 10만원입니다.",
+    "existing_answer": "수강료는 월 10만원입니다.",
+    "required_keywords": ["10만원"]
+  },
+  {
+    "id": "TC-002",
+    "category": "REG",
+    "question": "환불은 언제까지 가능한가요?",
+    "golden_answer": "수업 시작 7일 전까지 전액 환불할 수 있습니다.",
+    "existing_answer": "수업 시작 7일 전까지 전액 환불할 수 있습니다.",
+    "required_keywords": ["7일 전", "전액 환불"]
+  },
+  {
+    "id": "TC-003",
+    "category": "RPT",
+    "question": "필요한 제출 서류를 알려주세요.",
+    "golden_answer": "신청서와 신분증 사본을 제출해야 합니다.",
+    "existing_answer": "신청서와 신분증 사본을 제출해야 합니다.",
+    "required_keywords": ["신청서", "신분증 사본"]
+  }
+]

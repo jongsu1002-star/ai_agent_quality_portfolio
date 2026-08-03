@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: "ai-agent-monitoring-addon"
+    metrics_path: "/metrics-addon"
+    static_configs:
+      # The recording stack runs the app in the same Compose network.
+      - targets: ["qa-platform:8000"]

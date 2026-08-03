@@ -55,13 +55,14 @@ services:
       # 네트워크(서비스명 prometheus:9090)로 접근하므로 이 바인딩 변경과 무관하게 계속 동작함.
       - "127.0.0.1:9090:9090"
     volumes:
-      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/prometheus/prometheus.docker.yml:/etc/prometheus/prometheus.yml:ro
       # TSDB(수집된 지표 데이터) 영속화 - 이게 없으면(이전 상태) 컨테이너를 재생성할 때마다
       # (이미지 업데이트, docker compose up --force-recreate 등) 그동안 쌓인 지표 이력이
       # 통째로 사라짐. 네임드 볼륨이라 qa-platform-data와 같은 이유로 재시작에도 유지됨.
       - prometheus-data:/prometheus
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    depends_on:
+      qa-platform:
+        condition: service_healthy
     # --web.cors.origin: /monitoring-addon 페이지가 자체 차트를 그리려고 브라우저에서 직접
     # Prometheus HTTP API(/api/v1/query_range)를 fetch()하는데, 기본 상태로는 브라우저가
     # CORS로 그 응답을 막음 - 이 플래그로 허용해야 함(iframe 임베딩과 무관하게 fetch에는 항상 필요).

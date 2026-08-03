@@ -47,6 +47,7 @@ function loadDemo(search = '?demo=1', initialStorage = {}) {
     document,
     sessionStorage: storage(initialStorage),
     URLSearchParams,
+    URL,
     setTimeout() { return 1; },
     clearTimeout() {},
     console,
@@ -103,6 +104,12 @@ check('VOC 대체 단계는 사전 생성과 SKIPPED를 정직하게 표시한�
   const copy = demo.steps.map((step) => `${step.title} ${step.description}`).join(' ');
   assert.ok(copy.includes('사전 생성'));
   assert.ok(copy.includes('SKIPPED'));
+});
+
+check('데모 이동은 실제 경로와 해시를 구분해 보존한다', () => {
+  const demo = loadDemo('?demo=1');
+  assert.strictEqual(demo.withDemoQuery('/monitoring-addon'), '/monitoring-addon?demo=1');
+  assert.strictEqual(demo.withDemoQuery('/#dashboard'), '/?demo=1#dashboard');
 });
 
 console.log(`\n${passed} passed, ${failed} failed (demo_mode_regression.js)`);

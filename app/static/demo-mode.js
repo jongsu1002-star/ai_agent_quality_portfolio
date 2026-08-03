@@ -107,15 +107,22 @@
   function previous() { goTo(currentIndex - 1); }
   function togglePlayback() { playing = !playing; render(); }
 
+  function withDemoQuery(rawHref) {
+    const url = new URL(rawHref, window.location.href);
+    url.searchParams.set('demo', '1');
+    return `${url.pathname}${url.search}${url.hash}`;
+  }
+
   function preserveDemoNavigation() {
     document.querySelectorAll('a[href^="/"]').forEach((link) => {
-      const url = new URL(link.getAttribute('href'), window.location.href);
-      url.searchParams.set('demo', '1');
-      link.setAttribute('href', `${url.pathname}${url.search}${url.hash}`);
+      link.setAttribute('href', withDemoQuery(link.getAttribute('href')));
     });
     document.querySelectorAll('[onclick*="window.location.href"]').forEach((button) => {
       const value = button.getAttribute('onclick');
-      button.setAttribute('onclick', value.replace(/window\.location\.href='\/([^']*)'/, "window.location.href='/?demo=1#$1'"));
+      button.setAttribute('onclick', value.replace(
+        /window\.location\.href='([^']+)'/,
+        (_match, href) => `window.location.href='${withDemoQuery(href)}'`
+      ));
     });
   }
 
@@ -155,7 +162,7 @@
   }
 
   window.QADemoMode = {
-    enabled, steps, maskSelectors, start, stop, next, previous, togglePlayback, goTo,
+    enabled, steps, maskSelectors, start, stop, next, previous, togglePlayback, goTo, withDemoQuery,
     get currentIndex() { return currentIndex; }
   };
 

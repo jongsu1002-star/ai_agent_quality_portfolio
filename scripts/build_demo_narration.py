@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+import wave
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +21,28 @@ class Cue:
     start: float
     end: float
     text: str
+
+
+INTRO_CUES = (
+    Cue(
+        1001,
+        0.0,
+        7.0,
+        "합성 데이터 입력부터 QA와 VOC 분석, 운영 모니터링을 거쳐 AWS 서비스 배포까지 연결됩니다.",
+    ),
+    Cue(
+        1002,
+        7.0,
+        14.0,
+        "사용자와 운영자는 FastAPI 품질 플랫폼에서 QA, VOC, 케이식스를 실행하고 프로메테우스와 그라파나로 관측합니다.",
+    ),
+    Cue(
+        1003,
+        14.0,
+        24.0,
+        "등록과 업로드, 실제 QA, VOC Improved, 관측과 운영 안전, AWS 서비스까지 주요 기능을 순서대로 시연합니다.",
+    ),
+)
 
 
 def _seconds(value: str) -> float:
@@ -85,3 +109,75 @@ def slot_filter(duration: float, slot_duration: float) -> str:
         ]
     )
     return ",".join(filters)
+
+
+def build_manifest(cues: list[Cue], raw_dir: Path) -> list[dict[str, object]]:
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    return [
+        {
+            "index": cue.index,
+            "text": cue.text,
+            "wav_path": str((raw_dir / f"cue-{cue.index:03d}.wav").resolve()),
+        }
+        for cue in cues
+    ]
+
+
+def write_manifest(items: list[dict[str, object]], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(items, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def wave_duration(path: Path) -> float:
+    with wave.open(str(path), "rb") as source:
+        return source.getnframes() / source.getframerate()
+
+
+def sapi_command(
+    helper: Path,
+    manifest: Path,
+    voice: str = "Microsoft Heami Desktop",
+) -> list[str]:
+    return [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(helper.resolve()),
+        "-ManifestPath",
+        str(manifest.resolve()),
+        "-VoiceName",
+        voice,
+    ]
+
+
+def ffmpeg_slot_args(
+    ffmpeg: Path,
+    raw: Path,
+    output: Path,
+    *,
+    duration: float,
+    slot_duration: float,
+) -> list[str]:
+    return [
+        str(ffmpeg),
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(raw.resolve()),
+        "-af",
+        slot_filter(duration, slot_duration),
+        "-c:a",
+        "pcm_s16le",
+        "-ar",
+        "48000",
+        "-ac",
+        "1",
+        str(output.resolve()),
+    ]

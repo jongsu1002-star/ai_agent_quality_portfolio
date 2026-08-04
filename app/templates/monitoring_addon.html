@@ -430,9 +430,11 @@
 
       if (useUtterance && !utterance) {
         statusEl.innerHTML = '<p class="error-note">발화문 전송을 체크했으면 발화문 내용을 입력해주세요.</p>';
+        window.QADemoMode?.reportResult('발화문 내용을 입력해야 합니다.', 'error');
         return;
       }
 
+      window.QADemoMode?.reportProcess(`k6 부하 테스트 실행 중 · ${path} · ${vus} VU · ${duration}`, 'running');
       try {
         const response = await fetch('/api/monitoring-addon/k6/trigger', {
           method: 'POST',
@@ -441,7 +443,9 @@
         });
         const result = await response.json();
         if (!response.ok) {
-          statusEl.innerHTML = `<p class="error-note">실행 실패: ${escapeHtml(result.error || '알 수 없는 오류')}</p>`;
+          const errorMessage = result.error || '알 수 없는 오류';
+          statusEl.innerHTML = `<p class="error-note">실행 실패: ${escapeHtml(errorMessage)}</p>`;
+          window.QADemoMode?.reportResult(`k6 실행 실패 · ${errorMessage}`, 'error');
           return;
         }
         _setK6Progress(0);
@@ -449,6 +453,7 @@
         await pollK6TriggerStatus(); // 이 안에서 "running"이면 스스로 폴링 타이머를 시작함
       } catch (err) {
         statusEl.innerHTML = `<p class="error-note">실행 요청이 실패했습니다 (네트워크 오류): ${escapeHtml(err.message)}</p>`;
+        window.QADemoMode?.reportResult(`k6 실행 요청 실패 · ${err.message}`, 'error');
         _setK6Progress(null);
       }
     }
@@ -469,6 +474,7 @@
           const utteranceNote = data.utterance ? `, 발화문: "${escapeHtml(data.utterance)}"` : '';
           statusEl.innerHTML = `<p class="muted">실행 중... (${elapsed}초 경과, 대상: ${escapeHtml(data.target_url)}${escapeHtml(data.path || '')}, 동시사용자수: ${data.vus}, 지속시간: ${escapeHtml(data.duration)}${utteranceNote})</p>`
             + _renderStepChecklist(K6_STEP_LIST, 1);
+          window.QADemoMode?.reportProcess(`k6 실행 중 · ${elapsed}/${totalSeconds || '?'}초 · ${data.vus} VU`, 'running');
           return;
         }
         if (k6TriggerPollTimer) { clearInterval(k6TriggerPollTimer); k6TriggerPollTimer = null; }
@@ -476,12 +482,14 @@
           _setK6Progress(100);
           statusEl.innerHTML = `<p style="color:var(--status-good, #0ca30c);">실행 완료 (종료 코드 ${data.exit_code}) - 아래 "k6 최신 성능테스트 결과"와 이력에 반영됩니다.</p>`
             + _renderStepChecklist(K6_STEP_LIST, K6_STEP_LIST.length);
+          window.QADemoMode?.reportResult('k6 실행 완료 · p95와 실패율을 확인합니다.', 'success');
           await loadK6Latest();
           await loadK6Runs(1);
         } else if (data.status === 'error') {
           _setK6Progress(null);
           statusEl.innerHTML = `<p class="error-note">실행 중 오류: ${escapeHtml(data.error || '알 수 없는 오류')}</p>`
             + _renderStepChecklist(K6_STEP_LIST, 1, { failedIndex: 1 });
+          window.QADemoMode?.reportResult(`k6 실행 오류 · ${data.error || '알 수 없는 오류'}`, 'error');
         } else {
           // status === 'idle'이면 아직 한 번도 실행 안 한 초기 상태 - 진행률 바도 숨김
           _setK6Progress(null);
@@ -489,6 +497,7 @@
       } catch (err) {
         if (k6TriggerPollTimer) { clearInterval(k6TriggerPollTimer); k6TriggerPollTimer = null; }
         statusEl.innerHTML = `<p class="error-note">상태 확인 중 오류가 발생했습니다: ${escapeHtml(err.message)}</p>`;
+        window.QADemoMode?.reportResult(`k6 상태 확인 오류 · ${err.message}`, 'error');
         _setK6Progress(null);
       }
     }

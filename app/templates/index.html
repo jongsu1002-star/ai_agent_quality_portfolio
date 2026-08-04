@@ -861,6 +861,7 @@
     // 보여주고 있었으니, 성공에도 같은 수준의 눈에 띄는(그러나 alert처럼 막지는 않는)
     // 피드백을 준다.
     function showToast(message, type = 'success') {
+      window.QADemoMode?.reportResult(message, type);
       const container = document.getElementById('toast-container');
       const el = document.createElement('div');
       el.className = `toast toast-${type}`;

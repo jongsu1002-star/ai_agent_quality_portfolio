@@ -6,7 +6,7 @@ from scripts.remove_video_bookmarks import bookmark_filter, ffmpeg_command
 def test_bookmark_filter_only_masks_the_browser_bar_after_the_intro():
     assert bookmark_filter() == (
         "drawbox=x=0:y=88:w=1920:h=40:"
-        "color=0xF4F6F8:t=fill:enable='gte(t,24)'"
+        "color=0xF4F6F8:t=fill:enable='gte(t,24)*lt(t,308)'"
     )
 
 

@@ -10,7 +10,7 @@ from pathlib import Path
 def bookmark_filter() -> str:
     return (
         "drawbox=x=0:y=88:w=1920:h=40:"
-        "color=0xF4F6F8:t=fill:enable='gte(t,24)'"
+        "color=0xF4F6F8:t=fill:enable='gte(t,24)*lt(t,308)'"
     )
 
 

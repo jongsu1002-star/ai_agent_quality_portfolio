@@ -125,5 +125,25 @@ check('숨겨진 관리자 메뉴는 촬영 가능한 대상으로 취급하지 
   assert.strictEqual(demo.isTargetAvailable({ offsetParent: {}, getClientRects() { return [{}]; } }), true);
 });
 
+check('프로세스 설명은 실행과 결과 상태를 공개 API에 보존한다', () => {
+  const demo = loadDemo('?demo=1');
+  demo.reportProcess('QA 데이터 준비 중', 'running');
+  assert.deepStrictEqual(
+    JSON.parse(JSON.stringify(demo.processState)),
+    { message: 'QA 데이터 준비 중', state: 'running' }
+  );
+  demo.reportResult('QA 실행이 완료되었습니다.', 'success');
+  assert.deepStrictEqual(
+    JSON.parse(JSON.stringify(demo.processState)),
+    { message: 'QA 실행이 완료되었습니다.', state: 'success' }
+  );
+});
+
+check('체크박스 설명은 선택과 해제를 구분한다', () => {
+  const demo = loadDemo('?demo=1');
+  assert.strictEqual(demo.describeCheckbox({ checked: true, value: 'rag', id: '' }), 'rag 선택');
+  assert.strictEqual(demo.describeCheckbox({ checked: false, value: 'rag', id: '' }), 'rag 선택 해제');
+});
+
 console.log(`\n${passed} passed, ${failed} failed (demo_mode_regression.js)`);
 process.exit(failed > 0 ? 1 : 0);

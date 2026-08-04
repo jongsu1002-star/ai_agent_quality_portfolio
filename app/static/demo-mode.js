@@ -33,6 +33,7 @@
   let started = false;
   let highlighted = null;
   let caption = null;
+  let processState = { message: '시연 준비 완료', state: 'idle' };
 
   function applyMasks() {
     maskSelectors.forEach((selector) => {
@@ -58,6 +59,7 @@
     caption.setAttribute('aria-live', 'polite');
     caption.innerHTML = [
       '<strong data-demo-title></strong>', '<p data-demo-description></p>',
+      '<p class="qa-demo-process" data-demo-process data-state="idle"></p>',
       '<div class="qa-demo-missing" data-demo-missing hidden></div>',
       '<div class="qa-demo-controls">',
       '<button type="button" data-demo-previous aria-label="이전 단계">◀</button>',
@@ -74,6 +76,38 @@
     document.body.appendChild(caption);
   }
 
+  function updateProcessRow() {
+    if (!caption) return;
+    const row = caption.querySelector('[data-demo-process]');
+    if (!row) return;
+    row.textContent = processState.message;
+    row.dataset.state = processState.state;
+  }
+
+  function reportProcess(message, state = 'running') {
+    processState = { message: String(message || ''), state };
+    updateProcessRow();
+  }
+
+  function reportResult(message, type = 'success') {
+    reportProcess(message, type === 'error' ? 'error' : 'success');
+  }
+
+  function describeCheckbox(element) {
+    const label = element.value || element.id || '항목';
+    return `${label} ${element.checked ? '선택' : '선택 해제'}`;
+  }
+
+  function onCheckboxChange(event) {
+    const target = event.target;
+    if (!target || typeof target.matches !== 'function' || !target.matches('input[type="checkbox"]')) return;
+    reportProcess(describeCheckbox(target), 'success');
+    target.classList.remove('qa-demo-checkbox-changed');
+    void target.offsetWidth;
+    target.classList.add('qa-demo-checkbox-changed');
+    setTimeout(() => target.classList.remove('qa-demo-checkbox-changed'), 800);
+  }
+
   function render() {
     if (!started) return;
     clearTimeout(timer);
@@ -85,6 +119,7 @@
     caption.querySelector('[data-demo-description]').textContent = step.description;
     caption.querySelector('[data-demo-count]').textContent = `${currentIndex + 1} / ${steps.length}`;
     caption.querySelector('[data-demo-play]').textContent = playing ? 'Ⅱ' : '▶';
+    updateProcessRow();
     const missing = caption.querySelector('[data-demo-missing]');
     const candidate = document.querySelector(step.target);
     const target = isTargetAvailable(candidate) ? candidate : null;
@@ -151,6 +186,7 @@
     started = true;
     document.body.classList.add('qa-demo-active');
     document.documentElement.addEventListener('click', ripple, true);
+    document.documentElement.addEventListener('change', onCheckboxChange, true);
     preserveDemoNavigation();
     render();
   }
@@ -162,6 +198,7 @@
     document.body.classList.remove('qa-demo-active');
     document.querySelectorAll('.qa-demo-mask').forEach((element) => element.classList.remove('qa-demo-mask'));
     document.documentElement.removeEventListener('click', ripple, true);
+    document.documentElement.removeEventListener('change', onCheckboxChange, true);
     if (caption) caption.remove();
     caption = null;
     started = false;
@@ -174,7 +211,9 @@
 
   window.QADemoMode = {
     enabled, steps, maskSelectors, start, stop, next, previous, togglePlayback, goTo, withDemoQuery, isTargetAvailable,
-    get currentIndex() { return currentIndex; }
+    reportProcess, reportResult, describeCheckbox,
+    get currentIndex() { return currentIndex; },
+    get processState() { return { ...processState }; }
   };
 
   if (enabled) {

@@ -2982,9 +2982,11 @@ let _vocActiveRunId = null;
       const stepsEl = document.getElementById('dataset-upload-steps');
       if (!fileInput.files.length) {
         document.getElementById(resultTarget).textContent = '데이터셋 파일을 선택해주세요.';
+        window.QADemoMode?.reportResult('데이터셋 파일을 선택해주세요.', 'error');
         return;
       }
       stepsEl.innerHTML = renderStepChecklist(['업로드', '완료'], 0);
+      window.QADemoMode?.reportProcess('데이터셋 업로드 중', 'running');
       try {
         const formData = new FormData();
         formData.append('file', fileInput.files[0]);
@@ -2994,6 +2996,7 @@ let _vocActiveRunId = null;
         if (!response.ok) {
           document.getElementById('status-pill').textContent = '업로드 실패';
           stepsEl.innerHTML = renderStepChecklist(['업로드', '완료'], 0, { failedIndex: 0 });
+          window.QADemoMode?.reportResult(payload.error || '데이터셋 업로드 실패', 'error');
           return;
         }
         const uploadedName = payload.dataset_path ? payload.dataset_path.split(/[\\/]/).pop() : null;
@@ -3001,12 +3004,14 @@ let _vocActiveRunId = null;
         document.getElementById('metric-status').textContent = '데이터셋 업로드 완료';
         document.getElementById('status-pill').textContent = '데이터셋 준비 완료';
         stepsEl.innerHTML = renderStepChecklist(['업로드', '완료'], 2);
+        showToast(`데이터셋 업로드 완료 · ${payload.case_count}건`);
         await loadDatasetHistory();
       } catch (err) {
         // fetch 자체가 실패하면(서버 재시작 중 등) 아무 반응 없이 조용히 끝나버려서 "버튼이
         // 안 먹는다"처럼 보이므로, 반드시 화면에 에러를 남김
         document.getElementById(resultTarget).textContent = `업로드 요청이 실패했습니다 (네트워크 오류): ${err.message}`;
         stepsEl.innerHTML = renderStepChecklist(['업로드', '완료'], 0, { failedIndex: 0 });
+        window.QADemoMode?.reportResult('데이터셋 업로드 네트워크 오류', 'error');
       }
     }
 
@@ -3154,9 +3159,11 @@ let _vocActiveRunId = null;
       const stepsEl = document.getElementById('testcase-upload-steps');
       if (!fileInput.files.length) {
         document.getElementById('run-result').textContent = '테스트 케이스 파일을 선택해주세요.';
+        window.QADemoMode?.reportResult('테스트 케이스 파일을 선택해주세요.', 'error');
         return;
       }
       stepsEl.innerHTML = renderStepChecklist(['업로드', '완료'], 0);
+      window.QADemoMode?.reportProcess('테스트 케이스 업로드 중', 'running');
       try {
         const formData = new FormData();
         formData.append('file', fileInput.files[0]);
@@ -3166,16 +3173,19 @@ let _vocActiveRunId = null;
         if (!response.ok) {
           document.getElementById('status-pill').textContent = '테스트 케이스 업로드 실패';
           stepsEl.innerHTML = renderStepChecklist(['업로드', '완료'], 0, { failedIndex: 0 });
+          window.QADemoMode?.reportResult(payload.error || '테스트 케이스 업로드 실패', 'error');
           return;
         }
         const uploadedName = payload.testcase_path ? payload.testcase_path.split(/[\\/]/).pop() : null;
         setActiveTestcaseLabel(uploadedName ? `${uploadedName} (${payload.case_count}건)` : '업로드됨', payload.testcase_path || null);
         document.getElementById('status-pill').textContent = '테스트 케이스 준비 완료';
         stepsEl.innerHTML = renderStepChecklist(['업로드', '완료'], 2);
+        showToast(`테스트 케이스 업로드 완료 · ${payload.case_count}건`);
         await loadTestcaseHistory();
       } catch (err) {
         document.getElementById('run-result').textContent = `업로드 요청이 실패했습니다 (네트워크 오류): ${err.message}`;
         stepsEl.innerHTML = renderStepChecklist(['업로드', '완료'], 0, { failedIndex: 0 });
+        window.QADemoMode?.reportResult('테스트 케이스 업로드 네트워크 오류', 'error');
       }
     }
 
@@ -3377,6 +3387,7 @@ let _vocActiveRunId = null;
       const techniques = selectedTechniques();
       if (!techniques.length) {
         document.getElementById('run-result').textContent = '최소 하나의 기법을 선택하세요.';
+        window.QADemoMode?.reportResult('최소 하나의 평가 기법을 선택하세요.', 'error');
         return;
       }
       const payload = {
@@ -3408,6 +3419,7 @@ let _vocActiveRunId = null;
       runButton.disabled = true;
       runButton.textContent = '파이프라인 실행 중…';
       setProgress(0, 1);
+      window.QADemoMode?.reportProcess(`합성 QA 실행 중 · ${techniques.length}개 기법`, 'running');
       const stageSteps = _pipelineStageSteps(payload);
       document.getElementById('run-steps').innerHTML = renderStepChecklist(stageSteps, 0);
 
@@ -3420,6 +3432,7 @@ let _vocActiveRunId = null;
         runCard.classList.add('run-error');
         runButton.disabled = false;
         runButton.textContent = 'QA 파이프라인 다시 실행';
+        window.QADemoMode?.reportResult(result.error || 'QA 실행 요청이 거부되었습니다.', 'error');
         return;
       }
 
@@ -3429,6 +3442,10 @@ let _vocActiveRunId = null;
       runCard.classList.add(finalStatus.status === 'done' ? 'run-success' : 'run-error');
       runButton.disabled = false;
       runButton.textContent = 'QA 파이프라인 다시 실행';
+      window.QADemoMode?.reportResult(
+        finalStatus.status === 'done' ? '합성 QA 실행 완료 · 결과 보고서 생성' : '합성 QA 실행 실패',
+        finalStatus.status === 'done' ? 'success' : 'error'
+      );
 
       const resultResponse = await fetch(`/api/run/${result.run_id}/result`);
       const report = resultResponse.ok ? await resultResponse.json() : { error: finalStatus.error };

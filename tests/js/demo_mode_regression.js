@@ -146,6 +146,12 @@ check('체크박스 설명은 선택과 해제를 구분한다', () => {
   assert.strictEqual(demo.describeCheckbox({
     checked: true,
     value: 'on',
+    id: '',
+    getAttribute(name) { return name === 'aria-label' ? '데이터셋 전체 선택' : ''; },
+  }), '데이터셋 전체 선택');
+  assert.strictEqual(demo.describeCheckbox({
+    checked: true,
+    value: 'on',
     id: 'voc-use-board',
     getAttribute() { return ''; },
     closest() { return { textContent: ' 게시판 VOC ' }; },

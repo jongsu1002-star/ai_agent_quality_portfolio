@@ -1004,11 +1004,11 @@
       bulkBtn.style.display = _canModerate ? '' : 'none';
       const res = await fetch(`/api/board/posts?board_type=${encodeURIComponent(_currentBoardType)}`);
       const data = await res.json();
-      const checkboxHeader = _canModerate ? '<th style="width:2rem;"><input type="checkbox" onclick="toggleAllBoardCheckboxes(this)" /></th>' : '';
+      const checkboxHeader = _canModerate ? '<th style="width:2rem;"><input type="checkbox" aria-label="게시글 전체 선택" onclick="toggleAllBoardCheckboxes(this)" /></th>' : '';
       const headerHtml = `<thead><tr>${checkboxHeader}<th>제목</th><th>작성자</th><th>작성일</th><th>댓글</th></tr></thead>`;
       renderPagedHtmlTable('board-post-list', headerHtml, data.items, post => {
         const hiddenBadge = post.visible ? '' : '<span class="board-hidden-badge">비노출</span>';
-        const checkboxCell = _canModerate ? `<td><input type="checkbox" class="board-select-checkbox" value="${post.id}" /></td>` : '';
+        const checkboxCell = _canModerate ? `<td><input type="checkbox" class="board-select-checkbox" value="${post.id}" aria-label="게시글 ${escapeHtml(post.title)} 선택" /></td>` : '';
         return `<tr>
           ${checkboxCell}
           <td><span class="board-row-title" onclick="openBoardPost(${post.id})">${escapeHtml(post.title)}</span>${hiddenBadge}</td>
@@ -3084,7 +3084,7 @@ let _vocActiveRunId = null;
         delete _htmlTablePagers['dataset-history'];
         return;
       }
-      const headerHtml = '<thead><tr><th><input type="checkbox" class="dataset-check-all" title="전체 선택" /></th><th>파일명</th><th>케이스</th><th>업로드 시각</th><th>상태</th><th></th><th></th><th></th></tr></thead>';
+      const headerHtml = '<thead><tr><th><input type="checkbox" class="dataset-check-all" title="전체 선택" aria-label="데이터셋 전체 선택" /></th><th>파일명</th><th>케이스</th><th>업로드 시각</th><th>상태</th><th></th><th></th><th></th></tr></thead>';
       renderPagedHtmlTable('dataset-history', headerHtml, history, item => {
         let status;
         if (item.active) status = '<strong style="color:#166534;">사용 중</strong>';
@@ -3094,7 +3094,7 @@ let _vocActiveRunId = null;
           ? `<button type="button" class="table-toggle dataset-deactivate-btn" data-path="${escapeHtml(item.path)}" style="color:#b91c1c;">미사용</button>`
           : `<button type="button" class="table-toggle dataset-select-btn" data-path="${escapeHtml(item.path)}" ${!item.exists ? 'disabled' : ''}>사용</button>`;
         return `<tr>
-          <td><input type="checkbox" class="dataset-row-check" data-path="${escapeHtml(item.path)}" /></td>
+          <td><input type="checkbox" class="dataset-row-check" data-path="${escapeHtml(item.path)}" aria-label="데이터셋 ${escapeHtml(item.filename)} 선택" /></td>
           <td>${escapeHtml(item.filename)}</td>
           <td>${item.case_count}건</td>
           <td>${escapeHtml(formatTimestamp(item.uploaded_at))}</td>
@@ -3247,7 +3247,7 @@ let _vocActiveRunId = null;
         delete _htmlTablePagers['testcase-history'];
         return;
       }
-      const headerHtml = '<thead><tr><th><input type="checkbox" class="testcase-check-all" title="전체 선택" /></th><th>파일명</th><th>케이스</th><th>업로드 시각</th><th>상태</th><th></th><th></th><th></th></tr></thead>';
+      const headerHtml = '<thead><tr><th><input type="checkbox" class="testcase-check-all" title="전체 선택" aria-label="테스트 케이스 전체 선택" /></th><th>파일명</th><th>케이스</th><th>업로드 시각</th><th>상태</th><th></th><th></th><th></th></tr></thead>';
       renderPagedHtmlTable('testcase-history', headerHtml, history, item => {
         let status;
         if (item.active) status = '<strong style="color:#166534;">사용 중</strong>';
@@ -3257,7 +3257,7 @@ let _vocActiveRunId = null;
           ? `<button type="button" class="table-toggle testcase-deactivate-btn" data-path="${escapeHtml(item.path)}" style="color:#b91c1c;">미사용</button>`
           : `<button type="button" class="table-toggle testcase-select-btn" data-path="${escapeHtml(item.path)}" ${!item.exists ? 'disabled' : ''}>사용</button>`;
         return `<tr>
-          <td><input type="checkbox" class="testcase-row-check" data-path="${escapeHtml(item.path)}" /></td>
+          <td><input type="checkbox" class="testcase-row-check" data-path="${escapeHtml(item.path)}" aria-label="테스트 케이스 ${escapeHtml(item.filename)} 선택" /></td>
           <td>${escapeHtml(item.filename)}</td>
           <td>${item.case_count}건</td>
           <td>${escapeHtml(formatTimestamp(item.uploaded_at))}</td>

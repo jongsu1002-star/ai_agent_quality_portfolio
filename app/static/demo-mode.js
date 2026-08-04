@@ -109,6 +109,7 @@
       || element.value
       || '항목';
     const label = String(rawLabel).replace(/\s+/g, ' ').trim();
+    if (label.endsWith('선택')) return element.checked ? label : `${label} 해제`;
     return `${label} ${element.checked ? '선택' : '선택 해제'}`;
   }
 

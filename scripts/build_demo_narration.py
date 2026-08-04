@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
+import subprocess
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -181,3 +183,130 @@ def ffmpeg_slot_args(
         "1",
         str(output.resolve()),
     ]
+
+
+def _concat_manifest(paths: list[Path], target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for path in paths:
+        escaped = path.resolve().as_posix().replace("'", "'\\''")
+        lines.append(f"file '{escaped}'")
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def build_narration_track(
+    *,
+    ffmpeg: Path,
+    srt: Path,
+    helper: Path,
+    work_dir: Path,
+) -> Path:
+    demo_cues = parse_srt(srt)
+    validate_cues(demo_cues)
+    cues = [*INTRO_CUES, *demo_cues]
+    raw_dir = work_dir / "raw"
+    slot_dir = work_dir / "slots"
+    slot_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = work_dir / "speech-manifest.json"
+    write_manifest(build_manifest(cues, raw_dir), manifest_path)
+    subprocess.run(sapi_command(helper, manifest_path), check=True)
+
+    slots: list[Path] = []
+    for cue in cues:
+        raw = raw_dir / f"cue-{cue.index:03d}.wav"
+        slot = slot_dir / f"slot-{cue.index:04d}.wav"
+        subprocess.run(
+            ffmpeg_slot_args(
+                ffmpeg,
+                raw,
+                slot,
+                duration=wave_duration(raw),
+                slot_duration=cue.end - cue.start,
+            ),
+            check=True,
+        )
+        slots.append(slot)
+
+    concat_path = work_dir / "audio-slots.txt"
+    _concat_manifest(slots, concat_path)
+    narration = work_dir / "narration-324s.wav"
+    subprocess.run(
+        [
+            str(ffmpeg), "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "concat", "-safe", "0", "-i", str(concat_path.resolve()),
+            "-c:a", "pcm_s16le", "-ar", "48000", "-ac", "1",
+            str(narration.resolve()),
+        ],
+        check=True,
+    )
+    return narration
+
+
+def assemble_video(
+    *,
+    ffmpeg: Path,
+    intro: Path,
+    original: Path,
+    narration: Path,
+    output: Path,
+    work_dir: Path,
+) -> None:
+    video_manifest = work_dir / "video-parts.txt"
+    _concat_manifest([intro, original], video_manifest)
+    combined = work_dir / "combined-324s-video.mp4"
+    subprocess.run(
+        [
+            str(ffmpeg), "-y", "-hide_banner", "-loglevel", "error",
+            "-f", "concat", "-safe", "0", "-i", str(video_manifest.resolve()),
+            "-map", "0:v:0", "-c:v", "copy", str(combined.resolve()),
+        ],
+        check=True,
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(".new.mp4")
+    subprocess.run(
+        [
+            str(ffmpeg), "-y", "-hide_banner", "-loglevel", "error",
+            "-i", str(combined.resolve()), "-i", str(narration.resolve()),
+            "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
+            "-af", "loudnorm=I=-18:LRA=7:TP=-2",
+            "-c:a", "aac", "-b:a", "160k", "-ar", "48000", "-ac", "2",
+            "-t", "324", "-movflags", "+faststart", str(temporary.resolve()),
+        ],
+        check=True,
+    )
+    temporary.replace(output)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ffmpeg", type=Path, required=True)
+    parser.add_argument("--srt", type=Path, required=True)
+    parser.add_argument("--intro", type=Path, required=True)
+    parser.add_argument("--original", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--work-dir", type=Path, required=True)
+    parser.add_argument(
+        "--helper",
+        type=Path,
+        default=Path(__file__).with_name("synthesize_korean_tts.ps1"),
+    )
+    args = parser.parse_args()
+    narration = build_narration_track(
+        ffmpeg=args.ffmpeg,
+        srt=args.srt,
+        helper=args.helper,
+        work_dir=args.work_dir,
+    )
+    assemble_video(
+        ffmpeg=args.ffmpeg,
+        intro=args.intro,
+        original=args.original,
+        narration=narration,
+        output=args.output,
+        work_dir=args.work_dir,
+    )
+
+
+if __name__ == "__main__":
+    main()

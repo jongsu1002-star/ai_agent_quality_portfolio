@@ -437,6 +437,44 @@ body.app-page button:disabled {
   border-color: var(--ui-brand) !important;
   box-shadow: 0 0 0 3px rgb(var(--ui-brand-rgb) / .12);
 }
+.app-page input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid !important;
+  place-content: center;
+  width: 1.2rem !important;
+  height: 1.2rem !important;
+  min-width: 1.2rem;
+  margin: 0 .38rem 0 0;
+  border: 2px solid #64748b !important;
+  border-radius: .28rem;
+  background: #fff;
+  vertical-align: -.2rem;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+.app-page input[type="checkbox"]::before {
+  content: "";
+  width: .62rem;
+  height: .34rem;
+  border-left: .18rem solid #fff;
+  border-bottom: .18rem solid #fff;
+  transform: rotate(-45deg) scale(0);
+  transform-origin: center;
+  transition: transform 120ms ease;
+}
+.app-page input[type="checkbox"]:checked {
+  border-color: #1d4ed8 !important;
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgb(37 99 235 / .2);
+}
+.app-page input[type="checkbox"]:checked::before {
+  transform: rotate(-45deg) scale(1);
+}
+.app-page input[type="checkbox"]:focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
+}
 .app-page table {
   border: 1px solid var(--ui-line);
   border-radius: 12px;

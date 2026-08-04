@@ -94,7 +94,21 @@
   }
 
   function describeCheckbox(element) {
-    const label = element.value || element.id || '항목';
+    const ariaLabel = typeof element.getAttribute === 'function' ? element.getAttribute('aria-label') : '';
+    let explicitLabel = null;
+    if (element.id) {
+      explicitLabel = Array.from(document.querySelectorAll('label[for]'))
+        .find((candidate) => candidate.htmlFor === element.id) || null;
+    }
+    const enclosingLabel = typeof element.closest === 'function' ? element.closest('label') : null;
+    const rawLabel = ariaLabel
+      || explicitLabel?.textContent
+      || enclosingLabel?.textContent
+      || element.dataset?.label
+      || element.id
+      || element.value
+      || '항목';
+    const label = String(rawLabel).replace(/\s+/g, ' ').trim();
     return `${label} ${element.checked ? '선택' : '선택 해제'}`;
   }
 

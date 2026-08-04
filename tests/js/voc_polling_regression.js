@@ -78,11 +78,16 @@ function buildSandbox({ elementOverrides = {}, fetchImpl, demoEnabled = false } 
   const storage = {};
   const pendingTimers = []; // { id, fn, ms }
   let nextTimerId = 1;
-  const calls = { showToast: [], renderVocResult: [], loadVocHistory: 0, escapeHtmlCalls: 0, stageLists: [] };
+  const calls = { showToast: [], processStates: [], renderVocResult: [], loadVocHistory: 0, escapeHtmlCalls: 0, stageLists: [] };
 
   const sandbox = {
     console,
-    window: { QADemoMode: { enabled: demoEnabled } },
+    window: {
+      QADemoMode: {
+        enabled: demoEnabled,
+        reportProcess: (message, state) => { calls.processStates.push({ message, state }); },
+      },
+    },
     document: { getElementById: (id) => elements[id] || makeElement() },
     sessionStorage: {
       getItem: (k) => (Object.prototype.hasOwnProperty.call(storage, k) ? storage[k] : null),
@@ -136,6 +141,8 @@ check('데모 모드 VOC Improved는 외부 API 없이 5단계와 SKIPPED 결과
     '의도 분류 중', '개선안 생성 중', '자가 비평·교정 중', '내부 재점검 중', '독립 Judge 확인 중',
   ]);
   assert.strictEqual(calls.renderVocResult[0].result.judge.verdict, 'SKIPPED');
+  assert.strictEqual(calls.processStates.length, 5);
+  assert.deepStrictEqual(calls.processStates.at(-1), { message: 'VOC Improved · 독립 Judge 확인 중', state: 'running' });
   assert.match(elements['voc-result'].innerHTML, /촬영용 합성 실행/);
   assert.match(elements['voc-result'].innerHTML, /LLM Judge: SKIPPED/);
 });

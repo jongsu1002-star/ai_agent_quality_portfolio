@@ -184,7 +184,7 @@
   <link rel="stylesheet" href="/static/ui-system.css?v=24" />
   <link rel="stylesheet" href="/static/demo-mode.css?v=2" />
   <script src="/static/ui-theme.js?v=3" defer></script>
-  <script src="/static/demo-mode.js?v=2" defer></script>
+  <script src="/static/demo-mode.js?v=3" defer></script>
 </head>
 <body class="app-page workspace-page">
   <div class="card" id="app-header">
@@ -1178,19 +1178,26 @@
     async function uploadVocExcel() {
       const fileInput = document.getElementById('voc-excel-file');
       const statusEl = document.getElementById('voc-excel-status');
-      if (!fileInput.files.length) { alert('업로드할 파일을 선택하세요.'); return; }
+      if (!fileInput.files.length) {
+        window.QADemoMode?.reportResult('VOC 파일을 선택하세요.', 'error');
+        alert('업로드할 파일을 선택하세요.');
+        return;
+      }
       const formData = new FormData();
       formData.append('file', fileInput.files[0]);
       statusEl.innerHTML = renderStepChecklist(['업로드', '완료'], 0);
+      window.QADemoMode?.reportProcess('VOC 합성 데이터 업로드 중', 'running');
       const res = await fetch('/api/voc-analysis/excel/upload', { method: 'POST', body: formData });
       const data = await res.json();
       if (!res.ok) {
         statusEl.innerHTML = renderStepChecklist(['업로드', '완료'], 0, { failedIndex: 0 }) + `<p style="color:#dc2626;">${escapeHtml(data.error || '업로드에 실패했습니다.')}</p>`;
+        window.QADemoMode?.reportResult(data.error || 'VOC 파일 업로드 실패', 'error');
         return;
       }
       _vocExcelPath = data.excel_path;
       statusEl.innerHTML = renderStepChecklist(['업로드', '완료'], 2) + `<p class="chart-hint">${escapeHtml(String(data.row_count))}건 업로드됨</p>`;
       document.getElementById('voc-use-excel').checked = true;
+      showToast(`VOC 합성 데이터 업로드 완료 · ${data.row_count}건`);
     }
 
 let _vocActiveRunId = null;
@@ -1257,6 +1264,7 @@ let _vocActiveRunId = null;
       let stageIndex = 0;
 
       function advanceDemoStage() {
+        window.QADemoMode?.reportProcess(`VOC Improved · ${_VOC_DEMO_STAGE_STEPS[stageIndex]}`, 'running');
         resultEl.innerHTML = banner + renderStepChecklist(_VOC_DEMO_STAGE_STEPS, stageIndex);
         stageIndex += 1;
         if (stageIndex < _VOC_DEMO_STAGE_STEPS.length) {

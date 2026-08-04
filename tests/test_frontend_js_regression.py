@@ -99,7 +99,7 @@ def test_demo_mode_assets_are_loaded_by_main_and_addon_pages():
     for html_path in (INDEX_HTML, MONITORING_ADDON_HTML):
         html = html_path.read_text(encoding="utf-8")
         assert '/static/demo-mode.css?v=2' in html
-        assert '/static/demo-mode.js?v=2' in html
+        assert '/static/demo-mode.js?v=3' in html
 
 
 def test_demo_mode_has_stable_ids_for_every_recorded_menu():

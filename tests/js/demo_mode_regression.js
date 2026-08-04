@@ -143,6 +143,13 @@ check('체크박스 설명은 선택과 해제를 구분한다', () => {
   const demo = loadDemo('?demo=1');
   assert.strictEqual(demo.describeCheckbox({ checked: true, value: 'rag', id: '' }), 'rag 선택');
   assert.strictEqual(demo.describeCheckbox({ checked: false, value: 'rag', id: '' }), 'rag 선택 해제');
+  assert.strictEqual(demo.describeCheckbox({
+    checked: true,
+    value: 'on',
+    id: 'voc-use-board',
+    getAttribute() { return ''; },
+    closest() { return { textContent: ' 게시판 VOC ' }; },
+  }), '게시판 VOC 선택');
 });
 
 console.log(`\n${passed} passed, ${failed} failed (demo_mode_regression.js)`);

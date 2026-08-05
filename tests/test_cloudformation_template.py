@@ -173,3 +173,40 @@ def test_security_group_descriptions_are_ascii_only(template):
             if any(ord(c) > 127 for c in props.get("Description", "")):
                 problems.append(f"{logical_id}.Description")
     assert problems == []
+
+
+def test_cloudwatch_dashboard_has_ec2_and_alb_operational_charts(template):
+    import json
+
+    dashboard = template["Resources"]["OperationsDashboard"]
+    assert dashboard["Type"] == "AWS::CloudWatch::Dashboard"
+    body = dashboard["Properties"]["DashboardBody"]["Fn::Sub"][0]
+    parsed = json.loads(body)
+    assert len(parsed["widgets"]) >= 5
+
+    metric_names = {
+        metric[1]
+        for widget in parsed["widgets"]
+        for metric in widget["properties"].get("metrics", [])
+        if len(metric) > 1 and metric[1] != "."
+    }
+    assert {
+        "CPUUtilization",
+        "NetworkIn",
+        "RequestCount",
+        "HTTPCode_Target_5XX_Count",
+        "TargetResponseTime",
+        "StatusCheckFailed",
+    } <= metric_names
+
+    substitutions = dashboard["Properties"]["DashboardBody"]["Fn::Sub"][1]
+    assert substitutions["InstanceId"] == {"Ref": "Ec2Instance"}
+    assert substitutions["LoadBalancerFullName"] == {
+        "Fn::GetAtt": ["Alb", "LoadBalancerFullName"]
+    }
+    assert substitutions["TargetGroupFullName"] == {
+        "Fn::GetAtt": ["TargetGroup", "TargetGroupFullName"]
+    }
+    assert template["Outputs"]["CloudWatchDashboardName"]["Value"] == {
+        "Ref": "OperationsDashboard"
+    }

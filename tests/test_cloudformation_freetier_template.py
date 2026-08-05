@@ -130,3 +130,28 @@ def test_no_duplicate_resource_logical_ids(template_text):
                 seen[m.group(1)] = seen.get(m.group(1), 0) + 1
     duplicates = [name for name, count in seen.items() if count > 1]
     assert duplicates == []
+
+
+def test_cloudwatch_dashboard_has_free_ec2_operational_charts(template):
+    dashboard = template["Resources"]["OperationsDashboard"]
+    assert dashboard["Type"] == "AWS::CloudWatch::Dashboard"
+    body = dashboard["Properties"]["DashboardBody"]["Fn::Sub"][0]
+    parsed = json.loads(body)
+    assert len(parsed["widgets"]) >= 3
+
+    metric_names = {
+        metric[1]
+        for widget in parsed["widgets"]
+        for metric in widget["properties"].get("metrics", [])
+        if len(metric) > 1 and metric[1] != "."
+    }
+    assert {
+        "CPUUtilization",
+        "NetworkIn",
+        "StatusCheckFailed",
+    } <= metric_names
+    substitutions = dashboard["Properties"]["DashboardBody"]["Fn::Sub"][1]
+    assert substitutions == {"InstanceId": {"Ref": "Ec2Instance"}}
+    assert template["Outputs"]["CloudWatchDashboardName"]["Value"] == {
+        "Ref": "OperationsDashboard"
+    }

@@ -176,12 +176,76 @@ Resources:
           Subscribers:
             - {SubscriptionType: "EMAIL", Address: {"Ref": "BudgetAlertEmail"}}
 
+  # AWS 콘솔 CloudWatch > Dashboards에 자동 생성되는 프리티어 운영 차트.
+  # EC2 기본 메트릭만 사용하므로 CloudWatch Agent 설치나 추가 사용자 지정 메트릭 비용이 없다.
+  OperationsDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: {"Fn::Sub": "qa-platform-freetier-${AWS::StackName}"}
+      DashboardBody:
+        Fn::Sub:
+          - |
+            {
+              "start": "-PT6H",
+              "periodOverride": "inherit",
+              "widgets": [
+                {
+                  "type": "metric",
+                  "x": 0, "y": 0, "width": 12, "height": 6,
+                  "properties": {
+                    "title": "EC2 CPU utilization",
+                    "region": "${AWS::Region}",
+                    "view": "timeSeries",
+                    "stat": "Average",
+                    "period": 300,
+                    "yAxis": {"left": {"min": 0, "max": 100}},
+                    "metrics": [["AWS/EC2", "CPUUtilization", "InstanceId", "${InstanceId}"]]
+                  }
+                },
+                {
+                  "type": "metric",
+                  "x": 12, "y": 0, "width": 12, "height": 6,
+                  "properties": {
+                    "title": "EC2 network bytes",
+                    "region": "${AWS::Region}",
+                    "view": "timeSeries",
+                    "stat": "Sum",
+                    "period": 300,
+                    "metrics": [
+                      ["AWS/EC2", "NetworkIn", "InstanceId", "${InstanceId}"],
+                      [".", "NetworkOut", ".", "."]
+                    ]
+                  }
+                },
+                {
+                  "type": "metric",
+                  "x": 0, "y": 6, "width": 24, "height": 6,
+                  "properties": {
+                    "title": "EC2 status checks",
+                    "region": "${AWS::Region}",
+                    "view": "timeSeries",
+                    "stat": "Maximum",
+                    "period": 60,
+                    "yAxis": {"left": {"min": 0}},
+                    "metrics": [
+                      ["AWS/EC2", "StatusCheckFailed", "InstanceId", "${InstanceId}"],
+                      [".", "StatusCheckFailed_Instance", ".", "."],
+                      [".", "StatusCheckFailed_System", ".", "."]
+                    ]
+                  }
+                }
+              ]
+            }
+          - InstanceId: {"Ref": "Ec2Instance"}
+
 Outputs:
   PublicIp:
     Value: {"Ref": "ElasticIp"}
     Description: "이 IP로 http://<IP>:8000 접속 - app/main.py::_fetch_public_ip 및 접근 허용 IP 등록에도 이 값을 사용"
   Ec2InstanceId:
     Value: {"Ref": "Ec2Instance"}
+  CloudWatchDashboardName:
+    Value: {"Ref": "OperationsDashboard"}
   SsmSessionCommand:
     Value: {"Fn::Sub": "aws ssm start-session --target ${Ec2Instance}"}
     Description: "SSH 대신 이 명령으로 EC2에 접속(포트 22 자체가 없음)"

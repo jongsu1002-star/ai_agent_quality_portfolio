@@ -158,6 +158,15 @@ h1 {
   font-size: clamp(2.25rem, 5vw, 4.4rem);
   line-height: 1.18;
   letter-spacing: -0.04em;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+@media (max-width: 760px) {
+  h1 {
+    white-space: normal;
+    overflow-wrap: break-word;
+  }
 }
 
 h2 { margin: 0.3rem 0 0.65rem; font-size: clamp(1.8rem, 3vw, 2.6rem); line-height: 1.3; }

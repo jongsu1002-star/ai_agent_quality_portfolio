@@ -16,31 +16,49 @@
 
     <header class="hero" id="top">
       <div class="hero__content">
-        <p class="eyebrow">22+ Years IT Experience · PM · AI Agent QA · RPA</p>
-        <h1>프로젝트 관리와 AI 품질 검증을 함께 이해하는 IT PM</h1>
-        <p class="lead">
-          2004년부터 22년 이상 시스템 개발과 PL·PM·PMO, RPA 팀 관리를 수행해왔습니다. 최근에는
-          AICC·IPCC·AI 서비스콜(음성봇) 프로젝트와 AI Agent 품질관리·운영 모니터링 분야로
-          전문성을 확장해, 이 저장소의 플랫폼을 직접 설계·구현·검증했습니다.
-        </p>
+        <div class="hero__layout">
+          <div class="hero__content-main">
+            <p class="eyebrow">22+ Years IT Experience · PM · AI Agent QA · RPA</p>
+            <h1>프로젝트 관리와 AI 품질 검증을 함께 이해하는 IT PM</h1>
+            <p class="lead">
+              2004년부터 22년 이상 시스템 개발과 PL·PM·PMO, RPA 팀 관리를 수행해왔습니다. 최근에는
+              AICC·IPCC·AI 서비스콜(음성봇) 프로젝트와 AI Agent 품질관리·운영 모니터링 분야로
+              전문성을 확장해, 이 저장소의 플랫폼을 직접 설계·구현·검증했습니다.
+            </p>
 
-        <div class="hero__actions">
-          <a class="button primary" href="https://github.com/jongsu1002-star/ai_agent_quality_portfolio" target="_blank" rel="noreferrer">GitHub Repository</a>
-          <a class="button secondary" href="#timeline">경력 보기</a>
-          <a class="button secondary" href="#contact">Contact</a>
+            <div class="hero__actions">
+              <a class="button primary" href="https://github.com/jongsu1002-star/ai_agent_quality_portfolio" target="_blank" rel="noreferrer">GitHub Repository</a>
+              <a class="button secondary" href="#timeline">경력 보기</a>
+              <a class="button secondary" href="#contact">Contact</a>
+            </div>
+
+            <div class="deploy-banner" role="note">
+              <span>GitHub Pages</span>
+              <a href="https://jongsu1002-star.github.io/ai_agent_quality_portfolio/" target="_blank" rel="noreferrer">https://jongsu1002-star.github.io/ai_agent_quality_portfolio/</a>
+            </div>
+
+            <ul class="highlights" aria-label="핵심 경력">
+              <li>IT 경력 22년+</li>
+              <li>PM·PL·PMO·RPA 팀 관리</li>
+              <li>AI Agent QA·운영 모니터링</li>
+              <li>AICC·IPCC·AI 서비스콜(음성봇)</li>
+            </ul>
+          </div>
+
+          <aside class="profile-card" aria-label="프로필 요약">
+            <img src="assets/profile-photo.svg" alt="정종수 프로필 사진" />
+            <div class="profile-card__body">
+              <p class="section-kicker">Current Focus</p>
+              <h3>PM · QA · 운영 자동화</h3>
+              <p>기술, 현업, 품질을 하나의 흐름으로 연결해 실제 서비스 리스크와 운영 안정성을 함께 관리합니다.</p>
+              <ul class="metric-list">
+                <li><strong>22+</strong><span>년 IT 경력</span></li>
+                <li><strong>650+</strong><span>회귀 테스트 검증</span></li>
+                <li><strong>4</strong><span>핵심 역량 분야</span></li>
+              </ul>
+            </div>
+          </aside>
         </div>
-
-        <div class="deploy-banner" role="note">
-          <span>GitHub Pages</span>
-          <a href="https://jongsu1002-star.github.io/ai_agent_quality_portfolio/" target="_blank" rel="noreferrer">https://jongsu1002-star.github.io/ai_agent_quality_portfolio/</a>
-        </div>
-
-        <ul class="highlights" aria-label="핵심 경력">
-          <li>IT 경력 22년+</li>
-          <li>PM·PL·PMO·RPA 팀 관리</li>
-          <li>AI Agent QA·운영 모니터링</li>
-          <li>AICC·IPCC·AI 서비스콜(음성봇)</li>
-        </ul>
       </div>
     </header>
 
@@ -244,10 +262,10 @@
               운영 모니터링, AWS 배포까지 하나의 품질 흐름으로 통합했습니다.
             </p>
             <ul>
-              <li>회귀 테스트 650건 전건 통과를 자동 검증하고 결과 문서를 자동 생성</li>
-              <li>VOC 분석에 독립 LLM Judge를 도입하고, 미실행 시 PASS로 위장하지 않고 SKIPPED로 명시</li>
-              <li>AWS S3 업로드·퍼블릭 접근 차단·암호화·CloudTrail 감사까지 실제 운영 절차로 검증</li>
-              <li>Docker·CloudFormation 기반 배포와 CloudWatch 대시보드로 운영 지표 확인</li>
+              <li>회귀 테스트 650건 이상을 자동 검증하고 결과 문서를 자동 생성</li>
+              <li>VOC 분석과 LLM Judge 검증을 2단계로 분리해, 미실행 항목은 PASS가 아닌 SKIPPED로 명시</li>
+              <li>AWS S3 업로드·퍼블릭 접근 차단·암호화·CloudTrail 감사까지 운영 절차로 구현</li>
+              <li>Docker·CloudFormation·CloudWatch로 배포·모니터링 체계를 하나로 연결</li>
             </ul>
           </article>
 

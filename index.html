@@ -3,114 +3,347 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Backend developer portfolio focused on Python, FastAPI, QA automation, and monitoring systems." />
-    <title>Backend & QA Automation Portfolio</title>
+    <meta
+      name="description"
+      content="22년 이상의 IT 프로젝트 경험을 바탕으로 PM·RPA를 거쳐 AI Agent 품질관리·운영 모니터링 분야로 전문성을 넓혀온 정종수의 포트폴리오입니다."
+    />
+    <title>정종수 | IT PM · AI Agent QA · RPA</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="background-glow"></div>
-    <header class="hero">
+    <div class="background-glow glow-one"></div>
+    <div class="background-glow glow-two"></div>
+
+    <header class="hero" id="top">
       <div class="hero__content">
-        <p class="eyebrow">Backend Developer • QA Automation • Web Platform</p>
-        <h1>품질 관리와 운영 효율을 높이는 웹 서비스 개발자</h1>
+        <p class="eyebrow">22+ Years IT Experience · PM · AI Agent QA · RPA</p>
+        <h1>프로젝트 관리와 AI 품질 검증을 함께 이해하는 IT PM</h1>
         <p class="lead">
-          Python과 FastAPI를 활용해 웹 서비스, QA 자동화, 운영 모니터링 흐름을 설계하고
-          실무에 바로 적용 가능한 구조로 구현해온 개발자입니다. 기능 구현뿐 아니라
-          지속 가능한 운영과 품질 개선까지 고려하며 프로젝트를 진행해왔습니다.
+          2004년부터 22년 이상 시스템 개발과 PL·PM·PMO, RPA 팀 관리를 수행해왔습니다. 최근에는
+          AICC·IPCC·AI 서비스콜(음성봇) 프로젝트와 AI Agent 품질관리·운영 모니터링 분야로
+          전문성을 확장해, 이 저장소의 플랫폼을 직접 설계·구현·검증했습니다.
         </p>
+
         <div class="hero__actions">
           <a class="button primary" href="https://github.com/jongsu1002-star/ai_agent_quality_portfolio" target="_blank" rel="noreferrer">GitHub Repository</a>
-          <a class="button secondary" href="#experience">프로젝트 보기</a>
+          <a class="button secondary" href="#timeline">경력 보기</a>
           <a class="button secondary" href="#contact">Contact</a>
         </div>
-        <ul class="highlights">
-          <li>FastAPI 기반 웹 서비스 개발</li>
-          <li>QA 자동화 및 리포트 흐름 구축</li>
-          <li>모니터링, 헬스체크, 운영 구조 설계</li>
+
+        <ul class="highlights" aria-label="핵심 경력">
+          <li>IT 경력 22년+</li>
+          <li>PM·PL·PMO·RPA 팀 관리</li>
+          <li>AI Agent QA·운영 모니터링</li>
+          <li>AICC·IPCC·AI 서비스콜(음성봇)</li>
         </ul>
       </div>
     </header>
 
     <main>
-      <section id="about" class="section">
-        <h2>About Me</h2>
-        <p class="section-intro">백엔드 개발과 QA 자동화 경험을 결합해, 실사용 가능한 서비스와 운영 효율을 함께 만드는 개발자입니다.</p>
-        <div class="about-grid">
-          <article class="card">
-            <h3>무엇을 만들고 있나</h3>
-            <p>서비스가 실제 운영 단계까지 이어질 수 있도록, 사용자 경험과 품질 지표를 함께 확보하는 방향으로 개발해왔습니다.</p>
+      <section class="section quick-summary" aria-labelledby="summary-title">
+        <div class="section-heading">
+          <p class="section-kicker">Professional Snapshot</p>
+          <h2 id="summary-title">지금 보는 이 페이지가 곧 실적입니다</h2>
+        </div>
+        <div class="summary-grid">
+          <article class="summary-card">
+            <span class="summary-number">22+</span>
+            <h3>IT 경력</h3>
+            <p>개발자로 시작해 PL·PM·PMO·팀 관리로 역할을 넓혀왔습니다.</p>
           </article>
-          <article class="card">
-            <h3>강점</h3>
-            <p>백엔드 구현 능력과 QA 자동화 경험을 결합해, 기능 개발과 운영 효율을 동시에 높이는 방식으로 문제를 해결해왔습니다.</p>
+          <article class="summary-card">
+            <span class="summary-number">AI</span>
+            <h3>최근 전문 분야</h3>
+            <p>AI Agent QA, AICC·IPCC, AI 서비스콜(음성봇), 운영 모니터링을 다룹니다.</p>
+          </article>
+          <article class="summary-card">
+            <span class="summary-number">650</span>
+            <h3>회귀 테스트</h3>
+            <p>이 저장소의 AI Agent 품질관리 플랫폼이 자체 테스트 650건 통과를 자동 검증·문서화합니다.</p>
+          </article>
+          <article class="summary-card">
+            <span class="summary-number">PM</span>
+            <h3>일하는 방식</h3>
+            <p>요구사항, 일정, 운영, 리스크, 품질을 고객·현업과의 커뮤니케이션으로 연결합니다.</p>
           </article>
         </div>
       </section>
 
-      <section id="experience" class="section">
-        <h2>Selected Projects</h2>
-        <p class="section-intro">다음 프로젝트들은 실제 서비스 흐름과 운영 관점까지 반영해 설계한 사례들입니다.</p>
-        <div class="project-card">
-          <div class="project-card__head">
-            <h3>AI Agent 품질관리 플랫폼</h3>
-            <span>2024–Present</span>
-          </div>
-          <p>
-            QA 에이전트의 실행, 결과 수집, 리포팅, 모니터링을 하나의 서비스로 통합한 웹 플랫폼을 구현했습니다.
-            운영자가 쉽게 확인할 수 있는 대시보드와 보고서 흐름을 함께 구성해, 품질 평가 결과를 빠르게 파악할 수 있도록 만들었습니다.
+      <section id="about" class="section">
+        <div class="section-heading">
+          <p class="section-kicker">Professional Summary</p>
+          <h2>기술과 실무를 함께 이해하는 PM</h2>
+          <p class="section-intro">
+            개발 구조를 이해하면서도 프로젝트의 일정·범위·품질과 현업 요구를 함께 관리하는 것이 핵심 강점입니다.
           </p>
-          <ul>
-            <li>FastAPI 기반 웹 애플리케이션 개발</li>
-            <li>품질 평가 결과 시각화 및 자동 보고서 생성</li>
-            <li>모니터링, 헬스체크, 사용자/게시판 관리 기능 구현</li>
-            <li>운영 환경까지 고려한 구조 설계</li>
-          </ul>
         </div>
 
-        <div class="project-card">
-          <div class="project-card__head">
-            <h3>Monitoring Add-on</h3>
-            <span>2024–Present</span>
-          </div>
-          <p>
-            k6 성능 테스트, SQLite 기반 이력 저장, Prometheus/Grafana 연동을 포함한 모니터링 확장 기능을 설계했습니다.
-            서비스 운영의 관측성과 안정성을 높이는 방향으로 구현해, 성능 이슈와 운영 상태를 더 쉽게 확인할 수 있게 만들었습니다.
+        <div class="about-grid">
+          <article class="card">
+            <h3>개발 기반의 프로젝트 관리</h3>
+            <p>
+              Java·JSP·Oracle 기반 개발 경험을 바탕으로 기술적 제약과 구현 난이도를 이해하며 프로젝트를 관리합니다.
+            </p>
+          </article>
+          <article class="card">
+            <h3>AI 품질·운영으로 확장</h3>
+            <p>
+              AI Agent 평가, QA 자동화, 운영 모니터링, AICC·IPCC·AI 서비스콜(음성봇) 경험을 기존 PM 역량과 결합하고 있습니다.
+            </p>
+          </article>
+          <article class="card">
+            <h3>직접 만든 검증 사례</h3>
+            <p>
+              이 포트폴리오의 AI Agent 품질관리 플랫폼은 요구사항 정의부터 구현, 테스트, AWS 배포까지 직접 수행한 결과물입니다.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="timeline" class="section">
+        <div class="section-heading">
+          <p class="section-kicker">Project Timeline</p>
+          <h2>대표 프로젝트 중심 경력</h2>
+          <p class="section-intro">
+            2004년부터 현재까지 참여한 프로젝트를 시기·고객사·역할 중심으로 정리했습니다.
           </p>
-          <ul>
-            <li>성능 테스트 결과 수집 및 이력 관리</li>
-            <li>운영 지표 스냅샷 저장 및 시각화 연계</li>
-            <li>배포 환경에서도 안정적으로 동작하는 구조 구성</li>
-          </ul>
+        </div>
+
+        <div class="timeline">
+          <article class="timeline-item featured">
+            <div class="timeline-date">2025.08–2026.03</div>
+            <div class="timeline-card">
+              <div class="timeline-title-row">
+                <h3>삼성생명 서비스콜 재구축 프로젝트</h3>
+                <span class="role-badge">PL</span>
+              </div>
+              <p class="timeline-subtitle">AICC · IPCC · AI 서비스콜(음성봇)</p>
+              <ul>
+                <li>AICC·IPCC·AI 서비스콜(음성봇) 재구축 범위의 업무·기술 요구사항 정리</li>
+                <li>개발·인프라·상담 운영 조직 간 협업 조율</li>
+                <li>일정, 이슈, 범위의 품질 관리</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="timeline-item">
+            <div class="timeline-date">2025.03–2025.05</div>
+            <div class="timeline-card">
+              <div class="timeline-title-row">
+                <h3>한국남부발전 RPA 4차 프로젝트</h3>
+                <span class="role-badge">기술·교육지원</span>
+              </div>
+              <ul>
+                <li>RPA 기술지원</li>
+                <li>사용자 및 운영 담당자 교육지원</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="timeline-item">
+            <div class="timeline-date">2024.05–2024.07</div>
+            <div class="timeline-card">
+              <div class="timeline-title-row">
+                <h3>주택도시보증공사 RPA 시스템 구축</h3>
+                <span class="role-badge">분석·설계·PM</span>
+              </div>
+              <p class="timeline-subtitle">부뜰정보시스템</p>
+              <ul>
+                <li>Brity Works 기반 RPA 시스템 구축</li>
+                <li>그룹웨어·대법원사이트 연계 업무 자동화 분석·설계</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="timeline-item">
+            <div class="timeline-date">2022.03–2023.09</div>
+            <div class="timeline-card">
+              <div class="timeline-title-row">
+                <h3>삼성 SDI RPA 1·2차</h3>
+                <span class="role-badge">분석·설계·PM</span>
+              </div>
+              <p class="timeline-subtitle">루밴티스</p>
+              <ul>
+                <li>ERP(SAP), MES, QMS, 삼성클라우드 시스템, VDI 연계 RPA 구축</li>
+                <li>Brity Works 기반 RPA팀 관리 감독(팀장)</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="timeline-item">
+            <div class="timeline-date">2020.02–2022.02</div>
+            <div class="timeline-card">
+              <div class="timeline-title-row">
+                <h3>우정사업본부·한국서부발전·네패스 등 다수 RPA 프로젝트</h3>
+                <span class="role-badge">분석·설계·PM</span>
+              </div>
+              <p class="timeline-subtitle">비에이템</p>
+              <ul>
+                <li>우정사업본부, 한국서부발전 RPA 구축(BA-Studio·BA-Server)</li>
+                <li>네패스 RPA 1·2차 등 다수 고객사 RPA 분석·설계·개발·PM</li>
+                <li>RPA팀 관리 감독(팀장)</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="timeline-item">
+            <div class="timeline-date">2018.11–2020.01</div>
+            <div class="timeline-card">
+              <div class="timeline-title-row">
+                <h3>삼성전기·NS홈쇼핑 RPA 개발</h3>
+                <span class="role-badge">PL·PM·개발</span>
+              </div>
+              <p class="timeline-subtitle">알앤비소프트</p>
+              <ul>
+                <li>삼성전기 RPA 개발(ERP(SAP), MES, QMS, VDI 연계) PL</li>
+                <li>NS홈쇼핑 RPA 개발(그룹웨어, QMS, CRM) PM</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="timeline-item">
+            <div class="timeline-date">2004.04–2018.09</div>
+            <div class="timeline-card">
+              <div class="timeline-title-row">
+                <h3>KT·KBS·SKT·SK브로드밴드·국정원 등 다수 시스템 구축·운영</h3>
+                <span class="role-badge">개발·PL·PM·PMO</span>
+              </div>
+              <p class="timeline-subtitle">아이온커뮤니케이션즈</p>
+              <ul>
+                <li>KT 무선포털·오픈넷·올레마켓 등 다수 시스템 장기 운영·PM</li>
+                <li>KBS 콘텐츠 라이선스 관리시스템, SK Broadband 메타DB 구축</li>
+                <li>Java·JSP·Oracle 기반 개발에서 PL·PM·PMO로 역할 확장</li>
+              </ul>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="projects" class="section">
+        <div class="section-heading">
+          <p class="section-kicker">Featured Projects</p>
+          <h2>직접 설계·구현·검증한 프로젝트</h2>
+        </div>
+
+        <div class="projects-grid">
+          <article class="project-card accent-card">
+            <div class="project-card__head">
+              <div>
+                <p class="project-label">AI · QA · Monitoring</p>
+                <h3>AI Agent 품질관리·운영 모니터링 플랫폼</h3>
+              </div>
+              <span>2025–현재</span>
+            </div>
+            <p>
+              FastAPI 기반 단일 플랫폼에서 멀티에이전트 QA 파이프라인 실행, VOC 분석과 독립 LLM Judge 검증,
+              운영 모니터링, AWS 배포까지 하나의 품질 흐름으로 통합했습니다.
+            </p>
+            <ul>
+              <li>회귀 테스트 650건 전건 통과를 자동 검증하고 결과 문서를 자동 생성</li>
+              <li>VOC 분석에 독립 LLM Judge를 도입하고, 미실행 시 PASS로 위장하지 않고 SKIPPED로 명시</li>
+              <li>AWS S3 업로드·퍼블릭 접근 차단·암호화·CloudTrail 감사까지 실제 운영 절차로 검증</li>
+              <li>Docker·CloudFormation 기반 배포와 CloudWatch 대시보드로 운영 지표 확인</li>
+            </ul>
+          </article>
+
+          <article class="project-card">
+            <div class="project-card__head">
+              <div>
+                <p class="project-label">Performance · Observability</p>
+                <h3>Monitoring Add-on</h3>
+              </div>
+              <span>2025–현재</span>
+            </div>
+            <p>
+              기존 서비스에 대한 영향을 최소화하면서, 성능 테스트 결과와 운영 지표를 장기 이력으로 확인할 수 있도록
+              확장한 모니터링 기능입니다.
+            </p>
+            <ul>
+              <li>k6 성능 테스트 결과 수집 및 이력 관리</li>
+              <li>SQLite 기반 이력 저장</li>
+              <li>Prometheus·Grafana 시각화 연동</li>
+            </ul>
+          </article>
         </div>
       </section>
 
       <section id="skills" class="section">
-        <h2>Skills</h2>
-        <div class="pill-list">
-          <span>Python</span>
-          <span>FastAPI</span>
-          <span>HTML/CSS/JavaScript</span>
-          <span>Docker</span>
-          <span>QA Automation</span>
-          <span>Monitoring</span>
-          <span>Git / GitHub</span>
+        <div class="section-heading">
+          <p class="section-kicker">Core Competencies</p>
+          <h2>핵심 역량과 기술</h2>
+        </div>
+
+        <div class="skills-grid">
+          <article class="skill-card">
+            <h3>Project & Delivery</h3>
+            <div class="pill-list">
+              <span>PM</span><span>PL</span><span>PMO</span><span>요구사항 분석</span><span>일정 관리</span><span>리스크 관리</span><span>고객 커뮤니케이션</span>
+            </div>
+          </article>
+          <article class="skill-card">
+            <h3>Development</h3>
+            <div class="pill-list">
+              <span>Python</span><span>FastAPI</span><span>Java</span><span>JSP</span><span>Oracle</span><span>JavaScript</span><span>HTML/CSS</span>
+            </div>
+          </article>
+          <article class="skill-card">
+            <h3>QA & AI Quality</h3>
+            <div class="pill-list">
+              <span>AI Agent QA</span><span>QA Automation</span><span>VOC 분석</span><span>LLM Judge</span><span>Regression</span><span>리포트 자동화</span>
+            </div>
+          </article>
+          <article class="skill-card">
+            <h3>AICC · RPA</h3>
+            <div class="pill-list">
+              <span>AICC</span><span>IPCC</span><span>AI 서비스콜(음성봇)</span><span>RPA</span><span>업무 자동화</span>
+            </div>
+          </article>
+          <article class="skill-card">
+            <h3>Infra & Operations</h3>
+            <div class="pill-list">
+              <span>Docker</span><span>AWS</span><span>CloudFormation</span><span>CloudWatch</span><span>Git/GitHub</span><span>k6</span><span>Prometheus</span><span>Grafana</span>
+            </div>
+          </article>
         </div>
       </section>
 
-      <section id="contact" class="section">
-        <h2>Contact</h2>
+      <section id="roles" class="section">
+        <div class="section-heading">
+          <p class="section-kicker">Target Roles</p>
+          <h2>기여 가능한 역할</h2>
+          <p class="section-intro">
+            개발과 운영, 품질과 일정, 기술과 실무를 함께 이해해야 하는 역할에서 강점을 발휘합니다.
+          </p>
+        </div>
+        <div class="roles-grid">
+          <article class="role-card"><h3>AI Agent QA</h3><p>AI 서비스 평가, 테스트 자동화, 품질·운영 검증 체계 구축</p></article>
+          <article class="role-card"><h3>IT 프로젝트 PM</h3><p>요구사항, 일정, 운영, 리스크, 고객과 실무팀을 연결하는 프로젝트 관리</p></article>
+          <article class="role-card"><h3>RPA·업무자동화 PM</h3><p>현업 업무 분석부터 자동화 설계, 구축, 안정화, 사용자 교육까지 관리</p></article>
+          <article class="role-card"><h3>AICC·IPCC·AI 서비스콜</h3><p>상담·음성봇 재구축 프로젝트의 업무·기술 조율 및 PL 역할</p></article>
+        </div>
+      </section>
+
+      <section id="contact" class="section contact-section">
         <div class="contact-card">
-          <p>채용, 협업, 프로젝트 제안이 있다면 아래 경로로 연락해 주세요.</p>
-          <p><strong>Contact:</strong> GitHub 프로필 또는 저장소 이슈를 통해 연락 가능합니다.</p>
-          <p><strong>GitHub:</strong> <a href="https://github.com/jongsu1002-star" target="_blank" rel="noreferrer">github.com/jongsu1002-star</a></p>
-          <p><strong>Repository:</strong> <a href="https://github.com/jongsu1002-star/ai_agent_quality_portfolio" target="_blank" rel="noreferrer">ai_agent_quality_portfolio</a></p>
+          <div>
+            <p class="section-kicker">Contact</p>
+            <h2>채용·협업·프로젝트 제안</h2>
+            <p>
+              IT PM, AI Agent QA, RPA, AICC·IPCC·AI 서비스콜(음성봇) 관련 채용과 협업 제안을 검토합니다.
+            </p>
+          </div>
+          <div class="contact-links">
+            <a href="https://github.com/jongsu1002-star" target="_blank" rel="noreferrer">GitHub Profile</a>
+            <a href="https://github.com/jongsu1002-star/ai_agent_quality_portfolio" target="_blank" rel="noreferrer">Portfolio Repository</a>
+            <a href="https://github.com/jongsu1002-star/ai_agent_quality_portfolio/issues" target="_blank" rel="noreferrer">GitHub Issue로 연락</a>
+          </div>
         </div>
       </section>
     </main>
 
     <footer class="footer">
-      <p>GitHub Pages로 배포된 포트폴리오 페이지입니다.</p>
-      <a href="https://github.com/jongsu1002-star/ai_agent_quality_portfolio/issues" target="_blank" rel="noreferrer">문의 및 연락</a>
+      <p>정종수 · IT PM · AI Agent QA · RPA Portfolio</p>
+      <a href="#top">맨 위로</a>
     </footer>
   </body>
 </html>

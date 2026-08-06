@@ -136,6 +136,62 @@ h3 { margin-top: 0; line-height: 1.4; }
 .skills-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .roles-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 
+.timeline { position: relative; margin-top: 2rem; }
+.timeline::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 190px;
+  width: 2px;
+  background: linear-gradient(var(--accent), var(--accent-2), rgba(255,255,255,0.08));
+}
+.timeline-item {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 60px;
+  position: relative;
+  margin-bottom: 1.2rem;
+}
+.timeline-item::before {
+  content: "";
+  position: absolute;
+  left: 183px;
+  top: 29px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 6px rgba(79, 195, 247, 0.12);
+}
+.timeline-item.featured::before { background: var(--accent-2); box-shadow: 0 0 0 7px rgba(139, 103, 255, 0.14); }
+.timeline-date { padding-top: 1.15rem; color: var(--accent); font-weight: 700; text-align: right; }
+.timeline-card {
+  background: linear-gradient(145deg, var(--panel), rgba(9, 20, 36, 0.96));
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+  padding: 1.45rem;
+}
+.timeline-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+.timeline-title-row h3 { margin-bottom: 0.35rem; }
+.timeline-subtitle { margin-top: 0; color: var(--muted); }
+.timeline-card ul { margin-bottom: 0; padding-left: 1.25rem; color: #c7d4e4; }
+.role-badge {
+  flex: 0 0 auto;
+  padding: 0.38rem 0.7rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .card,
 .summary-card,
 .project-card,
@@ -231,4 +287,9 @@ h3 { margin-top: 0; line-height: 1.4; }
   .section { padding: 3rem 1.15rem; }
   .roles-grid { grid-template-columns: 1fr; }
   .contact-card { grid-template-columns: 1fr; }
+  .timeline::before { left: 11px; }
+  .timeline-item { grid-template-columns: 1fr; gap: 0.5rem; padding-left: 34px; }
+  .timeline-item::before { left: 4px; top: 45px; }
+  .timeline-date { text-align: left; padding-top: 0; }
+  .timeline-title-row { flex-direction: column; }
 }

@@ -60,60 +60,86 @@ a { color: inherit; text-decoration: none; }
 
 .hero__layout {
   display: grid;
-  grid-template-columns: 1.35fr 0.8fr;
-  gap: 1.4rem;
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 360px);
+  gap: 1.6rem;
   align-items: start;
 }
 
 .hero__content-main { min-width: 0; }
 
 .profile-card {
-  padding: 1.2rem;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid var(--border);
-  border-radius: 24px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  padding: 1.6rem;
+  display: grid;
+  gap: 1.25rem;
+  justify-items: center;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 30px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.16);
+}
+
+.profile-card picture,
+.profile-card img {
+  display: block;
+  width: min(220px, 100%);
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: 32px;
+  border: 1px solid rgba(255,255,255,0.16);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.14);
+  background: rgba(255,255,255,0.06);
 }
 
 .profile-card img {
-  display: block;
   width: 100%;
-  max-width: 220px;
-  margin: 0 auto 1rem;
-  border-radius: 20px;
-  border: 1px solid rgba(255,255,255,0.12);
+  height: 100%;
+  object-fit: cover;
+}
+
+.profile-card__body {
+  display: grid;
+  gap: 0.75rem;
 }
 
 .profile-card__body h3 {
-  margin-bottom: 0.45rem;
+  margin: 0;
+}
+
+.profile-card__body p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
 }
 
 .metric-list {
   display: grid;
-  gap: 0.7rem;
+  gap: 0.75rem;
   margin: 1rem 0 0;
   padding: 0;
   list-style: none;
+  width: 100%;
 }
 
 .metric-list li {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 1rem;
-  padding: 0.65rem 0.75rem;
-  border-radius: 12px;
-  background: rgba(255,255,255,0.05);
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
 }
 
 .metric-list strong {
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   color: var(--accent);
 }
 
 .metric-list span {
   color: var(--muted);
-  font-size: 0.92rem;
+  font-size: 0.95rem;
 }
 
 .eyebrow,

@@ -171,25 +171,6 @@ h3 { margin-top: 0; line-height: 1.4; }
 }
 
 .hero__actions { display: flex; flex-wrap: wrap; gap: 0.85rem; margin-top: 2rem; }
-.deploy-banner {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.7rem;
-  flex-wrap: wrap;
-  margin-top: 1rem;
-  padding: 0.8rem 1rem;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid var(--border);
-  color: #dce7f5;
-}
-.deploy-banner span {
-  color: var(--accent);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.deploy-banner a { color: var(--accent); font-weight: 600; }
 .button {
   display: inline-flex;
   align-items: center;

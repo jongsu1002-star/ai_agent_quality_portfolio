@@ -2,6 +2,7 @@ import io
 import json
 import pathlib
 import re
+import threading
 import time
 
 import pandas as pd
@@ -860,11 +861,26 @@ class _SlowFakeClient:
 
     def judge(self, system_prompt, user_prompt):
         time.sleep(0.3)
+        return self._respond(system_prompt)
+
+    @staticmethod
+    def _respond(system_prompt):
         if "독립적인 QA 심사관" in system_prompt:
             return {"verdict": "PASS", "criteria": {"relevance": True, "root_cause_addressing": True, "feasibility": True, "measurability": True}, "reasoning": "ok"}
         if "classifications" in system_prompt:
             return {"classifications": [{"id": "post-1", "intent": "complaint", "topic": "x"}]}
         return {"summary": "요약", "top_issues": [{"theme": "t", "frequency": 1, "severity": "high", "suggestion": "담당자가 즉시 조치하고 효과를 측정", "example_ids": ["post-1"]}]}
+
+
+class _GatedFakeClient(_SlowFakeClient):
+    """release가 set될 때까지 judge()를 붙잡아 실행을 running 상태로 고정한다.
+    고정 sleep과 달리 검증이 끝나면 바로 풀어줄 수 있어, 409 동시실행 테스트가
+    정리 단계에서 모든 단계의 지연(약 1.2초)을 기다리지 않게 한다."""
+    release = threading.Event()
+
+    def judge(self, system_prompt, user_prompt):
+        self.release.wait(timeout=5)
+        return self._respond(system_prompt)
 
 
 def test_run_async_cancel_stops_before_next_step(monkeypatch):
@@ -969,17 +985,21 @@ def test_sync_run_save_failure_returns_502_not_500(monkeypatch):
 # ===================== P0-2: 동시 실행 제한 + registry 정리 =====================
 
 def test_run_async_second_concurrent_request_from_same_user_gets_409(monkeypatch):
-    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _SlowFakeClient)
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _GatedFakeClient)
+    _GatedFakeClient.release.clear()
     client = TestClient(app)
     client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
 
     first = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False})
-    assert first.status_code == 200
-    first_run_id = first.json()["run_id"]
+    try:
+        assert first.status_code == 200
+        first_run_id = first.json()["run_id"]
 
-    second = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False})
-    assert second.status_code == 409
-    assert second.json()["active_run_id"] == first_run_id
+        second = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False})
+        assert second.status_code == 409
+        assert second.json()["active_run_id"] == first_run_id
+    finally:
+        _GatedFakeClient.release.set()
 
     # 정리: 첫 실행이 끝날 때까지 기다려 다음 테스트를 오염시키지 않음
     _poll_until(client, f"/api/voc-analysis/run-async/{first_run_id}/status", {"done", "error", "canceled"}, timeout_s=5.0)
@@ -1393,18 +1413,22 @@ def test_cross_validation_matrix_run_async_status_and_result_for_unknown_run_id_
 def test_cross_validation_matrix_run_async_conflicts_with_concurrent_voc_analysis_run(monkeypatch):
     """VOC_RUN_REGISTRY를 VOC 분석과 공유하므로, 한쪽이 실행 중이면 다른 쪽도 409로
     막혀야 한다(동시에 LLM 호출이 많은 두 작업을 함께 돌리지 않는다는 설계 의도).
-    _SlowFakeClient로 인위적 지연을 줘서 두 번째 요청이 도착할 때까지 첫 실행이 아직
+    _GatedFakeClient로 judge()를 붙잡아 두 번째 요청이 도착할 때까지 첫 실행이 아직
     running 상태로 남아있게 한다(P0-2 동시실행 테스트와 동일한 기법)."""
-    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _SlowFakeClient)
+    monkeypatch.setattr(voc_analysis_module, "OpenAIJudgeClient", _GatedFakeClient)
+    _GatedFakeClient.release.clear()
     client = TestClient(app)
     client.post("/api/board/posts", json={"board_type": "voc", "title": "t", "content": "c"})
 
     voc_start = client.post("/api/voc-analysis/run-async", json={"use_jira": False, "use_excel": False})
-    assert voc_start.status_code == 200
+    try:
+        assert voc_start.status_code == 200
 
-    xval_start = client.post("/api/voc-analysis/cross-validation-matrix/run-async", json={"use_board": True})
-    assert xval_start.status_code == 409
-    assert "active_run_id" in xval_start.json()
+        xval_start = client.post("/api/voc-analysis/cross-validation-matrix/run-async", json={"use_board": True})
+        assert xval_start.status_code == 409
+        assert "active_run_id" in xval_start.json()
+    finally:
+        _GatedFakeClient.release.set()
 
     _poll_until(client, f"/api/voc-analysis/run-async/{voc_start.json()['run_id']}/status", {"done", "error", "canceled"}, timeout_s=5.0)
 
